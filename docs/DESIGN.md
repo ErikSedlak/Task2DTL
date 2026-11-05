@@ -67,15 +67,18 @@ This project does **not** compete with class-agnostic geometric change detection
 | 3DSSG | 1,482 scans in `objects.json`, 1,335 in `relationships.json` (train+val refs and rescans; test rescans have none). Objects carry `nyu40/eigen13/rio27`. 41 predicates with `none` = id 0; `inside` never occurs; `classes.txt` has 528 lines | verified |
 | Ref objects absent from rescan semseg (val) | 1,018, vs. only 96 listed `removed` → absence in the rescan annotation ≠ removal (partial rescans) | verified |
 | GT completeness (example) | On 19eda6f4, pillow 49 is not listed as moved, but its reference and rescan footprints barely overlap (IoU 0.14 in a shared view) → probably an unlisted move | observed after M0; one example |
+| Duplicate `rigid` ids | A rescan's `rigid` list can repeat an id (7 extra entries in val, all with identical transforms) → deduplicated per rescan | verified M1 |
+| Small GT moves | 134 of the 370 unique thing/anchor moves in val have a displacement < 0.10 m (median 0.17 m; p25 0.06 m) | verified M1 |
 
 ### 2.2 Change ground-truth statistics (validation split, 110 rescans of 47 references)
 
-- rigid (moved): 390;
-- removed (listed): 96;
+- rigid (moved): 390 entries = 370 unique things/anchors + 7 duplicate entries + 13 structure (mostly doors). 134 of the 370 move < τ_eval_move = 0.10 m and become `dont_care` (§5), which leaves **235 scored `moved`**;
+- removed (listed): 96 (73 scored; 20 still present in the rescan → `dont_care`, of which 12 are things/anchors);
 - nonrigid: 54;
-- new (derived, rescan IDs not in reference): 224;
-- moved *things*: 278, of which only **12 change support parent**;
-- train split: 174 parent-changed things over 793 rescans.
+- new (derived, rescan IDs not in reference): **224 raw** (structure included); **171** things/anchors are scored (§5): 105 large, 66 small;
+- moved *things*: 278 entries (274 unique). Their support-parent set differs between reference and rescan 3DSSG for **12**, but only **4 are real parent→parent swaps**: 7 *gained* a parent (none annotated in the reference), 1 *lost* it (verified M1). 4 more have structure-only parents (excluded);
+- relchange set (§2.3): the 73 "parent-changed" events = 47 gained + 4 lost + 18 swapped + 4 structure-only. Most look like gaps in the reference annotation, not real changes; the §7.2(c) definition is fixed at M5 (DECISIONS M1);
+- train split: 174 parent-changed things over 793 rescans (same broad definition).
 
 Most-moved classes: chair 80, pillow 31, armchair 23, table 22, ottoman 20, coffee table 17.
 
@@ -90,7 +93,7 @@ Most-moved classes: chair 80, pillow 31, armchair 23, table 22, ottoman 20, coff
 | `eval_relchange_train.txt` | 40 train pairs with the most parent-changed moved things (73 events) | relation-update evaluation only; never tuned on |
 | `download_tier1.txt` | 162 scan IDs (dev + val) | downloaded (M0) |
 | `download_tier2.txt` | 63 more scan IDs (relchange set) | download in week 1–2 |
-| `download_textures.txt` | the **72 reference scans** of the three pair lists above (written by `lsg splits textures`, M1) | texture files for the appearance residual (§3, §6.6) |
+| `download_textures.txt` | the **72 reference scans** of the three pair lists above (written by `lsg splits textures`, M1) | texture files for the appearance residual (§3, §6.6); downloaded at M1 (216 files, 1.1 GB) |
 
 **Class priors (§6.10)** and the **CLIP vocabulary (§6.6)** come from train-split metadata (3RScan.json + 3DSSG objects), **excluding** the references in `eval_relchange_train.txt` and `dev_train.txt`. This needs no downloads.
 
@@ -187,9 +190,10 @@ while read id; do for t in mesh.refined.v2.obj mesh.refined.mtl mesh.refined_0.p
 
 Per pair (ref R, rescan S). O_R and O_S are the objectIds in their semseg files.
 
+- **Precedence** (M1): listed removed > nonrigid > rigid > present in O_S (unchanged) > absent-unlisted. Duplicate `rigid` ids count once.
 - **moved**: IDs in S's `rigid` list (dict or int form).
   - GT displacement = ‖T_align · T_rigid · c_R − c_R‖, where c_R is the reference centroid (raw 3RScan `T_align`). `T_rigid` alone maps into the rescan frame (§2.1, confirmed at M0), so M_ref = T_align · T_rigid is the motion in the reference frame.
-  - GT moved with displacement < τ_eval_move = 0.10 m *(set at M1)* → `dont_care` for the moved/unchanged decision.
+  - GT moved with displacement < τ_eval_move = **0.10 m** *(fixed at M1 from the histogram, `lsg m1`: 134 of 370 val moves)* → `dont_care` for the moved/unchanged decision.
   - GT new location (for localisation error) = centroid of the rescan instance's points, mapped with raw `T_align`.
 - **removed**: IDs in `removed`. If a listed removed ID still appears in O_S (20 cases in val) → `dont_care`.
 - **nonrigid**: `dont_care` for change-type metrics (either `unchanged` or `moved` is accepted). Excluded from relation metrics.
@@ -216,7 +220,7 @@ Per pair (ref R, rescan S). O_R and O_S are the objectIds in their semseg files.
 
 ## 6. Modules and interfaces (inputs → outputs; no implementation here)
 
-`src/lsg/` — every function is pure where possible and works in the reference frame. ✅ = exists (M0).
+`src/lsg/` — every function is pure where possible and works in the reference frame. ✅ = exists (M0/M1).
 
 1. `io` ✅
    - `scan3r.load_meta(root) -> Meta` (3RScan.json, column-major transforms) ✅;
@@ -224,18 +228,19 @@ Per pair (ref R, rescan S). O_R and O_S are the objectIds in their semseg files.
    - `scan3r.open_sequence(root, id) -> SequenceReader` and `iter_frames(seq, stride, idx=None) -> Frame` (idx, pose_c2w, depth[m]; colour on demand) ✅;
    - `scan3r.load_textured_mesh(root, id) -> TexturedMesh` (OBJ vertices, faces, per-face-corner UVs, texture image; **reference scans only**) — M6;
    - `dssg.load_relations / load_objects / load_predicates` ✅;
-   - `splits.write_texture_list(split_files, out)` → `splits/download_textures.txt` (CLI `lsg splits textures`) — M1.
+   - `splits.write_texture_list(split_files, out)` → `splits/download_textures.txt` (CLI `lsg splits textures`) ✅.
 2. `geom` ✅
    - `render.Renderer(vertices, faces, face_labels)`, `.render(K, T_w2c, W, H) -> (depth[m], label_map)`, `.distance(points)` ✅. Open3D RaycastingScene on CPU; label map via `primitive_ids`.
    - `render.TextureRenderer(textured_mesh)`, `.render_color(K, T_w2c, W, H) -> rgb`: `primitive_ids` + `primitive_uvs` → interpolate per-face UVs → sample `mesh.refined_0.png`. Uses OBJ geometry — M6.
    - `align.refine_from_sequence(seq, ref_V, ref_F, T_align, cfg, frame_ids) -> (T_refined, info)` ✅. A pre-pass over the frames of the processed chunk only (not online; DECISIONS). Corrections beyond `max_delta_t` / `max_delta_rot_deg` are rejected.
-3. `graph.build`
-   - `build_reference_graph(scan, relations=None, mode="gt"|"geometric") -> Graph`.
-   - `graph.relations`: `infer_support(node, candidates, floor_z, cfg) -> (parent_id|"floor"|None, "on"|"in", score)`. Rules (all *(tune)* on reference scans of dev):
-     - contact: ≥ 30% of the child's bottom-slice points (lowest 3 cm) have a candidate point within 5 cm horizontally and 0–10 cm below → `on`;
+3. `graph` ✅
+   - `graph.model`: `Graph` / `Node` / `Edge`, §4 JSON (`save` / `load`), `validate(graph)` ✅.
+   - `graph.build.build_reference_graph(scan, objects, relations=None, mode="gt"|"geometric", cfg) -> Graph` ✅. GT mode picks one parent when 3DSSG gives several: anchor > thing > floor, then `on` > `in`, then lowest id. Anchors carry no support edge.
+   - `graph.relations`: `infer_support(child_pts, candidates, floor_z, cfg) -> (parent_id|"floor"|None, "on"|"in", score)` ✅; `gt_support` (§5 mapping), `estimate_floor_z` (median z of floor-labelled reference vertices). Rules (all *(tune)* on reference scans of dev; values tuned at M1 in `configs/default.yaml`):
+     - contact: ≥ 30% of the child's bottom-slice points (lowest 3 cm) have a candidate point within 5 cm horizontally and 0–10 cm below → `on`; supporting points must lie ≥ `support_min_height` = 5 cm above the floor (M1: a neighbour's bottom edge at floor level does not carry a thing standing on the floor);
      - containment: ≥ 60% of child points inside the candidate's AABB, and the candidate is an anchor → `in`;
      - best score wins, anchor beats thing on ties;
-     - otherwise `floor` if the child's bottom is < 10 cm above floor_z.
+     - otherwise `floor` if the child's bottom is < `floor_max_gap` above floor_z (spec start 10 cm; **20 cm** after M1 dev tuning, because object bottoms are often unreconstructed).
 4. `obs` — the observation interface.
    - `ObsInstance`:
      - `token`, `label`, `label_topk: list[(label, score)]` (oracle: `[(label, 1.0)]`), `nyu40`;
@@ -296,7 +301,7 @@ Per pair (ref R, rescan S). O_R and O_S are the objectIds in their semseg files.
     - Moves nodes (apply T_move to the centroid and bbox), recomputes `infer_support` for moved and new things **and** for things whose parent moved or was removed, adds new nodes (with `label_topk`), sets `last_seen`, `confidence`, `state`.
     - Optional rule (ablation): an unobserved thing whose parent anchor moved moves with it.
 13. `eval`
-    - `gt_changes(meta, R, S) -> GTLabels` (§5);
+    - `gt.gt_changes(scan_meta, R, S, objs_R, objs_S, cfg) -> GTLabels` (§5) ✅; `gt.gt_parent_changes` ✅; `gt_stats.run_m1` (`lsg m1`) ✅;
     - `match_new(pred_new, gt, mode, cfg)` (§5 matching rules);
     - `score_changes(states, new_nodes, gt) -> dict`, including localisation error and size buckets;
     - `score_relations(G_upd, gt_rel) -> dict`;
@@ -309,8 +314,9 @@ CLI:
 - `uv run lsg run --pair R S --obs perception|oracle --method full --frac 1.0 --seed 0`;
 - `uv run lsg eval --split eval_val --obs perception,oracle --method …`;
 - `uv run lsg ablate …`;
-- `uv run lsg splits textures`;
-- `uv run lsg m0` ✅.
+- `uv run lsg splits textures` ✅;
+- `uv run lsg graph --scan R --mode gt|geometric [--out f.json]` ✅;
+- `uv run lsg m0` ✅, `uv run lsg m1` ✅.
 
 ## 7. Evaluation protocol
 
@@ -384,12 +390,12 @@ Expected story:
 - Appearance residual helps mainly for thin things (books, towels) and may be small overall; that is still a valid finding.
 - Decorrelation mostly protects against many votes from one standpoint.
 
-## 9. Milestones (dates assume 9–27 Nov; M0 finished early on 5 Nov)
+## 9. Milestones (dates assume 9–27 Nov; M0 and M1 finished early on 5 Nov)
 
 | M | Dates | Deliverable | Acceptance check |
 |---|---|---|---|
 | M0 ✅ | done 5 Nov | loaders, renderer, `T_align` (+ ICP refinement), overlay script; finalise §2.1 | **Passed** (commit `dd66381`): (1) aligned depth median 1.9–2.2 cm < 3 cm; (2) structure 1.6–3.0 cm < 5 cm (metres); (3) `rigid` → rescan frame, 17/21 < 5 cm; (4) overlays checked; (5) pytest green |
-| M1 | 9–10 Nov | reference graph (GT + geometric relations), `gt_changes`, GT statistics; `lsg splits textures` + texture download started | Counts on val reproduce §2.2 (390 / 96 / 224); GT displacement histogram saved → τ_eval_move fixed; reference-scan rule parent accuracy reported; `download_textures.txt` lists the 72 references |
+| M1 ✅ | done 5 Nov | reference graph (GT + geometric relations), `gt_changes`, GT statistics; `lsg splits textures` + texture download started | **Passed** (`lsg m1`, git 5ed8260): val counts 390 / 96 / 224 raw (171 new scored); histogram saved → τ_eval_move = 0.10 m (134 / 370 val moves `dont_care`); rule parent accuracy on reference scans 92.9% dev (n = 28, tuned) / 85.2% val (n = 575; 85.9% without floor parents), type accuracy given parent 100% / 85.3%; `download_textures.txt` lists 72 references, all downloaded |
 | M2 | 11–12 Nov | `obs` interface + `OracleSource`; eval harness (both matching rules, size buckets, localisation error, bootstrap); B0 (oracle) | `lsg eval --method B0 --obs oracle` on `eval_val` writes metrics.json in < 15 min; metric unit tests on a 5-object toy case, including the perception matching rule; **no-leak test** in place (import check: `perception/` imports neither `oracle/` nor `eval/`) |
 | M3 | 13 + 16 Nov | online loop (`change.online`, `visibility`, `Decorrelator`), deferred commitment, snapshots; B1 (oracle) | **Decorrelation unit test**: the same viewpoint repeated 30× gives 1 counted vote. **Synthetic scene**: box removed → free votes → `removed` at end; box occluded / out of frustum → `unknown`. On dev, B1's false-deletion rate < B0's. **Determinism**: two runs → identical `metrics` |
 | M4 | 17–18 Nov | perception end-to-end: residual points, `VoxelEvidence`, clustering, CLIP labelling, `PerceptionSource`; B0 + B1 in perception mode | **Synthetic**: box added → exactly one candidate, centroid error < 5 cm. Overlay PNGs of candidate clusters on 3 dev frames. Candidate recall vs GT new / moved-to objects on dev reported (no threshold yet). No-leak test passes on the real `perception/` code |

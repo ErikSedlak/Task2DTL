@@ -1,18 +1,18 @@
 # Code structure — what is where and what it does
 
-State: end of milestone M0 (2026-11-05). Covers everything in `src/lsg/`, `tests/` and `configs/`. For *why* things are done this way, see `DESIGN.md` (the spec) and `DECISIONS.md` (the log); this file only explains *what* the code does.
+State: end of milestone M1 (2026-11-05). Covers everything in `src/lsg/`, `tests/` and `configs/`. For *why* things are done this way, see `DESIGN.md` (the spec) and `DECISIONS.md` (the log); this file only explains *what* the code does.
 
 ## 1. The project in one paragraph
 
 3RScan contains rooms that were scanned several times. The first scan of a room is the **reference**; later visits are **rescans**. Between visits, furniture moves, objects disappear and new ones appear. The goal is to take the reference room's scene graph (objects + "cup is on the table" relations), look at a rescan's camera frames, and update the graph: which objects are unchanged, moved, removed, unknown (not seen) or new.
 
-M0 does not do any of that yet. It builds the foundation: reading the data, drawing ("rendering") a scanned room from any camera position, lining up the rescan with the reference, and checking on real data that all of this is correct.
+M0 built the foundation: reading the data, drawing ("rendering") a scanned room from any camera position, lining up the rescan with the reference, and checking on real data that all of this is correct. M1 added the reference scene graph (objects + support relations, from annotations or from geometry) and the ground truth of what changed between two visits. The change detection itself starts at M2/M3.
 
 ## 2. Folder map
 
 ```
 Task2/
-├── configs/default.yaml     all tunable numbers (thresholds, ICP settings, M0 gates)
+├── configs/default.yaml     all tunable numbers (thresholds, ICP, relation rules, eval definitions, gates)
 ├── docs/                    DESIGN (spec), DECISIONS (log), AI_USAGE, this file
 ├── splits/                  lists of scan ids / (reference, rescan) pairs to use
 ├── src/lsg/                 the Python package (run as `uv run lsg …`)
@@ -22,13 +22,20 @@ Task2/
 │   ├── classes.py           which object classes are "structure", "anchor", "thing"
 │   ├── io/                  READING DATA
 │   │   ├── scan3r.py        3RScan: metadata, meshes + labels, camera frames
-│   │   └── dssg.py          3DSSG: object attributes and relations
+│   │   ├── dssg.py          3DSSG: object attributes and relations
+│   │   └── splits.py        split lists: which references need textures
+│   ├── graph/               SCENE GRAPHS
+│   │   ├── model.py         Graph / Node / Edge, JSON in and out, validate()
+│   │   ├── relations.py     "what stands on what": from 3DSSG or from geometry
+│   │   └── build.py         builds the reference graph of a scan
 │   ├── geom/                GEOMETRY
 │   │   ├── transforms.py    moving points between coordinate frames, depth -> 3D points
 │   │   ├── render.py        draws a mesh as seen by a camera (depth + object ids)
 │   │   └── align.py         fine-tunes how the rescan lines up with the reference
 │   ├── eval/                CHECKING / SCORING (may read rescan ground truth)
-│   │   └── m0_checks.py     the four M0 acceptance checks
+│   │   ├── m0_checks.py     the four M0 acceptance checks
+│   │   ├── gt.py            ground truth per pair: moved / removed / new / ...
+│   │   └── gt_stats.py      M1 checks: GT counts, displacement histogram, rule sanity
 │   ├── oracle/              (empty, M2+) ground-truth rescan objects: the upper-bound mode
 │   └── (perception/)        (M4+) finds rescan objects from depth/colour alone: the headline mode
 ├── tests/                   automated tests (`uv run pytest -q`)
@@ -126,8 +133,37 @@ The big JSON files are parsed only once per run and then reused.
 
 `run_m0()` runs all four on the dev pairs, applies the pass/fail thresholds from the config and writes `metrics.json`. `format_summary()` prints the table you see in the terminal.
 
+### `io/splits.py` — split lists
+- `reference_ids(split_files)`: the distinct reference scans of some pair lists.
+- `write_texture_list(split_files, out)`: writes `splits/download_textures.txt` (the 72 references whose textures are needed; rescans never need them).
+
+### `graph/model.py` — the scene graph and its JSON
+- `Node`, `Edge`, `Graph`: exactly the fields of DESIGN §4. Ids: `r<objectId>` for reference objects, `n<k>` for new ones, `room` for the room. `floor` is only a parent name, not a node.
+- `Graph.save(path)` / `Graph.load(path)` write and read the JSON; `support_parent()` gives `{child: (parent, "on"|"in")}`.
+- `validate(graph)` lists schema problems (missing keys, more than one support edge per thing, edges to unknown nodes, ...). Empty list = valid.
+
+### `graph/relations.py` — what stands on / in what
+- `gt_support(relations, objects)`: turns 3DSSG relations ("standing on", "lying in", ...) into support parents (`on` / `in`), with the floor as a special parent. Things that only hang on walls are marked `excluded`.
+- `pick_parent(parents, level_of)`: if 3DSSG lists several parents, picks one (anchor first, then thing, then floor).
+- `estimate_floor_z(...)`: height of the floor (it is at z ≈ −1.4, not 0).
+- `infer_support(child_pts, candidates, floor_z, cfg)`: the **geometric** rules. "On": enough of the child's lowest points rest on a candidate just below them (but not on a neighbour's bottom edge at floor level). "In": most of the child lies inside a piece of furniture's box. Otherwise "on the floor" if the child's bottom is near the floor.
+
+### `graph/build.py` — the reference graph
+- `build_reference_graph(scan, objects, relations, mode, cfg)`: one node per anchor/thing (structure such as walls gets none), a `room` node, `hierarchy` edges, at most one support edge per thing, `next_to` edges, and per thing its `anchor` (first piece of furniture up the chain: book → box → shelf gives shelf).
+- `mode="gt"` takes relations from 3DSSG; `mode="geometric"` computes them with `infer_support` (baseline R1, and later used for moved / new objects).
+
+### `eval/gt.py` — what really changed (ground truth)
+- `gt_changes(scan_meta, R, S, objs_R, objs_S, cfg)`: for every reference anchor/thing, one status: `moved`, `removed`, `unchanged`, `absent_unlisted` (not in the rescan, but not listed as removed either) or `dont_care` (with a reason: removed-but-still-there, non-rigid, or moved less than 10 cm). Also the true displacement and new position of moved objects, the new objects (in the reference frame), and a size class (small / large).
+- `gt_parent_changes(...)`: for moved things, did their support parent change between the two visits (same / swapped / gained / lost)?
+
+### `eval/gt_stats.py` — the M1 checks (`uv run lsg m1`)
+- Counts per split (must reproduce DESIGN §2.2), a histogram of how far objects moved (`outputs/<run>/gt_displacement_hist.png`), and how often the geometric relation rules agree with 3DSSG on the reference scans.
+
 ### `cli.py` — the command line
-- `uv run lsg m0` runs the checks. Exit code 0 means checks (1)–(3) passed.
+- `uv run lsg m0` runs the M0 checks. Exit code 0 means checks (1)–(3) passed.
+- `uv run lsg m1` runs the M1 checks (about 70 s). Exit code 0 means all four passed.
+- `uv run lsg splits textures` writes `splits/download_textures.txt`.
+- `uv run lsg graph --scan <reference id> --mode gt|geometric [--out file.json]` exports one reference graph and validates it.
 - Later milestones add more subcommands (`lsg run`, `lsg eval`, `lsg ablate`).
 
 ## 6. The one rule that shapes the layout
@@ -147,14 +183,16 @@ These may only be read inside `eval/` (scoring, checks) and `oracle/` (the upper
 | `test_io.py` | Depth images (big-endian, comments); zip and folder give identical frames; both kinds of `rigid` entries; PLY parsing; object summaries; 3DSSG; split files. |
 | `test_render.py` | A flat wall renders at the right depth everywhere; a box in front gets the right label; empty pixels are 0; a posed camera's depth back-projects onto the mesh. |
 | `test_align.py` | ICP recovers a known 5 cm / 1° misalignment; oversized corrections are rejected. |
-| `test_real_data.py` | *(slow, needs `data/`)* Renders a real dev frame and compares with its depth. |
+| `test_relations.py` | 3DSSG → on/in mapping; contact, containment, floor and tie rules on synthetic boxes; floor-level neighbours don't count as support. |
+| `test_graph.py` | A synthetic room built in both modes: no structure nodes, one parent per thing, anchor chain, JSON round trip, `validate`. |
+| `test_gt.py` | A synthetic pair with every GT case (moved, small move, bare-int, removed, removed-but-present, non-rigid, new, absent); parent-change kinds. |
+| `test_real_data.py` | *(slow, needs `data/`)* Renders a real dev frame and compares with its depth; val GT counts reproduce DESIGN §2.2. |
 
-Run with `uv run pytest -q` (21 tests, ~2 s); the slow one with `uv run pytest -q -m slow`.
+Run with `uv run pytest -q` (47 tests, ~2 s); the slow ones with `uv run pytest -q -m slow` (~1 min).
 
 ## 8. What is not built yet
 
 Planned in DESIGN §6 and §9 (spec v2), in order:
-- M1: reference graph + ground-truth change labels (`graph/`, `eval/`), texture download list;
 - M2: the observation interface (`obs/`) with the oracle as upper bound (`oracle/`), scoring (`eval/`), baseline B0;
 - M3: the online frame loop with visibility votes, decorrelation and deferred decisions (`change/`);
 - M4: perception mode: finding new/moved objects from depth differences and naming them with CLIP (`perception/`);
