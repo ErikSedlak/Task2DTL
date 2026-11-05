@@ -1,6 +1,6 @@
 # DESIGN — Living Scene Graphs, Subproject D: change detection and graph maintenance
 
-Status: v1 (2026-11-05), written before M0. Numbers marked *(tune)* are starting values. They are fixed on `splits/dev_train.txt`, and every change is logged in DECISIONS.md.
+Status: v1 (2026-11-05), written before M0; §2.1, §3, §5, §6.2 and §11.4 updated with the M0 results (see DECISIONS, M0). Numbers marked *(tune)* are starting values. They are fixed on `splits/dev_train.txt`, and every change is logged in DECISIONS.md.
 
 ---
 
@@ -40,9 +40,11 @@ This project does **not** compete with class-agnostic geometric change detection
 | Open3D `t_hit` with intrinsic rays | equals camera-z depth (max diff 0.0) | verified |
 | Render speed (CPU) | ~5 ms per 224×172 frame, ~50 ms at 960×540 | verified (cloud CPU) |
 | PLY | ASCII; per-vertex `objectId, globalId, NYU40, Eigen13, RIO27`; 99.5% of faces have one label | verified |
-| 3RScan.json transforms | 16 floats, column-major, orthonormal R. Translations: scan-align median 1.0 m, max 9.7 m → **metres**, not the mm the FAQ states | strong evidence; **M0 confirms with an overlay** |
+| 3RScan.json transforms | 16 floats, column-major, orthonormal R, **metres** (not the mm the FAQ states). `T_align` maps rescan → reference: rescan structure lies 1.6 / 1.9 / 3.0 cm (median, point-to-surface) from reference structure on the 3 dev rescans; T⁻¹ gives 12–204 cm, translation ×0.001 gives 6–46 cm | verified M0 |
+| `T_align` accuracy | Aligned-reference depth residual median 2.9–3.8 cm vs. 1.1–1.3 cm for the rescan's own mesh. Label-free ICP of rescan depth onto the reference mesh corrects 1.6–8.4 cm / 0.4–1.5° → 1.9–2.2 cm. The method uses the **refined** alignment (`geom.align`); GT/eval uses raw 3RScan transforms | verified M0 (3 dev rescans) |
+| Depth valid area | Stored depth columns 0–~20 and ~205–223 are never valid (sensor border, ≈ 18% of pixels); depth is otherwise ~85% valid | verified M0 |
 | `rigid` entries | 2,933 dicts + 390 bare ints (no transform); `instance_reference == instance_rescan` always | verified |
-| Rigid-transform semantics (which frame, ref→rescan or inverse) | unknown | **M0 check** |
+| Rigid-transform semantics | `T_rigid` maps reference-frame instance points **into the rescan frame**: p_S = T_rigid · p_R. Best of 5 hypotheses on 20/21 dev objects (Chamfer 2.8–7.8 cm, 17 < 5 cm; the 21st is a toilet that barely moved). Motion in the reference frame: **M_ref = T_align · T_rigid** | verified M0 |
 | Instance IDs | consistent within an environment (same objectId = same object) | verified via 3DSSG `objects.json` |
 | 3DSSG | 1,482 scans in `objects.json`, 1,335 in `relationships.json` (train+val refs and rescans; test rescans have none). Objects carry `nyu40/eigen13/rio27`. 41 predicates with `none` = id 0; `inside` never occurs; `classes.txt` has 528 lines | verified |
 | Ref objects absent from rescan semseg (val) | 1,018, vs. only 96 listed `removed` → absence in the rescan annotation ≠ removal (partial rescans) | verified |
@@ -83,7 +85,7 @@ while read id; do for t in semseg.v2.json labels.instances.annotated.v2.ply sequ
 
 ## 3. Definitions
 
-- **Reference frame**: the reference scan's mesh frame (z-up, metres). All rescan geometry and poses are mapped into it via `T_align`.
+- **Reference frame**: the reference scan's mesh frame (z-up, metres). All rescan geometry and poses are mapped into it via `T_align`, refined by label-free ICP on the method side (§2.1, `geom.align`).
 - **Frame subsampling**: stride `s = 3` *(tune)*. Frames move only ~6 cm / 5° per step, so consecutive frames are strongly correlated.
 - **Node classes**: decided from 3DSSG `nyu40` id.
   - `anchor`: nyu40 ∈ {3 cabinet, 4 bed, 6 sofa, 7 table, 10 bookshelf, 12 counter, 14 desk, 15 shelves, 17 dresser, 32 nightstand}.
@@ -136,7 +138,7 @@ while read id; do for t in semseg.v2.json labels.instances.annotated.v2.ply sequ
 Per pair (ref R, rescan S). O_R and O_S are the objectIds in their semseg files.
 
 - **moved**: IDs in S's `rigid` list (dict or int form).
-  - GT displacement = ‖T_rigid · c_R − c_R‖, where c_R is the reference centroid. This uses the semantics confirmed at M0.
+  - GT displacement = ‖T_align · T_rigid · c_R − c_R‖, where c_R is the reference centroid (raw 3RScan `T_align`). `T_rigid` alone maps into the rescan frame (§2.1, confirmed at M0), so M_ref = T_align · T_rigid is the motion in the reference frame.
   - GT moved with displacement < τ_eval_move = 0.10 m *(set at M1)* → `dont_care` for the moved/unchanged decision.
 - **removed**: IDs in `removed`. If a listed removed ID still appears in O_S (20 cases in val) → `dont_care`.
 - **nonrigid**: `dont_care` for change-type metrics (either `unchanged` or `moved` is accepted). Excluded from relation metrics.
@@ -166,6 +168,7 @@ Per pair (ref R, rescan S). O_R and O_S are the objectIds in their semseg files.
    - `Renderer(vertices, faces, face_labels)`;
    - `.render(K, T_w2c, W, H) -> (depth[m], label_map)`.
    - Open3D RaycastingScene on CPU; label map via `primitive_ids`.
+   - `geom.align.refine_from_sequence(seq, ref_V, ref_F, T_align, cfg) -> (T_refined, info)`: robust point-to-plane ICP of rescan depth points onto the reference mesh (no rescan labels); corrections beyond `max_delta_t` / `max_delta_rot_deg` are rejected.
 3. `graph.build`
    - `build_reference_graph(scan, relations=None, mode="gt"|"geometric") -> Graph`.
    - `graph.relations`: `infer_support(node, candidates, floor_z, cfg) -> (parent_id|"floor"|None, "on"|"in", score)`. Rules (all *(tune)* on reference scans of dev):
@@ -294,7 +297,7 @@ Buffer: B3 (appearance) can be dropped without breaking anything downstream.
 1. **Tiny positive counts**: 96 removed and 12 parent-changed in val. Mitigation: relchange set, CIs, support counts in every table.
 2. **Incomplete or noisy GT**: unlisted removals, noisy "new". Mitigation: false-deletion rate, audit (§7.4), recall emphasised.
 3. **Transform semantics** (units, direction of `rigid`) are not confirmed until M0. M0 is a hard gate.
-4. **Misalignment → fake `free` votes**. Mitigation: τ_free, ≥ 2 votes, report per-pair alignment residual. Optional ICP refinement on structure only, logged as a decision.
+4. **Misalignment → fake `free` votes**. Mitigation: τ_free, ≥ 2 votes, report per-pair alignment residual. ICP refinement of `T_align` adopted at M0 (raw `T_align` is off by up to 8 cm / 1.5° on dev).
 5. **The oracle makes "new" and association easy**. Say so plainly in the write-up; the contribution is the maintenance logic.
 6. **Download time and disk** (~11 GB). Start tier 1 before 9 Nov.
 
