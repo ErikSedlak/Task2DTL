@@ -29,7 +29,8 @@ Task2/
 │   │   └── align.py         fine-tunes how the rescan lines up with the reference
 │   ├── eval/                CHECKING / SCORING (may read rescan ground truth)
 │   │   └── m0_checks.py     the four M0 acceptance checks
-│   └── oracle/              (empty, M2+) ground-truth rescan objects for the method
+│   ├── oracle/              (empty, M2+) ground-truth rescan objects: the upper-bound mode
+│   └── (perception/)        (M4+) finds rescan objects from depth/colour alone: the headline mode
 ├── tests/                   automated tests (`uv run pytest -q`)
 ├── data/      (git-ignored) the downloaded dataset
 └── outputs/   (git-ignored) results of runs: outputs/<run_id>/metrics.json, PNGs
@@ -135,7 +136,7 @@ The method must not peek at the rescan's answers (CLAUDE.md, hard rule 1). Resca
 - the rescan's object labels (PLY / semseg / 3DSSG);
 - the lists of moved, removed and non-rigid objects in 3RScan.json.
 
-These may only be read inside `eval/` (scoring, checks) and `oracle/` (the stand-in object detector, from M2). Everything else reads a rescan only through `open_sequence` (photos, depth, poses). That is why `load_scan` and `SequenceReader` are separate. It is also why `align.py` uses depth only, and why the M0 checks live in `eval/`.
+These may only be read inside `eval/` (scoring, checks) and `oracle/` (the upper-bound stand-in for perception, from M2). `perception/` may not even import `oracle/` or `eval/`; a test checks this. Everything else reads a rescan only through `open_sequence` (photos, depth, poses). That is why `load_scan` and `SequenceReader` are separate. It is also why `align.py` uses depth only, and why the M0 checks live in `eval/`.
 
 ## 7. Tests (`tests/`)
 
@@ -152,11 +153,13 @@ Run with `uv run pytest -q` (21 tests, ~2 s); the slow one with `uv run pytest -
 
 ## 8. What is not built yet
 
-Planned in DESIGN §6 and §9, in order:
-- M1: reference graph + ground-truth change labels (`graph/`, `eval/`);
-- M2: oracle instances, baseline B0, scoring (`oracle/`, `eval/`);
-- M3: visibility votes (`change/visibility`);
-- M4: object matching + moved test (`change/association`, `change/classify`);
-- M5: graph update + relations (`change/update`, `graph/relations`);
-- M6: confidence and priors (`change/confidence`), appearance;
-- M7: visualisation (`viz/`).
+Planned in DESIGN §6 and §9 (spec v2), in order:
+- M1: reference graph + ground-truth change labels (`graph/`, `eval/`), texture download list;
+- M2: the observation interface (`obs/`) with the oracle as upper bound (`oracle/`), scoring (`eval/`), baseline B0;
+- M3: the online frame loop with visibility votes, decorrelation and deferred decisions (`change/`);
+- M4: perception mode: finding new/moved objects from depth differences and naming them with CLIP (`perception/`);
+- M5: object matching, moved test, graph update + relations (`change/`, `graph/`);
+- M6: confidence and priors; texture rendering + appearance comparison for thin objects (`perception/appearance`);
+- M7: all ablations; M8: visualisation (`viz/`) and write-up.
+
+Since spec v2 there are two **observation modes**. `perception` (the headline) finds rescan objects from the rescan's own depth and colour. `oracle` (upper bound) uses the rescan's ground-truth objects. Both feed the same change logic.
