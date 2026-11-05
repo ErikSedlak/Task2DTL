@@ -1,0 +1,24 @@
+# Thresholds live here, not in code (CLAUDE.md hard rule 3). Values marked (tune) in DESIGN.md
+# are starting points and may only be tuned on splits/dev_train.txt.
+data_root: ./data          # overridden by env LSG_DATA
+outputs_root: ./outputs
+
+frames:
+  stride: 3                # DESIGN §3 (tune)
+
+visibility:                # DESIGN §3 (tune) - used from M3 on
+  tau_near: 0.10
+  tau_free: 0.15
+  min_mask_px: 15
+
+m0:
+  pairs_file: splits/dev_train.txt
+  depth_frame_step: 10     # check (1): every 10th frame of each dev rescan
+  overlay_scans:           # check (4): rescans used for overlay PNGs
+    - 0ad2d3a1-79e2-2212-9b99-a96495d9f7fe
+    - 19eda6f4-55aa-29a0-8893-8eac3a4d8193
+  overlay_frames: 3
+  accept_depth_median: 0.03      # (1) median |d_obs - d_render| [m]
+  accept_struct_median: 0.05     # (2) median structure point-to-surface distance [m]
+  accept_rigid_chamfer: 0.05     # (3) Chamfer [m]
+  accept_rigid_min_objects: 2    # (3) objects below the Chamfer threshold
