@@ -32,3 +32,36 @@ m0:
   accept_struct_median: 0.05     # (2) median structure point-to-surface distance [m]
   accept_rigid_chamfer: 0.05     # (3) Chamfer [m]
   accept_rigid_min_objects: 2    # (3) objects below the Chamfer threshold
+
+splits:
+  texture_sources:         # pair lists whose references need textures (DESIGN §2.3)
+    - splits/dev_train.txt
+    - splits/eval_val.txt
+    - splits/eval_relchange_train.txt
+  texture_list: splits/download_textures.txt
+
+relations:                 # geometric support rules, DESIGN §6.3 (tune on dev refs only)
+  bottom_slice: 0.03       # [m] child's lowest slice used for contact
+  contact_xy: 0.05         # [m] horizontal radius for a supporting point
+  contact_dz: 0.10         # [m] supporting point lies 0..contact_dz below the slice point
+  contact_min_frac: 0.30   # share of slice points with support -> "on"
+  contain_min_frac: 0.60   # share of child points inside an anchor's AABB -> "in"
+  floor_max_gap: 0.20      # [m] child bottom this close above floor_z -> parent "floor" (dev-tuned M1; spec start 0.10)
+  support_min_height: 0.05 # [m] supporting points must lie this far above floor_z (dev-tuned M1)
+  candidate_margin: 0.10   # [m] XY AABB margin for the candidate pre-filter
+  next_to_gap: 0.15        # [m] AABB gap for geometric next_to (exported only)
+  floor_fallback_percentile: 1.0   # floor_z if no floor-labelled vertices: this percentile of z
+
+eval:                      # evaluation protocol (DESIGN §5, §7) - definitions, not method tunables
+  tau_eval_move: 0.10      # [m] GT moves below this are dont_care for moved/unchanged (fixed M1)
+  small_max_extent: 0.5    # [m] thing with largest AABB extent below this = "small"
+  disp_buckets: [0.1, 0.3, 1.0]    # [m] moved-recall buckets [0.1,0.3), [0.3,1), >=1
+
+m1:
+  count_split: splits/eval_val.txt
+  expected_counts: {rigid: 390, removed: 96, new_raw: 224}   # DESIGN §2.2
+  hist_splits: [splits/eval_val.txt, splits/dev_train.txt]
+  meta_only_splits: [splits/eval_relchange_train.txt]        # tier 2 meshes not downloaded
+  rule_tune_split: splits/dev_train.txt                      # reference-rule sanity, tuning
+  rule_report_split: splits/eval_val.txt                     # reference-rule sanity, report only
+  expected_texture_refs: 72

@@ -25,3 +25,28 @@ def test_render_own_mesh_matches_depth(real_data_root):
     assert v.mean() > 0.5
     assert np.median(np.abs(f.depth[v] - d[v])) < 0.03
     assert len(np.unique(lab[lab > 0])) >= 2
+
+
+@pytest.mark.slow
+def test_val_gt_counts_reproduce_design(real_data_root):
+    """DESIGN §2.2 / M1 acceptance (1): 390 rigid / 96 removed / 224 new raw (171 scored)."""
+    from collections import Counter
+
+    from lsg.config import REPO_ROOT, load_config
+    from lsg.eval.gt import gt_changes
+    from lsg.io.dssg import load_objects
+    from lsg.io.scan3r import read_pairs
+
+    cfg = load_config()
+    meta = load_meta(real_data_root)
+    c: Counter = Counter()
+    refs: dict = {}
+    for r, s in read_pairs(REPO_ROOT / "splits/eval_val.txt"):
+        if r not in refs:
+            refs.clear()
+            refs[r] = (load_scan(real_data_root, r, with_intrinsics=False), load_objects(real_data_root, r))
+        R, oR = refs[r]
+        S = load_scan(real_data_root, s, with_intrinsics=False)
+        c.update(gt_changes(meta[s], R, S, oR, load_objects(real_data_root, s), cfg).counts())
+    assert (c["rigid_raw"], c["removed_raw"], c["new_raw"], c["new"]) == (390, 96, 224, 171)
+    assert c["dont_care_small_move"] == 134

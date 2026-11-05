@@ -433,6 +433,7 @@ class Scan:
     face_nyu40: np.ndarray  # (M,) int64 by majority
     instances: dict[int, Instance]
     intrinsics: Intrinsics | None
+    semseg_labels: dict[int, str] = field(default_factory=dict)  # objectId -> label, semseg.v2.json
 
     def instance_points(self, object_id: int) -> np.ndarray:
         """(K, 3) mesh vertices labelled `object_id` (empty if the object is not in this scan)."""
@@ -452,7 +453,8 @@ def load_scan(root: str | Path, scan_id: str, with_intrinsics: bool = True) -> S
 
     Returns:
         `Scan` with vertices/faces, objectId and NYU40 per vertex and per face (face = majority
-        of its 3 vertices) and `instances` for every objectId > 0.
+        of its 3 vertices), `instances` for every objectId > 0 with vertices, and
+        `semseg_labels` = all objectIds of `semseg.v2.json` (the O_R / O_S of DESIGN §5).
     """
     d = Path(root) / scan_id
     ply = read_ply(d / "labels.instances.annotated.v2.ply")
@@ -505,4 +507,5 @@ def load_scan(root: str | Path, scan_id: str, with_intrinsics: bool = True) -> S
         face_nyu40=face_majority(nyu, F),
         instances=instances,
         intrinsics=intr,
+        semseg_labels=labels,
     )
