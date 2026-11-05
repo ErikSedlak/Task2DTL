@@ -6,6 +6,16 @@ outputs_root: ./outputs
 frames:
   stride: 3                # DESIGN §3 (tune)
 
+alignment:                 # T_align refinement, label-free ICP (DECISIONS 2026-11-05/M0)
+  refine: true
+  frame_step: 10           # every 10th frame builds the source cloud
+  voxel: 0.02              # [m] source voxel downsampling
+  max_depth: 4.0           # [m] ignore far, noisy depth
+  icp_schedule: [0.10, 0.05, 0.03]   # [m] max correspondence distance per stage (= Tukey k)
+  max_iter: 50
+  max_delta_t: 0.20        # [m] reject corrections larger than this, keep raw T_align
+  max_delta_rot_deg: 5.0
+
 visibility:                # DESIGN §3 (tune) - used from M3 on
   tau_near: 0.10
   tau_free: 0.15
