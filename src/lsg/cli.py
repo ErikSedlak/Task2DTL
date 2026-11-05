@@ -9,6 +9,11 @@ from lsg.config import load_config
 
 
 def _cmd_m0(args: argparse.Namespace) -> int:
+    """`lsg m0`: run the M0 checks, print the summary.
+
+    Returns:
+        Exit code 0 if checks (1)-(3) pass, else 1. Check (4) is visual and never fails the run.
+    """
     from lsg.eval.m0_checks import format_summary, run_m0
 
     res = run_m0(load_config(args.config), run_id=args.run_id)
@@ -19,6 +24,14 @@ def _cmd_m0(args: argparse.Namespace) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
+    """Entry point of the `lsg` command (see `[project.scripts]` in pyproject.toml).
+
+    Args:
+        argv: Arguments without the program name; defaults to `sys.argv[1:]`.
+
+    Returns:
+        Process exit code of the chosen subcommand.
+    """
     p = argparse.ArgumentParser(prog="lsg")
     sub = p.add_subparsers(dest="cmd", required=True)
     m0 = sub.add_parser("m0", help="M0 acceptance checks on the dev pairs")

@@ -9,9 +9,20 @@ from lsg.geom.transforms import pixel_grid
 
 
 class Renderer:
-    """Ray-casts a triangle mesh. `face_labels[k]` is reported for pixels whose first hit is face k."""
+    """Draws a triangle mesh as seen from a camera: a depth image and an object-id image.
+
+    Uses ray casting on the CPU (one ray per pixel, first triangle hit wins). Building the
+    acceleration structure happens once in the constructor; each `render` call is ~5 ms at
+    224x172. `face_labels[k]` is reported for pixels whose first hit is face k.
+    """
 
     def __init__(self, vertices: np.ndarray, faces: np.ndarray, face_labels: np.ndarray | None = None):
+        """
+        Args:
+            vertices: (N, 3) mesh vertices in world coordinates (metres).
+            faces: (M, 3) vertex indices per triangle.
+            face_labels: (M,) integer label per face (usually objectId). Defaults to all 1.
+        """
         self.vertices = np.asarray(vertices, dtype=np.float32)
         self.faces = np.asarray(faces, dtype=np.uint32)
         n = len(self.faces)
@@ -25,10 +36,18 @@ class Renderer:
 
     @staticmethod
     def camera_rays(K: np.ndarray, T_w2c: np.ndarray, W: int, H: int) -> np.ndarray:
-        """(H, W, 6) float32 rays [origin, direction] in world frame.
+        """One ray per pixel, in the world frame.
 
         The camera-frame direction is [(u-cx)/fx, (v-cy)/fy, 1] (not normalised), so `t_hit`
         is camera-z depth, the quantity stored in the depth images.
+
+        Args:
+            K: 3x3 intrinsics for a W x H image.
+            T_w2c: 4x4 world->camera transform (the inverse of a camera pose).
+            W, H: Image size in pixels.
+
+        Returns:
+            (H, W, 6) float32 array [origin xyz, direction xyz].
         """
         u, v = pixel_grid(W, H)
         d_cam = np.stack(
@@ -41,7 +60,16 @@ class Renderer:
         return np.concatenate([o, d_world], axis=-1).astype(np.float32)
 
     def cast(self, rays: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-        """rays (..., 6) -> (t_hit (...,) float32 with 0 = no hit, face index (...,) int64 with -1)."""
+        """Cast arbitrary rays against the mesh.
+
+        Args:
+            rays: (..., 6) array [origin xyz, direction xyz].
+
+        Returns:
+            t_hit: (...,) float32 distance along the ray in units of the direction length;
+                0 where nothing was hit.
+            face: (...,) int64 index of the first face hit; -1 where nothing was hit.
+        """
         ans = self.scene.cast_rays(o3d.core.Tensor(np.ascontiguousarray(rays, dtype=np.float32)))
         t = ans["t_hit"].numpy()
         prim = ans["primitive_ids"].numpy().astype(np.int64)
@@ -53,12 +81,30 @@ class Renderer:
     def render(
         self, K: np.ndarray, T_w2c: np.ndarray, W: int, H: int
     ) -> tuple[np.ndarray, np.ndarray]:
-        """-> depth (H, W) float32 metres (0 = no hit), label_map (H, W) int64 (0 = no hit)."""
+        """Render what a camera at pose `T_w2c` would see of the mesh.
+
+        Args:
+            K: 3x3 intrinsics for a W x H image (depth or color resolution).
+            T_w2c: 4x4 world->camera transform, i.e. `invert(pose_c2w)`.
+            W, H: Image size in pixels.
+
+        Returns:
+            depth: (H, W) float32 camera-z depth in metres, comparable to the sensor's depth;
+                0 = no surface hit.
+            label_map: (H, W) int64 face label of the first hit (objectId); 0 = no hit.
+        """
         t, prim = self.cast(self.camera_rays(K, T_w2c, W, H))
         labels = np.where(prim >= 0, self.face_labels[np.maximum(prim, 0)], 0)
         return t, labels
 
     def distance(self, points: np.ndarray) -> np.ndarray:
-        """Unsigned point-to-surface distance (N,) for (N, 3) points."""
+        """Distance from each point to the closest spot on the mesh surface.
+
+        Args:
+            points: (N, 3) query points in world coordinates.
+
+        Returns:
+            (N,) float32 unsigned distances in metres.
+        """
         q = o3d.core.Tensor(np.asarray(points, dtype=np.float32))
         return self.scene.compute_distance(q).numpy()

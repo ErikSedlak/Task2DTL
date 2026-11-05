@@ -35,6 +35,12 @@ from lsg.runinfo import new_run_id, write_metrics
 
 @dataclass
 class PairCtx:
+    """Everything loaded for one (reference, rescan) pair, shared by the four checks.
+
+    `T_raw` is 3RScan's `T_align`; `T_ref` is the ICP-refined version (or `T_raw` if
+    refinement is off or was rejected). Both map rescan -> reference frame.
+    """
+
     ref: str
     rescan: str
     R: Scan
@@ -48,6 +54,7 @@ class PairCtx:
 
 
 def _stats(a: np.ndarray) -> dict[str, float]:
+    """Summary of a 1-D array of errors: count, median, 90th percentile, mean (NaN if empty)."""
     if a.size == 0:
         return {"n": 0, "median": float("nan"), "p90": float("nan"), "mean": float("nan")}
     return {
@@ -59,14 +66,34 @@ def _stats(a: np.ndarray) -> dict[str, float]:
 
 
 def chamfer(A: np.ndarray, B: np.ndarray) -> tuple[float, float]:
-    """(symmetric mean Chamfer, median one-sided B->A) in metres."""
+    """How well two point sets overlap.
+
+    Args:
+        A: (N, 3) points, e.g. the transformed reference instance.
+        B: (M, 3) points, e.g. the rescan instance.
+
+    Returns:
+        chamfer: Mean of (average nearest-neighbour distance A->B, same for B->A), metres.
+        median_b_to_a: Median nearest-neighbour distance from B to A. Robust when B is only
+            a partial copy of A (rescans often see only part of an object).
+    """
     dab = cKDTree(B).query(A)[0]
     dba = cKDTree(A).query(B)[0]
     return 0.5 * (float(dab.mean()) + float(dba.mean())), float(np.median(dba))
 
 
 def label_colors(ids: np.ndarray) -> np.ndarray:
-    """Deterministic colour per objectId (same id -> same colour in ref and rescan)."""
+    """Fixed pseudo-random colour per objectId, for label overlays.
+
+    The same id always gets the same colour, so an object looks the same in the reference
+    and rescan panels (ids are shared within a room). Id 0 (nothing) is black.
+
+    Args:
+        ids: Integer array of any shape.
+
+    Returns:
+        uint8 array of shape `ids.shape + (3,)`.
+    """
     ids = ids.astype(np.uint64)
     h = (ids * np.uint64(2654435761)) & np.uint64(0xFFFFFF)
     rgb = np.stack([(h >> np.uint64(s)) & np.uint64(0xFF) for s in (16, 8, 0)], axis=-1)
@@ -75,7 +102,16 @@ def label_colors(ids: np.ndarray) -> np.ndarray:
 
 
 def heat(err: np.ndarray, valid: np.ndarray, vmax: float = 0.20) -> np.ndarray:
-    """|Δ| -> RGB ramp blue (0) -> yellow -> red (>= vmax); invalid black."""
+    """Colour a depth-error image: blue (0) -> yellow (vmax/2) -> red (>= vmax).
+
+    Args:
+        err: (H, W) absolute depth error in metres.
+        valid: (H, W) bool; False pixels are drawn black.
+        vmax: Error (metres) that maps to full red.
+
+    Returns:
+        (H, W, 3) uint8 RGB image.
+    """
     x = np.clip(err / vmax, 0, 1)
     r = np.clip(2 * x, 0, 1)
     g = np.clip(2 - 2 * x, 0, 1) * np.clip(2 * x, 0, 1) + (x < 0.5) * 0.3 * (1 - 2 * x)
@@ -85,6 +121,7 @@ def heat(err: np.ndarray, valid: np.ndarray, vmax: float = 0.20) -> np.ndarray:
 
 
 def _resize_nn(img: np.ndarray, W: int, H: int) -> np.ndarray:
+    """Resize an image to W x H with nearest-neighbour sampling (no blending of colours)."""
     from PIL import Image
 
     return np.asarray(Image.fromarray(img).resize((W, H), Image.NEAREST))
@@ -96,6 +133,18 @@ def _resize_nn(img: np.ndarray, W: int, H: int) -> np.ndarray:
 
 
 def check_depth(ctx: PairCtx, frame_step: int) -> dict[str, Any]:
+    """Check (1): does the rendered depth match the sensor's depth?
+
+    For every `frame_step`-th rescan frame, render three ways and compare with the observed
+    depth on pixels where both are valid:
+    "own" = rescan mesh at its own pose (renderer + intrinsics sanity),
+    "ref_raw" = reference mesh at `T_raw @ pose`, "ref_refined" = reference mesh at
+    `T_ref @ pose` (the one that is gated, because the visibility votes will use it).
+
+    Returns:
+        `{"own" | "ref_raw" | "ref_refined": _stats(|d_obs - d_render|), "n_frames",
+        "sec_per_frame_3renders"}`.
+    """
     seq = ctx.seq
     K = seq.info.K_depth
     W, H = seq.info.depth_wh
@@ -122,6 +171,16 @@ def check_depth(ctx: PairCtx, frame_step: int) -> dict[str, Any]:
 
 
 def check_structure(ctx: PairCtx) -> dict[str, Any]:
+    """Check (2): after alignment, do walls/floor of both scans coincide? Settles the units.
+
+    Takes the rescan's structure vertices (walls, floor, ...; these rarely move), maps them
+    into the reference frame under several hypotheses and measures their distance to the
+    reference structure surface. Hypotheses: `T_align` (expected), its inverse, its
+    translation read as millimetres, no transform, and the ICP-refined transform.
+
+    Returns:
+        `{hypothesis name: _stats(distance), "n_points": int}`.
+    """
     S, R = ctx.S, ctx.R
     s_mask = np.isin(S.vertex_nyu40, list(STRUCTURE_NYU40))
     f_mask = np.isin(R.face_nyu40, list(STRUCTURE_NYU40))
@@ -142,6 +201,18 @@ def check_structure(ctx: PairCtx) -> dict[str, Any]:
 
 
 def check_rigid(ctx: PairCtx, meta: Meta) -> list[dict[str, Any]]:
+    """Check (3): what exactly does a `rigid` (moved-object) transform map from and to?
+
+    For every moved object with a transform, compares the reference copy (P_R) and the
+    rescan copy (P_S) under five readings (H0 no motion, H1-H4 the transform or its inverse,
+    landing in the reference or the rescan frame). The reading with the lowest Chamfer
+    distance wins. M0 result: H2, i.e. T_rigid maps reference points into the rescan frame.
+
+    Returns:
+        One dict per rigid entry: id, label, point counts, per-hypothesis Chamfer, "best",
+        and the object's displacement in the reference frame (`T_align @ T_rigid` applied
+        to its centroid). Entries without a transform or without points get a "skip" reason.
+    """
     rows = []
     for e in meta[ctx.rescan].rigid:
         row: dict[str, Any] = {"rescan": ctx.rescan, "id": e.id}
@@ -185,6 +256,14 @@ def check_rigid(ctx: PairCtx, meta: Meta) -> list[dict[str, Any]]:
 
 
 def make_overlays(ctx: PairCtx, n_frames: int, out_dir: Path) -> list[str]:
+    """Check (4): save PNGs for visual inspection (panel layout in the module docstring).
+
+    Picks `n_frames` frames spread over the middle 60% of the sequence and writes one
+    upright 5-panel PNG per frame to `out_dir`.
+
+    Returns:
+        Paths of the written PNGs.
+    """
     from PIL import Image
 
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -231,6 +310,19 @@ def make_overlays(ctx: PairCtx, n_frames: int, out_dir: Path) -> list[str]:
 
 
 def run_m0(cfg: dict[str, Any], run_id: str | None = None) -> dict[str, Any]:
+    """Run all M0 checks on the pairs in `cfg["m0"]["pairs_file"]` and decide pass/fail.
+
+    Per pair: load both labelled meshes, refine the alignment, run checks (1)-(3), and make
+    overlays for the scans listed in `cfg["m0"]["overlay_scans"]`. Then apply the acceptance
+    thresholds from `cfg["m0"]` and write `outputs/<run_id>/metrics.json`.
+
+    Args:
+        cfg: Full config.
+        run_id: Output folder name; defaults to a timestamped `m0_...`.
+
+    Returns:
+        All results plus `"acceptance"` (pass flag per check) and `"metrics_path"`.
+    """
     root = data_root(cfg)
     m0 = cfg["m0"]
     meta = load_meta(root)
@@ -302,6 +394,7 @@ def run_m0(cfg: dict[str, Any], run_id: str | None = None) -> dict[str, Any]:
 
 
 def format_summary(res: dict[str, Any]) -> str:
+    """Human-readable text report of `run_m0`'s result (distances shown in cm)."""
     L = []
     cm = lambda x: f"{100 * x:5.2f}"  # noqa: E731
     L.append("== M0 acceptance checks (oracle-free; dev pairs) ==")

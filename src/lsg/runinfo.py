@@ -12,7 +12,15 @@ from lsg.config import REPO_ROOT, config_hash
 
 
 def git_sha() -> dict[str, Any]:
+    """Current commit, so every result can be traced back to the code that produced it.
+
+    Returns:
+        `{"sha": <commit hash>, "dirty": <True if tracked files have uncommitted changes>}`,
+        or both None if git is unavailable.
+    """
+
     def _git(*args: str) -> str:
+        """Run a git command in the repo and return its trimmed stdout."""
         return subprocess.run(
             ["git", *args], cwd=REPO_ROOT, capture_output=True, text=True, check=True
         ).stdout.strip()
@@ -26,10 +34,21 @@ def git_sha() -> dict[str, Any]:
 
 
 def new_run_id(prefix: str) -> str:
+    """Timestamped run name, e.g. `m0_20261105-143012`."""
     return f"{prefix}_{_dt.datetime.now().strftime('%Y%m%d-%H%M%S')}"
 
 
 def write_metrics(run_dir: Path, metrics: dict[str, Any], cfg: dict[str, Any]) -> Path:
+    """Write `run_dir/metrics.json` with the results plus everything needed to reproduce them.
+
+    Args:
+        run_dir: Output folder of this run (created if missing).
+        metrics: Results; numpy scalars/arrays and Paths are converted automatically.
+        cfg: The config used, stored in full together with its hash.
+
+    Returns:
+        Path of the written file.
+    """
     run_dir = Path(run_dir)
     run_dir.mkdir(parents=True, exist_ok=True)
     payload = {
@@ -46,6 +65,7 @@ def write_metrics(run_dir: Path, metrics: dict[str, Any], cfg: dict[str, Any]) -
 
 
 def _json_default(o: Any) -> Any:
+    """`json.dumps` fallback: numpy scalars/arrays -> Python values/lists, Path -> str."""
     try:
         import numpy as np
 

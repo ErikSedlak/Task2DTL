@@ -34,6 +34,13 @@ class RigidEntry:
 
 @dataclass
 class ScanMeta:
+    """Everything 3RScan.json says about one scan.
+
+    For a reference scan, `reference_id == scan_id`, `T_align` is the identity and the change
+    lists are empty. For a rescan, the change lists (`rigid`, `removed`, `nonrigid`) are
+    ground truth: hard rule 1 allows reading them only in `lsg.oracle` / `lsg.eval`.
+    """
+
     scan_id: str
     reference_id: str
     is_reference: bool
@@ -46,15 +53,20 @@ class ScanMeta:
 
 @dataclass
 class Meta:
+    """All of 3RScan.json, indexed by scan id: `meta["<scan id>"]` gives its `ScanMeta`."""
+
     scans: dict[str, ScanMeta]
 
     def __getitem__(self, scan_id: str) -> ScanMeta:
+        """Metadata of one scan (reference or rescan). Raises KeyError if unknown."""
         return self.scans[scan_id]
 
     def __contains__(self, scan_id: str) -> bool:
+        """`scan_id in meta`."""
         return scan_id in self.scans
 
     def rescans_of(self, reference_id: str) -> list[str]:
+        """Ids of all rescans whose reference is `reference_id` (same room, later visits)."""
         return [
             s.scan_id
             for s in self.scans.values()
@@ -63,6 +75,11 @@ class Meta:
 
 
 def _parse_rigid(entry) -> RigidEntry:
+    """One item of a rescan's `rigid` list: a dict with a transform, or a bare object id.
+
+    The transform maps reference-frame instance points into the rescan frame (verified at M0,
+    DESIGN §2.1).
+    """
     if isinstance(entry, dict):
         ir, ires = int(entry["instance_reference"]), int(entry["instance_rescan"])
         if ir != ires:  # never observed (DESIGN §2.1); fail loudly if it happens
@@ -73,6 +90,11 @@ def _parse_rigid(entry) -> RigidEntry:
 
 
 def parse_meta(records: list[dict]) -> Meta:
+    """Build a `Meta` from the already-loaded JSON list of 3RScan.json.
+
+    Each record is one reference scan with a `scans` list of its rescans. Rescans without a
+    `transform` get the identity.
+    """
     scans: dict[str, ScanMeta] = {}
     for rec in records:
         ref = rec["reference"]
@@ -94,12 +116,19 @@ def parse_meta(records: list[dict]) -> Meta:
 
 
 def load_meta(root: str | Path) -> Meta:
+    """Read `<root>/3RScan.json` (~3 MB, 0.04 s) into a `Meta`."""
     with open(Path(root) / "3RScan.json", encoding="utf-8") as f:
         return parse_meta(json.load(f))
 
 
 def read_pairs(path: str | Path) -> list[tuple[str, str]]:
-    """Split file: `reference_scan rescan` per line, '#' comments."""
+    """Read a pair list from `splits/` (e.g. `dev_train.txt`).
+
+    Format: one `reference_scan rescan` pair per line; text after `#` is ignored.
+
+    Returns:
+        `[(reference_id, rescan_id), ...]` in file order.
+    """
     pairs = []
     for line in Path(path).read_text(encoding="utf-8").splitlines():
         line = line.split("#", 1)[0].strip()
@@ -116,12 +145,23 @@ def read_pairs(path: str | Path) -> list[tuple[str, str]]:
 
 @dataclass
 class PlyData:
+    """Raw content of a PLY file: one array per vertex property, plus the triangles."""
+
     vertex: dict[str, np.ndarray]  # property name -> (N,) array
     faces: np.ndarray  # (M, 3) int64
 
 
 def read_ply(path: str | Path) -> PlyData:
-    """Minimal ASCII PLY reader: one vertex element with scalar properties + triangle faces."""
+    """Read an ASCII PLY such as `labels.instances.annotated.v2.ply`.
+
+    Supports what 3RScan uses: one vertex element with scalar properties (x, y, z, red, green,
+    blue, objectId, globalId, NYU40, Eigen13, RIO27) and triangle faces. Anything else raises
+    ValueError rather than being silently misread.
+
+    Returns:
+        `PlyData` with `vertex["x"]`, `vertex["objectId"]`, ... as float64 arrays and
+        `faces` as (M, 3) int64.
+    """
     raw = Path(path).read_bytes()
     end = raw.find(b"end_header")
     if end < 0:
@@ -170,6 +210,12 @@ def face_majority(vertex_labels: np.ndarray, faces: np.ndarray) -> np.ndarray:
 
 @dataclass
 class Intrinsics:
+    """Camera parameters of a scan's sequence, from `_info.txt`.
+
+    Color (960x540) and depth (224x172) see the same field of view but have separate 3x3
+    intrinsics. Sizes are (width, height) of the images as stored (rotated 90°).
+    """
+
     K_color: np.ndarray  # 3x3
     color_wh: tuple[int, int]
     K_depth: np.ndarray  # 3x3, use for depth (CLAUDE.md)
@@ -179,6 +225,7 @@ class Intrinsics:
 
 
 def parse_info(text: str) -> Intrinsics:
+    """Parse the `key = value` lines of a sequence's `_info.txt` into `Intrinsics`."""
     kv = {}
     for line in text.splitlines():
         if "=" in line:
@@ -186,6 +233,7 @@ def parse_info(text: str) -> Intrinsics:
             kv[k.strip()] = v.strip()
 
     def K(name: str) -> np.ndarray:
+        """3x3 intrinsics from a 16-number `m_calibration...Intrinsic` line (stored 4x4)."""
         return np.array([float(x) for x in kv[name].split()]).reshape(4, 4)[:3, :3]
 
     return Intrinsics(
@@ -199,7 +247,17 @@ def parse_info(text: str) -> Intrinsics:
 
 
 def read_pgm16(data: bytes) -> np.ndarray:
-    """Binary P5 PGM. 16-bit samples are big-endian (PGM spec; verified on 3RScan, M0)."""
+    """Decode a binary (P5) PGM image, the format of `frame-XXXXXX.depth.pgm`.
+
+    16-bit samples are big-endian (PGM spec; verified on 3RScan, M0). Header comments are
+    skipped.
+
+    Args:
+        data: The raw file bytes.
+
+    Returns:
+        (H, W) uint16 array of raw values (for depth: millimetres, 0 = invalid).
+    """
     tokens: list[bytes] = []
     pos = 0
     while len(tokens) < 4:
@@ -226,6 +284,8 @@ _FRAME_RE = re.compile(r"frame-(\d{6})\.pose\.txt$")
 
 @dataclass
 class Frame:
+    """One RGB-D frame. The color image is loaded on demand via `SequenceReader.color(idx)`."""
+
     idx: int
     pose_c2w: np.ndarray  # 4x4 camera -> that scan's mesh frame
     depth: np.ndarray  # (H, W) float32 metres, 0 = invalid, stored (rotated) orientation
@@ -233,9 +293,20 @@ class Frame:
 
 
 class SequenceReader:
-    """Reads a scan's sequence from `sequence/` if extracted, else directly from `sequence.zip`."""
+    """Reads a scan's sequence from `sequence/` if extracted, else directly from `sequence.zip`.
+
+    Holds the zip file open; use it as a context manager (`with open_sequence(...) as seq:`)
+    or call `close()`. `frame_ids` lists the available frames, `info` the intrinsics.
+    """
 
     def __init__(self, scan_dir: str | Path):
+        """
+        Args:
+            scan_dir: The scan's folder, `<data root>/<scan id>`.
+
+        Raises:
+            FileNotFoundError: If neither `sequence/_info.txt` nor `sequence.zip` exists.
+        """
         self.scan_dir = Path(scan_dir)
         folder = self.scan_dir / "sequence"
         self._zip: zipfile.ZipFile | None = None
@@ -254,51 +325,76 @@ class SequenceReader:
 
     @property
     def source(self) -> str:
+        """Where frames come from: "folder" or "zip"."""
         return "folder" if self._folder is not None else "zip"
 
     def read_bytes(self, name: str) -> bytes:
+        """Raw bytes of one sequence file, e.g. "frame-000010.pose.txt"."""
         if self._folder is not None:
             return (self._folder / name).read_bytes()
         assert self._zip is not None
         return self._zip.read(self._zip_names[name])
 
     def pose(self, idx: int) -> np.ndarray:
+        """4x4 camera->world pose of frame `idx`, world = this scan's own mesh frame.
+
+        To place a rescan camera in the reference frame use `T_align @ pose`.
+        """
         txt = self.read_bytes(f"frame-{idx:06d}.pose.txt").decode("ascii")
         return np.array([float(x) for x in txt.split()], dtype=np.float64).reshape(4, 4)
 
     def depth(self, idx: int) -> np.ndarray:
+        """(172, 224) float32 depth of frame `idx` in metres (stored orientation), 0 = invalid."""
         raw = read_pgm16(self.read_bytes(f"frame-{idx:06d}.depth.pgm"))
         return (raw.astype(np.float32) / np.float32(self.info.depth_shift))
 
     def color(self, idx: int) -> np.ndarray:
-        """(H, W, 3) uint8, stored (rotated) orientation."""
+        """RGB image of frame `idx`: (540, 960, 3) uint8 in stored (rotated 90°) orientation.
+
+        Rotate with `np.rot90(img, k=-1)` to see it upright (only needed for viewing and
+        appearance models; geometry always uses the stored orientation).
+        """
         from PIL import Image
 
         with Image.open(io.BytesIO(self.read_bytes(f"frame-{idx:06d}.color.jpg"))) as im:
             return np.asarray(im.convert("RGB"))
 
     def frame(self, idx: int) -> Frame:
+        """Pose + depth of frame `idx` bundled as a `Frame`."""
         return Frame(idx, self.pose(idx), self.depth(idx), f"frame-{idx:06d}.color.jpg")
 
     def close(self) -> None:
+        """Close the zip file (no-op for an extracted folder)."""
         if self._zip is not None:
             self._zip.close()
 
     def __enter__(self) -> SequenceReader:
+        """Support `with SequenceReader(...) as seq:`."""
         return self
 
     def __exit__(self, *exc) -> None:
+        """Close the zip when the `with` block ends."""
         self.close()
 
 
 def open_sequence(root: str | Path, scan_id: str) -> SequenceReader:
+    """Open the RGB-D sequence of a scan. Safe for rescans on the method side (no labels)."""
     return SequenceReader(Path(root) / scan_id)
 
 
 def iter_frames(
     seq: SequenceReader, stride: int = 1, idx: Sequence[int] | None = None
 ) -> Iterator[Frame]:
-    """Frames with finite poses. `idx` (explicit frame ids) overrides `stride`."""
+    """Loop over a sequence's frames, skipping frames whose pose is not finite.
+
+    Args:
+        seq: An open sequence.
+        stride: Take every `stride`-th frame (DESIGN §3 uses 3).
+        idx: Explicit frame ids; overrides `stride` (used for contiguous chunks, §7.3).
+
+    Yields:
+        `Frame` objects in order.
+    """
     ids = list(idx) if idx is not None else seq.frame_ids[::stride]
     for i in ids:
         f = seq.frame(i)
@@ -313,6 +409,8 @@ def iter_frames(
 
 @dataclass
 class Instance:
+    """One annotated object of a scan, summarised from its mesh vertices (scan's own frame)."""
+
     id: int
     label: str
     nyu40: int
@@ -324,6 +422,8 @@ class Instance:
 
 @dataclass
 class Scan:
+    """A scan's labelled mesh: geometry, per-vertex and per-face labels, and its objects."""
+
     scan_id: str
     vertices: np.ndarray  # (N, 3) float64, scan's own mesh frame
     faces: np.ndarray  # (M, 3) int64
@@ -335,11 +435,25 @@ class Scan:
     intrinsics: Intrinsics | None
 
     def instance_points(self, object_id: int) -> np.ndarray:
+        """(K, 3) mesh vertices labelled `object_id` (empty if the object is not in this scan)."""
         return self.vertices[self.vertex_object_id == object_id]
 
 
 def load_scan(root: str | Path, scan_id: str, with_intrinsics: bool = True) -> Scan:
-    """Mesh, labels and instances of one scan. Annotation reader: see module docstring."""
+    """Load a scan's labelled mesh and its object list (~2 s for a large room).
+
+    Annotation reader: on a rescan, only `lsg.oracle` / `lsg.eval` may call this (module
+    docstring, hard rule 1).
+
+    Args:
+        root: Data root.
+        scan_id: Scan to load; reads `labels.instances.annotated.v2.ply` and `semseg.v2.json`.
+        with_intrinsics: Also read `_info.txt` from the sequence (None if there is none).
+
+    Returns:
+        `Scan` with vertices/faces, objectId and NYU40 per vertex and per face (face = majority
+        of its 3 vertices) and `instances` for every objectId > 0.
+    """
     d = Path(root) / scan_id
     ply = read_ply(d / "labels.instances.annotated.v2.ply")
     V = np.stack([ply.vertex["x"], ply.vertex["y"], ply.vertex["z"]], axis=1)
