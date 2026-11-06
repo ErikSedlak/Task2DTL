@@ -1,12 +1,12 @@
 # Code structure — what is where and what it does
 
-State: end of milestone M1 (2026-11-05). Covers everything in `src/lsg/`, `tests/` and `configs/`. For *why* things are done this way, see `DESIGN.md` (the spec) and `DECISIONS.md` (the log); this file only explains *what* the code does.
+State: end of milestone M2 (2026-11-06). Covers everything in `src/lsg/`, `tests/` and `configs/`. For *why* things are done this way, see `DESIGN.md` (the spec) and `DECISIONS.md` (the log); this file only explains *what* the code does.
 
 ## 1. The project in one paragraph
 
 3RScan contains rooms that were scanned several times. The first scan of a room is the **reference**; later visits are **rescans**. Between visits, furniture moves, objects disappear and new ones appear. The goal is to take the reference room's scene graph (objects + "cup is on the table" relations), look at a rescan's camera frames, and update the graph: which objects are unchanged, moved, removed, unknown (not seen) or new.
 
-M0 built the foundation: reading the data, drawing ("rendering") a scanned room from any camera position, lining up the rescan with the reference, and checking on real data that all of this is correct. M1 added the reference scene graph (objects + support relations, from annotations or from geometry) and the ground truth of what changed between two visits. The change detection itself starts at M2/M3.
+M0 built the foundation: reading the data, drawing ("rendering") a scanned room from any camera position, lining up the rescan with the reference, and checking on real data that all of this is correct. M1 added the reference scene graph (objects + support relations, from annotations or from geometry) and the ground truth of what changed between two visits. M2 added the observation interface (what the method sees of a rescan), the oracle version of it, the first (naive) change detector B0, and the scoring harness `lsg eval`.
 
 ## 2. Folder map
 
@@ -32,15 +32,24 @@ Task2/
 │   │   ├── transforms.py    moving points between coordinate frames, depth -> 3D points
 │   │   ├── render.py        draws a mesh as seen by a camera (depth + object ids)
 │   │   └── align.py         fine-tunes how the rescan lines up with the reference
+│   ├── obs/                 OBSERVATION INTERFACE (what the method sees of a rescan)
+│   │   └── base.py          ObsInstance, ObsSource, RefContext, SeqInfo, PackedMasks
+│   ├── change/              CHANGE LOGIC (method side)
+│   │   ├── pipeline.py      frame selection, per-pair preparation, the M2 frame loop
+│   │   └── baselines.py     B0: naive same-label matching
 │   ├── eval/                CHECKING / SCORING (may read rescan ground truth)
 │   │   ├── m0_checks.py     the four M0 acceptance checks
 │   │   ├── gt.py            ground truth per pair: moved / removed / new / ...
-│   │   └── gt_stats.py      M1 checks: GT counts, displacement histogram, rule sanity
-│   ├── oracle/              (empty, M2+) ground-truth rescan objects: the upper-bound mode
-│   └── (perception/)        (M4+) finds rescan objects from depth/colour alone: the headline mode
+│   │   ├── gt_stats.py      M1 checks: GT counts, displacement histogram, rule sanity
+│   │   ├── metrics.py       scoring: matching rules, per-pair counts, averages + bootstrap CIs
+│   │   └── harness.py       `lsg eval` / `lsg run`: method + observations + GT -> metrics.json
+│   ├── oracle/              ground-truth rescan objects: the upper-bound mode
+│   │   └── source.py        OracleSource
+│   └── perception/          (stub; M4) finds rescan objects from depth/colour alone: the headline mode
 ├── tests/                   automated tests (`uv run pytest -q`)
 ├── data/      (git-ignored) the downloaded dataset
-└── outputs/   (git-ignored) results of runs: outputs/<run_id>/metrics.json, PNGs
+├── cache/     (git-ignored) refined alignments (cache/align/), later model features
+└── outputs/   (git-ignored) results of runs: outputs/<run_id>/metrics.json, PNGs, graphs/
 ```
 
 ## 3. How the pieces fit together
@@ -159,12 +168,41 @@ The big JSON files are parsed only once per run and then reused.
 ### `eval/gt_stats.py` — the M1 checks (`uv run lsg m1`)
 - Counts per split (must reproduce DESIGN §2.2), a histogram of how far objects moved (`outputs/<run>/gt_displacement_hist.png`), and how often the geometric relation rules agree with 3DSSG on the reference scans.
 
+### `obs/base.py` — the observation interface
+- `ObsInstance`: one object seen in the rescan. It has an opaque `token`, a label (+ `label_topk`), a class id, its observed 3D points in the **reference** frame, and a mask per frame showing where it was seen.
+- `ObsSource`: anything that produces `ObsInstance`s frame by frame: `begin(...)`, then `observe(frame, ...)` for every processed frame in time order, then `finish()` returns the instances. The oracle implements it now; perception (M4) will too. The change logic only ever talks to this interface.
+- `RefContext` (the reference scan + its graph) and `SeqInfo` (rescan id, camera parameters, the refined `T_align`, which frames are processed) bundle what the method is allowed to know.
+- `PackedMasks` stores the per-frame masks bit-packed (8x smaller) but reads like a dict of boolean images.
+
+### `oracle/source.py` — the upper-bound observations
+- `OracleSource` renders the rescan's own **annotated** mesh from each rescan camera. Every object that shows up (where the sensor also has valid depth) becomes an `ObsInstance` with its real label and the mesh vertices that were seen. Objects with fewer than 50 seen vertices are dropped.
+- Object ids are replaced by shuffled tokens (`o0`, `o1`, ...) so the method cannot cheat by id; `token_map()` undoes the shuffle and is only used by `eval/`.
+
+### `change/pipeline.py` — preparing a pair and walking its frames
+- `select_frames(...)`: every 3rd frame, or one contiguous chunk of them (for the "observe only 50 / 25 / 10%" experiments).
+- `prepare_pair(...)`: builds the reference graph and the refined alignment. The refined alignment is cached in `cache/align/`, so ICP runs once per rescan (and chunk).
+- `collect_observations(...)`: the simple M2 loop: feed every processed frame to the `ObsSource`, return its instances. M3 replaces it with the full online loop.
+
+### `change/baselines.py` — B0, the naive change detector
+- `b0(G_ref, obs, cfg)`: pairs each reference object with the nearest observed object of the **same label** (one-to-one, closest pairs first). Within 0.5 m it is `unchanged`, farther `moved` (and its position is updated); without a partner `removed`; observed objects nobody claimed become `new` nodes. It returns the updated graph.
+- It ignores visibility, so anything simply not seen in the rescan is deleted. Later baselines fix exactly that.
+
+### `eval/metrics.py` — scoring
+- `match_new(...)`: which predicted new nodes are real new objects. Oracle: by token. Perception: same label (or class) and close (<= 30 cm) or overlapping (box IoU >= 0.25), best overlaps first, one-to-one.
+- `score_pair(G_upd, gt, ...)`: counts for one pair: hits / false alarms / misses for moved, removed and new; unchanged right / kept; false deletions and false moves on objects the rescan annotation doesn't mention; how often the method paired an object with the right observation; moved recall per distance and size bucket; how far off the new position of a correctly detected move is.
+- `aggregate(...)`: sums the counts over all pairs, turns them into percentages, and adds a 95% confidence interval by resampling pairs (bootstrap). Every number comes with its support `n`.
+
+### `eval/harness.py` — `lsg eval` and `lsg run`
+- For every pair: load the GT, prepare the pair, run the oracle over the frames, run the method, score, and save the updated graph to `outputs/<run>/graphs/<mode>/`.
+- Pairs of the same reference run in one worker process (4 in parallel by default). Results are sorted back into a fixed order, so the `metrics` block of metrics.json is identical across reruns; timings go into a separate `run` block.
+
 ### `cli.py` — the command line
 - `uv run lsg m0` runs the M0 checks. Exit code 0 means checks (1)–(3) passed.
 - `uv run lsg m1` runs the M1 checks (about 70 s). Exit code 0 means all four passed.
 - `uv run lsg splits textures` writes `splits/download_textures.txt`.
 - `uv run lsg graph --scan <reference id> --mode gt|geometric [--out file.json]` exports one reference graph and validates it.
-- Later milestones add more subcommands (`lsg run`, `lsg eval`, `lsg ablate`).
+- `uv run lsg eval --split eval_val --obs oracle --method B0 [--workers N] [--frac F --seed S]` runs and scores a whole split (~80 s for val); `uv run lsg run --pair <ref> <rescan> --obs oracle --method B0` does one pair. Both print a results table and write `outputs/<run>/metrics.json`. `--obs perception` answers "arrives at M4" for now.
+- Later milestones add `lsg ablate`.
 
 ## 6. The one rule that shapes the layout
 
@@ -172,7 +210,7 @@ The method must not peek at the rescan's answers (CLAUDE.md, hard rule 1). Resca
 - the rescan's object labels (PLY / semseg / 3DSSG);
 - the lists of moved, removed and non-rigid objects in 3RScan.json.
 
-These may only be read inside `eval/` (scoring, checks) and `oracle/` (the upper-bound stand-in for perception, from M2). `perception/` may not even import `oracle/` or `eval/`; a test checks this. Everything else reads a rescan only through `open_sequence` (photos, depth, poses). That is why `load_scan` and `SequenceReader` are separate. It is also why `align.py` uses depth only, and why the M0 checks live in `eval/`.
+These may only be read inside `eval/` (scoring, checks) and `oracle/` (the upper-bound stand-in for perception). `perception/`, and every other method-side package (`obs/`, `change/`, `graph/`, `geom/`, `io/`), may not even import `oracle/` or `eval/`; `tests/test_no_leak.py` checks this. The method also never receives the rescan's `ScanMeta` (which holds the moved/removed lists), only its `T_align` matrix. Everything else reads a rescan only through `open_sequence` (photos, depth, poses). That is why `load_scan` and `SequenceReader` are separate. It is also why `align.py` uses depth only, and why the M0 checks live in `eval/`.
 
 ## 7. Tests (`tests/`)
 
@@ -186,14 +224,18 @@ These may only be read inside `eval/` (scoring, checks) and `oracle/` (the upper
 | `test_relations.py` | 3DSSG → on/in mapping; contact, containment, floor and tie rules on synthetic boxes; floor-level neighbours don't count as support. |
 | `test_graph.py` | A synthetic room built in both modes: no structure nodes, one parent per thing, anchor chain, JSON round trip, `validate`. |
 | `test_gt.py` | A synthetic pair with every GT case (moved, small move, bare-int, removed, removed-but-present, non-rigid, new, absent); parent-change kinds. |
-| `test_real_data.py` | *(slow, needs `data/`)* Renders a real dev frame and compares with its depth; val GT counts reproduce DESIGN §2.2. |
+| `test_no_leak.py` | Method-side packages never import `oracle/` or `eval/` (source scan + a fresh-interpreter import check); `perception/` contains no rescan-annotation reads; the checker itself catches planted violations. |
+| `test_metrics.py` | 5-object toy pair: P/R/F1, unchanged strict + kept, false-deletion / false-move rates, unknown rate, association, buckets, localisation error; the perception matching rule (label vs class, distance vs overlap, one-to-one); bootstrap determinism. |
+| `test_oracle.py` | `OracleSource` on synthetic boxes: masks only where depth is valid, hidden objects not seen, points in the reference frame, `min_points`, deterministic token shuffle; `PackedMasks`. |
+| `test_b0.py` | B0 states (unchanged / moved / removed / new), one-to-one matching, structure ignored, exact labels, threshold from the config; the result validates. |
+| `test_pipeline.py` | Frame chunks; alignment cache hits and misses. |
+| `test_real_data.py` | *(slow, needs `data/`)* Renders a real dev frame and compares with its depth; val GT counts reproduce DESIGN §2.2; one dev pair end-to-end with oracle + B0, twice, with identical `metrics`. |
 
-Run with `uv run pytest -q` (47 tests, ~2 s); the slow ones with `uv run pytest -q -m slow` (~1 min).
+Run with `uv run pytest -q` (81 tests, ~7 s); the slow ones with `uv run pytest -q -m slow` (~1.5 min).
 
 ## 8. What is not built yet
 
 Planned in DESIGN §6 and §9 (spec v2), in order:
-- M2: the observation interface (`obs/`) with the oracle as upper bound (`oracle/`), scoring (`eval/`), baseline B0;
 - M3: the online frame loop with visibility votes, decorrelation and deferred decisions (`change/`);
 - M4: perception mode: finding new/moved objects from depth differences and naming them with CLIP (`perception/`);
 - M5: object matching, moved test, graph update + relations (`change/`, `graph/`);

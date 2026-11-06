@@ -220,7 +220,7 @@ Per pair (ref R, rescan S). O_R and O_S are the objectIds in their semseg files.
 
 ## 6. Modules and interfaces (inputs → outputs; no implementation here)
 
-`src/lsg/` — every function is pure where possible and works in the reference frame. ✅ = exists (M0/M1).
+`src/lsg/` — every function is pure where possible and works in the reference frame. ✅ = exists (M0–M2).
 
 1. `io` ✅
    - `scan3r.load_meta(root) -> Meta` (3RScan.json, column-major transforms) ✅;
@@ -241,19 +241,20 @@ Per pair (ref R, rescan S). O_R and O_S are the objectIds in their semseg files.
      - containment: ≥ 60% of child points inside the candidate's AABB, and the candidate is an anchor → `in`;
      - best score wins, anchor beats thing on ties;
      - otherwise `floor` if the child's bottom is < `floor_max_gap` above floor_z (spec start 10 cm; **20 cm** after M1 dev tuning, because object bottoms are often unreconstructed).
-4. `obs` — the observation interface.
+4. `obs` — the observation interface ✅ (M2).
    - `ObsInstance`:
      - `token`, `label`, `label_topk: list[(label, score)]` (oracle: `[(label, 1.0)]`), `nyu40`;
      - `points` (N×3, **reference frame**);
-     - `masks: {frame_idx: bool[172, 224]}` (depth resolution);
+     - `masks: {frame_idx: bool[172, 224]}` (depth resolution; stored bit-packed, `PackedMasks`);
      - `crops`: best colour crops, upright.
    - `ObsSource` protocol:
      - `begin(ref_ctx, seq_info)`;
      - `observe(frame, ref_render) -> None`, called per processed frame, in time order;
      - `finish() -> list[ObsInstance]`.
-   - Implementations: `oracle.OracleSource`, `perception.PerceptionSource`. The change logic depends only on this interface.
-5. `oracle` (upper bound)
-   - `OracleSource`: renders the rescan's own labelled mesh at each frame, collecting per-instance masks, points (vertices of hit triangles, *these frames only*) and crops. IDs are shuffled with a seeded permutation.
+   - Implementations: `oracle.OracleSource` ✅, `perception.PerceptionSource` (M4). The change logic depends only on this interface.
+   - Also `RefContext` (reference scan, G_ref, floor_z) and `SeqInfo` (rescan id, intrinsics, **refined** `T_align`, processed frame ids). `ref_render` is None until M3.
+5. `oracle` (upper bound) ✅ (M2)
+   - `OracleSource`: renders the rescan's own labelled mesh at each frame, collecting per-instance masks, points (vertices of hit triangles, *these frames only*, mapped with the refined `T_align`) and crops (optional, off by default). A pixel counts only where the sensor depth is valid. IDs are shuffled with a seeded permutation; `token_map()` is read only by `eval/`.
    - It is the only reader of rescan labels outside `eval/`.
    - Instances with < 50 observed points *(tune)* are dropped.
 6. `perception` (headline). **Must never import `oracle/` or `eval/`, and never read rescan semseg, rescan PLY labels, rescan 3DSSG or the `rigid/removed/nonrigid` lists.**
@@ -268,7 +269,9 @@ Per pair (ref R, rescan S). O_R and O_S are the objectIds in their semseg files.
      - `.topk(crops) -> label_topk` from the K = 5 largest projected upright crops;
      - vocabulary = reference-graph labels ∪ the most frequent 3RScan thing/anchor labels (train metadata, §2.3).
    - `source.PerceptionSource`: assembles the above into `ObsInstance`s (points, masks by projecting the cluster, crops, `label_topk`).
-7. `change.online`
+7. `change.pipeline` ✅ (M2) and `change.online` (M3)
+   - `pipeline.select_frames` (stride + §7.3 chunk); `pipeline.prepare_pair` (G_ref + cached refined `T_align`; it gets only the raw `T_align` matrix, never the rescan's change lists); `pipeline.collect_observations` (the M2 frame loop, replaced by `run_online` at M3).
+   - `baselines.b0` ✅ (§8; greedy one-to-one same-label matching).
    - `run_online(G_ref, ref_ctx, seq, obs_source, cfg, frame_ids) -> OnlineResult` (votes, obs instances, snapshots). Per processed frame, in time order:
      1. render the reference (depth, labels, and colour if appearance is on);
      2. compute frame votes (`change.visibility`);
@@ -302,8 +305,9 @@ Per pair (ref R, rescan S). O_R and O_S are the objectIds in their semseg files.
     - Optional rule (ablation): an unobserved thing whose parent anchor moved moves with it.
 13. `eval`
     - `gt.gt_changes(scan_meta, R, S, objs_R, objs_S, cfg) -> GTLabels` (§5) ✅; `gt.gt_parent_changes` ✅; `gt_stats.run_m1` (`lsg m1`) ✅;
-    - `match_new(pred_new, gt, mode, cfg)` (§5 matching rules);
-    - `score_changes(states, new_nodes, gt) -> dict`, including localisation error and size buckets;
+    - `metrics.match_new(pred_new, gt, mode, cfg)` (§5 matching rules) ✅;
+    - `metrics.score_pair(G_upd, gt, mode, cfg, obs_truth)` → per-pair counts, and `metrics.aggregate` (micro-average + bootstrap CI), including localisation error and size buckets ✅ (the spec's `score_changes`);
+    - `harness.run_eval` / `run_split` (`lsg eval`, `lsg run`) ✅;
     - `score_relations(G_upd, gt_rel) -> dict`;
     - `audit_sample(...)` writes image crops for manual FP review.
 14. `viz`
@@ -311,8 +315,8 @@ Per pair (ref R, rescan S). O_R and O_S are the objectIds in their semseg files.
     - `topdown_png(G_ref, G_upd)`: static before/after figure for slides/report.
 
 CLI:
-- `uv run lsg run --pair R S --obs perception|oracle --method full --frac 1.0 --seed 0`;
-- `uv run lsg eval --split eval_val --obs perception,oracle --method …`;
+- `uv run lsg run --pair R S --obs perception|oracle --method full --frac 1.0 --seed 0` ✅ (oracle, B0);
+- `uv run lsg eval --split eval_val --obs perception,oracle --method … [--workers N]` ✅ (oracle, B0);
 - `uv run lsg ablate …`;
 - `uv run lsg splits textures` ✅;
 - `uv run lsg graph --scan R --mode gt|geometric [--out f.json]` ✅;
@@ -326,9 +330,12 @@ Every table reports **two rows per method**, `oracle` (upper bound) and `percept
 
 - Precision / recall / F1 for **moved**, **removed** and **new**, plus accuracy on **unchanged**.
   - Reference-node states are compared with GT by object ID. New nodes are matched by the mode's rule (§5).
-  - A prediction of `unknown` counts as *not removed*.
-  - `dont_care` objects are excluded.
+  - Scored universe for moved P/R, removed P/R and unchanged accuracy: things/anchors with GT status `moved | removed | unchanged`. `dont_care` **and `absent-unlisted`** objects are excluded (M2, Erik).
+  - A prediction of `unknown` counts as *not removed* and *not moved*.
+  - Unchanged is reported twice (M2, Erik): **strict accuracy** (predicted `unchanged`) and **kept rate** (`unchanged` or `unknown`).
+  - A predicted new node that corresponds to a `dont_care` reference object is ignored (neither TP nor FP; M2, Erik).
 - **False-deletion rate**: share of `absent-unlisted` reference objects that the method deletes. Lower is better; the expected baseline failure is that B0 deletes many of them. Report it next to removed P/R, because GT precision is unreliable.
+- **False-move rate** (M2, Erik): share of `absent-unlisted` reference objects predicted `moved`, next to the false-deletion rate.
 - **Unknown rate**: share of reference nodes left `unknown`.
 - **Association accuracy**: correct ref→obs pairs / GT-matchable pairs. Report both strict and *same-label tolerant* (swaps between identical-label objects not penalised; chairs dominate). In perception mode, an obs counts as correct for a reference node if it matches that node's GT rescan instance (§5 rule).
 - Moved recall broken down by GT displacement buckets: [0.1, 0.3), [0.3, 1), ≥ 1 m.
@@ -361,7 +368,8 @@ Every table reports **two rows per method**, `oracle` (upper bound) and `percept
 
 ### 7.5 Reproducibility
 
-- Same config + seed → identical `metrics` block in `metrics.json`. The `created` and `run_id` fields differ by design.
+- Same config + seed → identical `metrics` block in `metrics.json`. The `created` and `run_id` fields differ by design, and so does the `run` block (wall times, cache hits).
+- Fresh multi-threaded ICP (`geom.align`) is not bit-exact between runs (~1e-15 m). The refined `T_align` is cached in `cache/align/`, and localisation errors are rounded to 1 µm, so cold and cached runs give the same `metrics` (verified at M2 on val).
 - GPU models run in eval mode with fixed seeds. Their outputs are cached per (scan, frame, model) in `cache/`, so reruns read identical features.
 
 ## 8. Baselines and ablations (each in `oracle` and `perception` mode)
@@ -396,7 +404,7 @@ Expected story:
 |---|---|---|---|
 | M0 ✅ | done 5 Nov | loaders, renderer, `T_align` (+ ICP refinement), overlay script; finalise §2.1 | **Passed** (commit `dd66381`): (1) aligned depth median 1.9–2.2 cm < 3 cm; (2) structure 1.6–3.0 cm < 5 cm (metres); (3) `rigid` → rescan frame, 17/21 < 5 cm; (4) overlays checked; (5) pytest green |
 | M1 ✅ | done 5 Nov | reference graph (GT + geometric relations), `gt_changes`, GT statistics; `lsg splits textures` + texture download started | **Passed** (`lsg m1`, git 5ed8260): val counts 390 / 96 / 224 raw (171 new scored); histogram saved → τ_eval_move = 0.10 m (134 / 370 val moves `dont_care`); rule parent accuracy on reference scans 92.9% dev (n = 28, tuned) / 85.2% val (n = 575; 85.9% without floor parents), type accuracy given parent 100% / 85.3%; `download_textures.txt` lists 72 references, all downloaded |
-| M2 | 11–12 Nov | `obs` interface + `OracleSource`; eval harness (both matching rules, size buckets, localisation error, bootstrap); B0 (oracle) | `lsg eval --method B0 --obs oracle` on `eval_val` writes metrics.json in < 15 min; metric unit tests on a 5-object toy case, including the perception matching rule; **no-leak test** in place (import check: `perception/` imports neither `oracle/` nor `eval/`) |
+| M2 ✅ | done 6 Nov | `obs` interface + `OracleSource`; eval harness (both matching rules, size buckets, localisation error, bootstrap); B0 (oracle) | **Passed** (`lsg eval --split eval_val --obs oracle --method B0`, git 4577e4b): metrics.json written in **69 s** cold (alignment cache empty; 44 s cached; 4 workers), GT support 235 moved / 73 removed / 171 new / 1,401 unchanged / 737 absent-unlisted; `test_metrics.py` 5-object toy case incl. the perception rule; **no-leak test** (`test_no_leak.py`: AST import scan of all method-side packages, fresh-interpreter import closure, rescan-annotation reads in `perception/`); two cold runs + one cached run → identical `metrics`. B0 oracle on val: moved F1 30.0%, removed P 21.2% / R 69.9%, new F1 70.1%, **false-deletion rate 95.0%** |
 | M3 | 13 + 16 Nov | online loop (`change.online`, `visibility`, `Decorrelator`), deferred commitment, snapshots; B1 (oracle) | **Decorrelation unit test**: the same viewpoint repeated 30× gives 1 counted vote. **Synthetic scene**: box removed → free votes → `removed` at end; box occluded / out of frustum → `unknown`. On dev, B1's false-deletion rate < B0's. **Determinism**: two runs → identical `metrics` |
 | M4 | 17–18 Nov | perception end-to-end: residual points, `VoxelEvidence`, clustering, CLIP labelling, `PerceptionSource`; B0 + B1 in perception mode | **Synthetic**: box added → exactly one candidate, centroid error < 5 cm. Overlay PNGs of candidate clusters on 3 dev frames. Candidate recall vs GT new / moved-to objects on dev reported (no threshold yet). No-leak test passes on the real `perception/` code |
 | M5 | 19–20 Nov | association changes (confirmed-in-place skip, soft label term), ICP moved test (B2, both modes); `update_graph` + relation eval | Association accuracy ≥ B0 on dev (both modes); moved F1 ≥ B1 on dev (both modes); relation table (a/b/c) for R0 vs R1 on val; JSON validates against the schema |
