@@ -194,3 +194,21 @@ def test_bootstrap_deterministic_and_brackets_value(gt):
     assert m["value"] == pytest.approx(0.25) and m["n"] == 4
     assert m["ci"][0] <= m["value"] <= m["ci"][1]
     assert 0.0 <= m["ci"][0] and m["ci"][1] <= 1.0
+
+
+def test_vote_evidence_diagnostics(gt):
+    from lsg.change.visibility import NodeVotes
+
+    votes = {
+        "r2": NodeVotes(raw_free=3, free=2),  # removed, with free evidence
+        "r3": NodeVotes(raw_free=2, free=2, seen=4, raw_seen=4),  # unchanged, false free evidence
+        "r4": NodeVotes(seen=1, raw_seen=1, free=1, raw_free=1),  # absent: seen, 1 free < k_free
+    }
+    c = score_pair(good_prediction(), gt, "oracle", CFG, obs_truth=TRUTH, votes=votes)["counts"]
+    assert (c["diag_votes"], c["diag_free_removed"], c["diag_free_unch"]) == (1, 1, 1)
+    assert (c["diag_free_absent"], c["diag_seen_absent"]) == (0, 1)
+    M = aggregate([{"counts": c, "loc_errors": []}], CFG)["metrics"]
+    assert M["free_ev_unchanged"]["value"] == 1.0 and M["free_ev_removed"]["value"] == 1.0
+    assert M["free_ev_absent"]["value"] == 0.0 and M["seen_ev_absent"]["value"] == 1.0
+    c0 = score_pair(good_prediction(), gt, "oracle", CFG, obs_truth=TRUTH)["counts"]
+    assert c0["diag_votes"] == 0 and c0["diag_free_unch"] == 0

@@ -117,7 +117,8 @@ def test_perception_reads_no_rescan_annotations():
 def test_runtime_import_closure_is_clean():
     """Importing the method side must not pull in oracle/eval transitively."""
     code = (
-        "import sys, lsg.perception, lsg.obs, lsg.change.pipeline, lsg.change.baselines, lsg.graph.build;"
+        "import sys, lsg.perception, lsg.obs, lsg.change.pipeline, lsg.change.baselines, lsg.change.online,"
+        " lsg.change.visibility, lsg.graph.build;"
         "bad=[m for m in sys.modules if m.startswith(('lsg.oracle','lsg.eval'))];"
         "print(','.join(bad)); sys.exit(1 if bad else 0)"
     )

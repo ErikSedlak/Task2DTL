@@ -17,10 +17,25 @@ alignment:                 # T_align refinement, label-free ICP (DECISIONS 2026-
   max_delta_t: 0.20        # [m] reject corrections larger than this, keep raw T_align
   max_delta_rot_deg: 5.0
 
-visibility:                # DESIGN §3 (tune) - used from M3 on
-  tau_near: 0.10
-  tau_free: 0.15
-  min_mask_px: 15
+visibility:                # DESIGN §3 frame votes (tune on dev only)
+  tau_near: 0.10           # [m] |d_obs - d_exp| <= tau_near -> present
+  tau_free: 0.15           # [m] d_obs > d_exp + tau_free -> free (seen through)
+  min_mask_px: 15          # node needs >= this many first-hit pixels (else unobserved) and
+                           # >= this many valid ones (else noinfo) to vote (DECISIONS M3)
+  vote_frac: 0.5           # share of valid pixels for a seen / free vote
+  erode_px: 0              # erode each node's first-hit mask by this many px (silhouette guard; M3 knob)
+
+decorrelation:             # DESIGN §3 viewpoint decorrelation (tune)
+  enabled: true            # false = every vote counts (ablation, §8)
+  d_dec: 0.30              # [m] camera centre moved this far since the last counted vote ...
+  theta_dec_deg: 20.0      # [deg] ... or the optical axis turned this much
+
+states:                    # DESIGN §3 state rules (tune)
+  k_free: 2                # counted free votes needed for removed
+  k_seen: 3                # counted seen votes (and no counted free) -> confirmed in place
+
+online:                    # DESIGN §6.7 online loop
+  snapshot_every: 20       # write a tentative snapshot every N processed frames (if enabled)
 
 m0:
   pairs_file: splits/dev_train.txt

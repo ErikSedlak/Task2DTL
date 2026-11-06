@@ -18,10 +18,12 @@ from pathlib import Path
 from typing import Any
 
 from lsg.change.baselines import METHODS
-from lsg.change.pipeline import collect_observations, prepare_pair, select_frames
+from lsg.change.online import run_online
+from lsg.change.pipeline import prepare_pair, select_frames
 from lsg.config import REPO_ROOT, data_root, outputs_root
 from lsg.eval.gt import gt_changes
 from lsg.eval.metrics import aggregate, bucket_names, score_pair
+from lsg.geom.render import Renderer
 from lsg.graph.build import build_reference_graph
 from lsg.io.dssg import load_objects, load_relations
 from lsg.io.scan3r import load_meta, load_scan, open_sequence, read_pairs
@@ -56,6 +58,7 @@ def _eval_group(task: dict[str, Any]) -> list[dict[str, Any]]:
     R = load_scan(root, ref, with_intrinsics=False)
     objs_R, rels_R = load_objects(root, ref), load_relations(root, ref)
     G_ref = build_reference_graph(R, objs_R, rels_R, "gt", cfg)
+    ref_renderer = Renderer(R.vertices, R.faces, R.face_labels)  # shared by the group's rescans
     method = METHODS[task["method"]]
     out = []
     for s in rescans:
@@ -75,12 +78,16 @@ def _eval_group(task: dict[str, Any]) -> list[dict[str, Any]]:
                 if mode != "oracle":  # guarded by check_modes; perception arrives at M4
                     raise NotImplementedError(mode)
                 src = OracleSource(S, objs_S, cfg, seed=task["seed"] + int(cfg["oracle"]["seed"]))
-                obs = collect_observations(seq, src, ctx, info)
+                snap = (Path(task["run_dir"]) / "snapshots" / mode / f"{ref}_{s}"
+                        if task.get("snapshots") and task.get("run_dir") else None)  # fmt: skip
+                online = run_online(ctx, info, seq, src, cfg, snapshot_dir=snap, obs_mode=mode,
+                                    renderer=ref_renderer)  # fmt: skip
+                obs = online.obs
                 tm = src.token_map()
                 truth = {o.token: (tm[o.token], o.label) for o in obs}
                 t_obs = time.time() - t2
-                G_upd = method(G_ref, obs, cfg, rescan_id=s, obs_mode=mode)
-                sc = score_pair(G_upd, gt, mode, cfg, obs_truth=truth)
+                G_upd = method(G_ref, obs, cfg, rescan_id=s, obs_mode=mode, votes=online.votes)
+                sc = score_pair(G_upd, gt, mode, cfg, obs_truth=truth, votes=online.votes)
                 if cfg["eval"].get("save_graphs", True) and task.get("run_dir"):
                     G_upd.save(Path(task["run_dir"]) / "graphs" / mode / f"{ref}_{s}.json")
                 out.append({
@@ -88,7 +95,9 @@ def _eval_group(task: dict[str, Any]) -> list[dict[str, Any]]:
                     "counts": sc["counts"], "loc_errors": sc["loc_errors"],
                     "n_frames": len(fids), "n_obs": len(obs),
                     "run": {"align": ainfo,
-                            "time_s": {"load_gt": t_load, "align": t_align, "obs": t_obs,
+                            "n_snapshots": len(online.snapshots),
+                            "time_s": {"load_gt": t_load, "align": t_align, "online": t_obs,
+                                       **{f"online_{k}": v for k, v in online.time_s.items()},
                                        "total": time.time() - t0}},
                 })  # fmt: skip
         del S
@@ -105,6 +114,7 @@ def run_eval(
     workers: int | None = None,
     run_id: str | None = None,
     split_name: str = "pairs",
+    snapshots: bool = False,
 ) -> dict[str, Any]:
     """Run `method` on `pairs` in each mode, score, write `outputs/<run_id>/metrics.json`.
 
@@ -118,6 +128,7 @@ def run_eval(
         workers: Processes (default `cfg["eval"]["workers"]`; 1 = in-process).
         run_id: Output folder name (default timestamped).
         split_name: Recorded in the metrics.
+        snapshots: Write tentative snapshots to `outputs/<run_id>/snapshots/<mode>/<ref>_<rescan>/`.
 
     Returns:
         The `metrics` block plus `"metrics_path"` and `"wall_time_s"`.
@@ -131,7 +142,8 @@ def run_eval(
     for r, s in pairs:
         groups.setdefault(r, []).append(s)
     tasks = [{"cfg": cfg, "ref": r, "rescans": ss, "modes": list(obs_modes), "method": method,
-              "frac": float(frac), "seed": int(seed), "run_dir": str(run_dir)}
+              "frac": float(frac), "seed": int(seed), "run_dir": str(run_dir),
+              "snapshots": bool(snapshots)}
              for r, ss in sorted(groups.items(), key=lambda kv: -len(kv[1]))]  # fmt: skip
     n_workers = int(workers if workers is not None else cfg["eval"].get("workers", 1))
     results: list[dict[str, Any]] = []
@@ -206,6 +218,8 @@ def format_summary(res: dict[str, Any]) -> str:
         ("moved R by displacement", [f"moved_R_disp{b}" for b in res["disp_buckets"]]),
         ("moved R small / large", ["moved_R_small", "moved_R_large"]),
         ("new R small / large", ["new_R_small", "new_R_large"]),
+        ("free evidence: unch / removed", ["free_ev_unchanged", "free_ev_removed"]),
+        ("absent: free ev. / seen ev.", ["free_ev_absent", "seen_ev_absent"]),
     ]
     for mode in MODES:
         L.append(f"-- {mode} --")

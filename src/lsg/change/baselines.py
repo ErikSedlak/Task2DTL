@@ -1,9 +1,16 @@
-"""Baselines (DESIGN §8). M2: B0 naive.
+"""Baselines (DESIGN §8). M2: B0 naive; M3: B1 + visibility.
 
 B0: nearest same-label observation within `near_dist` -> unchanged; same label farther ->
 moved; unmatched reference node -> removed; unmatched observation -> new. No visibility, no
 confidence. Matching is greedy one-to-one by centroid distance (DECISIONS M2), so one observed
 chair cannot explain two reference chairs.
+
+B1: B0's matching; an unmatched reference node is `removed` only with >= k_free counted
+(decorrelated) free votes from the online loop, else `unknown` (kept). Decided once, at the
+end of the sequence (deferred commitment).
+
+Every method has the signature `method(G_ref, obs, cfg, rescan_id=None, obs_mode=None,
+votes=None) -> G_upd`; `votes` = `OnlineResult.votes` (node id -> `NodeVotes`).
 """
 
 from __future__ import annotations
@@ -14,6 +21,7 @@ from typing import Any
 
 import numpy as np
 
+from lsg.change.visibility import NodeVotes, has_free_evidence
 from lsg.classes import node_level
 from lsg.graph.model import ROOM_ID, Edge, Graph, Node, bbox_dict
 from lsg.obs.base import ObsInstance
@@ -86,30 +94,23 @@ def add_new_nodes(G: Graph, obs: Sequence[ObsInstance], rescan_id: str | None) -
     return added
 
 
-def b0(
+def _match_b0(
     G_ref: Graph,
     obs: Sequence[ObsInstance],
     cfg: Mapping[str, Any],
-    rescan_id: str | None = None,
-    obs_mode: str | None = None,
-) -> Graph:
-    """Naive baseline B0 (DESIGN §8). Returns the updated graph G_upd.
-
-    Args:
-        G_ref: Reference graph (not modified).
-        obs: Observed instances (`ObsSource.finish()`); structure-level ones are ignored.
-        cfg: Full config; uses `cfg["baselines"]["b0"]["near_dist"]`.
-        rescan_id, obs_mode: Written to `meta.scan_obs` / `meta.obs_mode`.
+    rescan_id: str | None,
+    obs_mode: str | None,
+    method: str,
+) -> tuple[Graph, list[Node], set[str], list[ObsInstance]]:
+    """B0 matching shared by B0 and B1.
 
     Returns:
-        G_upd: reference nodes with `state` unchanged / moved / removed (moved nodes carry the
-        observed centroid, a shifted bbox and `T_move` = the translation), `obs_token` of the
-        matched observation, plus one `new` node per unmatched non-structure observation.
-        Relations are not recomputed (M5).
+        (G copy with matched nodes set to unchanged / moved, scored nodes, ids of matched
+        nodes, unmatched non-structure observations). Unmatched nodes are left for the caller.
     """
     near = float(cfg["baselines"]["b0"]["near_dist"])
     G = copy.deepcopy(G_ref)
-    G.meta.update(scan_obs=rescan_id, obs_mode=obs_mode, method="B0", tentative=False, frame_idx=None)
+    G.meta.update(scan_obs=rescan_id, obs_mode=obs_mode, method=method, tentative=False, frame_idx=None)
     nodes = [n for n in G.nodes if n.level in SCORED_LEVELS]
     usable = [o for o in obs if obs_level(o) != "structure" and len(o.points)]
 
@@ -129,11 +130,66 @@ def b0(
         assert n.bbox_3d is not None
         n.bbox_3d = bbox_dict(np.asarray(n.bbox_3d["min"]) + t, np.asarray(n.bbox_3d["max"]) + t)
         n.T_move = translation(t)
+    return G, nodes, matched_nodes, [o for o in usable if o.token not in matched_tokens]
+
+
+def b0(
+    G_ref: Graph,
+    obs: Sequence[ObsInstance],
+    cfg: Mapping[str, Any],
+    rescan_id: str | None = None,
+    obs_mode: str | None = None,
+    votes: Mapping[str, NodeVotes] | None = None,
+) -> Graph:
+    """Naive baseline B0 (DESIGN §8). Returns the updated graph G_upd.
+
+    Args:
+        G_ref: Reference graph (not modified).
+        obs: Observed instances (`ObsSource.finish()`); structure-level ones are ignored.
+        cfg: Full config; uses `cfg["baselines"]["b0"]["near_dist"]`.
+        rescan_id, obs_mode: Written to `meta.scan_obs` / `meta.obs_mode`.
+        votes: Ignored (B0 has no visibility reasoning).
+
+    Returns:
+        G_upd: reference nodes with `state` unchanged / moved / removed (moved nodes carry the
+        observed centroid, a shifted bbox and `T_move` = the translation), `obs_token` of the
+        matched observation, plus one `new` node per unmatched non-structure observation.
+        Relations are not recomputed (M5).
+    """
+    G, nodes, matched, rest = _match_b0(G_ref, obs, cfg, rescan_id, obs_mode, "B0")
     for n in nodes:
-        if n.id not in matched_nodes:
+        if n.id not in matched:
             n.state = "removed"
-    add_new_nodes(G, [o for o in usable if o.token not in matched_tokens], rescan_id)
+    add_new_nodes(G, rest, rescan_id)
     return G
 
 
-METHODS = {"B0": b0}
+def b1(
+    G_ref: Graph,
+    obs: Sequence[ObsInstance],
+    cfg: Mapping[str, Any],
+    rescan_id: str | None = None,
+    obs_mode: str | None = None,
+    votes: Mapping[str, NodeVotes] | None = None,
+) -> Graph:
+    """Baseline B1 = B0 matching + visibility removal rule (DESIGN §8). Returns G_upd.
+
+    Matched nodes are unchanged / moved exactly as in B0. An unmatched node is `removed` only
+    if it has >= `states.k_free` counted free votes, else `unknown` (kept, not deleted).
+    Without `votes` (None) every unmatched node is `unknown`. Unmatched nodes with a raw seen
+    vote get `last_seen` = the rescan.
+    """
+    G, nodes, matched, rest = _match_b0(G_ref, obs, cfg, rescan_id, obs_mode, "B1")
+    vs = votes or {}
+    for n in nodes:
+        if n.id in matched:
+            continue
+        v = vs.get(n.id)
+        n.state = "removed" if has_free_evidence(v, cfg) else "unknown"
+        if v is not None and v.raw_seen > 0:
+            n.last_seen = rescan_id
+    add_new_nodes(G, rest, rescan_id)
+    return G
+
+
+METHODS = {"B0": b0, "B1": b1}

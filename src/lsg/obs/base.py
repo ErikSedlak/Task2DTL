@@ -133,7 +133,8 @@ class ObsSource(Protocol):
         """Called once before the first frame."""
 
     def observe(self, frame: Frame, ref_render: RefRender | None) -> None:
-        """Called per processed frame, in time order. `ref_render` is None until M3."""
+        """Called per processed frame, in time order, with the reference rendered at the
+        frame's aligned pose (`change.online.run_online`; None if called without the loop)."""
 
     def finish(self) -> list[ObsInstance]:
         """Called once after the last frame; returns the observed instances."""

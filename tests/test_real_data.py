@@ -77,3 +77,32 @@ def test_m2_oracle_b0_one_dev_pair_deterministic(real_data_root, tmp_path):
         assert k in s["metrics"]
     assert (tmp_path / "a" / "graphs" / "oracle" / f"{pair[0]}_{pair[1]}.json").is_file()
     assert b["per_pair"][0]["n_obs"] == a["per_pair"][0]["n_obs"] > 5
+
+
+@pytest.mark.slow
+def test_m3_oracle_b1_one_dev_pair(real_data_root, tmp_path):
+    """M3 on one dev pair: online loop + B1, snapshots written, deterministic, and B1 deletes
+    no more absent-unlisted objects than B0."""
+    import copy
+    import json
+
+    from lsg.config import load_config
+    from lsg.eval.harness import run_eval
+    from lsg.graph.model import Graph, validate
+
+    cfg = copy.deepcopy(load_config())
+    cfg["outputs_root"] = str(tmp_path)
+    pair = ("531cff08-0021-28f6-8e08-ba2eeb945e09", "e2847ff7-a506-2b60-869c-2780e8694ae0")
+    r0 = run_eval(cfg, [pair], ["oracle"], "B0", workers=1, run_id="b0")
+    a = run_eval(cfg, [pair], ["oracle"], "B1", workers=1, run_id="a", snapshots=True)
+    run_eval(cfg, [pair], ["oracle"], "B1", workers=1, run_id="b")
+    ma = json.loads((tmp_path / "a" / "metrics.json").read_text())
+    mb = json.loads((tmp_path / "b" / "metrics.json").read_text())
+    assert ma["metrics"] == mb["metrics"]
+    c0, c1 = r0["summary"]["oracle"]["counts"], a["summary"]["oracle"]["counts"]
+    assert c1["diag_votes"] == 1 and c1["absent_del"] <= c0["absent_del"]
+    assert c1["ref_unknown"] > 0 == c0["ref_unknown"]
+    snaps = sorted((tmp_path / "a" / "snapshots" / "oracle" / f"{pair[0]}_{pair[1]}").glob("frame_*.json"))
+    assert len(snaps) >= 2
+    g = Graph.load(snaps[0])
+    assert g.meta["tentative"] is True and validate(g) == []

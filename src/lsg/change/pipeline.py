@@ -1,10 +1,11 @@
-"""Per-pair preparation and the minimal M2 frame loop (method side).
+"""Per-pair preparation: frame selection, G_ref, refined `T_align` (method side).
 
 Uses only allowed inputs (hard rule 1): reference scan + 3DSSG, the rescan's RGB-D frames +
 poses, and 3RScan's raw `T_align`. It never sees the rescan's `ScanMeta` (which carries the
 `rigid/removed/nonrigid` GT lists), only its `T_align` matrix.
 
-M3 replaces `collect_observations` with `change.online.run_online` (render, votes, snapshots).
+The frame loop itself is `change.online.run_online` (M3; it replaced M2's
+`collect_observations`).
 """
 
 from __future__ import annotations
@@ -21,8 +22,8 @@ import numpy as np
 from lsg.config import cache_root
 from lsg.geom.align import refine_from_sequence
 from lsg.graph.build import build_reference_graph
-from lsg.io.scan3r import Scan, SequenceReader, iter_frames
-from lsg.obs.base import ObsInstance, ObsSource, RefContext, SeqInfo
+from lsg.io.scan3r import Scan, SequenceReader
+from lsg.obs.base import RefContext, SeqInfo
 
 
 def select_frames(frame_ids: list[int], stride: int, frac: float = 1.0, seed: int = 0, key: str = "") -> list[int]:
@@ -119,16 +120,3 @@ def prepare_pair(
     ctx = RefContext(ref_scan.scan_id, ref_scan, G_ref, float(G_ref.meta["floor_z"]))
     info = SeqInfo(rescan_id, Path(root), seq.info, T, list(frame_ids))
     return ctx, info, ainfo
-
-
-def collect_observations(
-    seq: SequenceReader, source: ObsSource, ref_ctx: RefContext, seq_info: SeqInfo
-) -> list[ObsInstance]:
-    """Minimal M2 frame loop: `begin`, `observe` per processed frame in time order, `finish`.
-
-    `ref_render` is None here; M3's online loop renders the reference and passes it.
-    """
-    source.begin(ref_ctx, seq_info)
-    for frame in iter_frames(seq, idx=seq_info.frame_ids):
-        source.observe(frame, None)
-    return source.finish()

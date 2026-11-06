@@ -86,7 +86,8 @@ def _cmd_eval(args: argparse.Namespace) -> int:
 
     try:
         res = run_split(load_config(args.config), args.split, obs_modes=_modes(args.obs), method=args.method,
-                        frac=args.frac, seed=args.seed, workers=args.workers, run_id=args.run_id)  # fmt: skip
+                        frac=args.frac, seed=args.seed, workers=args.workers, run_id=args.run_id,
+                        snapshots=args.snapshots)  # fmt: skip
     except NotImplementedError as e:
         print(f"not available yet: {e}")
         return 2
@@ -101,7 +102,8 @@ def _cmd_run(args: argparse.Namespace) -> int:
     try:
         res = run_eval(load_config(args.config), [tuple(args.pair)], obs_modes=_modes(args.obs),
                        method=args.method, frac=args.frac, seed=args.seed, workers=1,
-                       run_id=args.run_id, split_name=f"pair {args.pair[0]} {args.pair[1]}")  # fmt: skip
+                       run_id=args.run_id, split_name=f"pair {args.pair[0]} {args.pair[1]}",
+                       snapshots=not args.no_snapshots)  # fmt: skip
     except NotImplementedError as e:
         print(f"not available yet: {e}")
         return 2
@@ -150,12 +152,14 @@ def main(argv: list[str] | None = None) -> int:
         if name == "eval":
             sp_.add_argument("--split", required=True, help="split name (eval_val, dev_train) or file")
             sp_.add_argument("--workers", type=int, default=None, help="processes (default: config)")
+            sp_.add_argument("--snapshots", action="store_true", help="write tentative snapshots (DESIGN §4)")
             sp_.set_defaults(func=_cmd_eval)
         else:
             sp_.add_argument("--pair", nargs=2, required=True, metavar=("REF", "RESCAN"))
+            sp_.add_argument("--no-snapshots", action="store_true", help="skip tentative snapshots")
             sp_.set_defaults(func=_cmd_run)
         sp_.add_argument("--obs", default="oracle", help="comma list of oracle,perception")
-        sp_.add_argument("--method", default="B0")
+        sp_.add_argument("--method", default="B0", help="B0 | B1")
         sp_.add_argument("--frac", type=float, default=1.0, help="observed fraction (contiguous chunk)")
         sp_.add_argument("--seed", type=int, default=0)
         sp_.add_argument("--config", default=None)

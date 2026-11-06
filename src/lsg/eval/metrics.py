@@ -202,7 +202,8 @@ def count_keys(cfg: Mapping[str, Any]) -> list[str]:
     keys = [f"{k}_{x}" for k in ("moved", "removed", "new") for x in ("tp", "fp", "fn")]
     keys += ["new_ignored", "unch_n", "unch_strict", "unch_kept", "absent_n", "absent_del", "absent_move",
              "ref_n", "ref_unknown", "ref_no_node", "assoc_n", "assoc_strict", "assoc_label",
-             "moved_no_disp"]  # fmt: skip
+             "moved_no_disp", "diag_free_unch", "diag_free_removed", "diag_free_absent",
+             "diag_seen_absent", "diag_votes"]  # fmt: skip
     keys += [f"moved_{x}_d{b}" for b in range(nb) for x in ("n", "tp")]
     keys += [f"{k}_{x}_{s}" for k in ("moved", "new") for s in SIZES for x in ("n", "tp")]
     return keys
@@ -216,6 +217,7 @@ def score_pair(
     obs_truth: Mapping[str, tuple[int, str]] | None = None,
     visible: set[int] | None = None,
     label_nyu: Mapping[str, int] | None = None,
+    votes: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Counts of one pair (module docstring for the definitions).
 
@@ -230,6 +232,10 @@ def score_pair(
         visible: Rescan objectIds visible in the processed frames (GT-matchable for the
             association metric). Default: the ids in `obs_truth`.
         label_nyu: Perception: label -> nyu40 fallback for the matching rule.
+        votes: Online-loop vote tallies `{node id: NodeVotes}` (M3). Gives the method-
+            independent evidence diagnostics: GT-unchanged / removed / absent-unlisted
+            objects with >= `states.k_free` counted free votes, and absent-unlisted objects
+            with any counted seen vote (`diag_votes` = 1 if votes were given).
 
     Returns:
         `{"counts": {name: int}, "loc_errors": [m], "new_match": match_new(...)}`.
@@ -241,6 +247,14 @@ def score_pair(
     c = dict.fromkeys(count_keys(cfg), 0)
     nodes = G_upd.node_map()
     loc: list[float] = []
+    k_free = int(cfg.get("states", {}).get("k_free", 2))
+    vts = votes or {}
+    c["diag_votes"] = int(votes is not None)
+
+    def n_free(oid: int) -> int:
+        """Counted free votes of a reference object (0 without votes)."""
+        v = vts.get(ref_node_id(oid))
+        return int(v.free) if v is not None else 0
 
     for oid, o in sorted(gt.objects.items()):
         n = nodes.get(ref_node_id(oid))
@@ -255,6 +269,9 @@ def score_pair(
             c["absent_n"] += 1
             c["absent_del"] += st == "removed"
             c["absent_move"] += st == "moved"
+            c["diag_free_absent"] += n_free(oid) >= k_free
+            v = vts.get(ref_node_id(oid))
+            c["diag_seen_absent"] += v is not None and v.seen > 0
             continue
         if s == "dont_care":
             continue
@@ -277,12 +294,14 @@ def score_pair(
             c["moved_fp"] += 1
         if s == "removed":
             c["removed_tp" if st == "removed" else "removed_fn"] += 1
+            c["diag_free_removed"] += n_free(oid) >= k_free
         elif st == "removed":
             c["removed_fp"] += 1
         if s == "unchanged":
             c["unch_n"] += 1
             c["unch_strict"] += st == "unchanged"
             c["unch_kept"] += st in ("unchanged", "unknown")
+            c["diag_free_unch"] += n_free(oid) >= k_free
         # association: GT-matchable = moved/unchanged objects visible in the processed frames
         if s in ("moved", "unchanged") and oid in vis:
             c["assoc_n"] += 1
@@ -321,6 +340,11 @@ def metric_defs(cfg: Mapping[str, Any]) -> dict[str, tuple[list[str], list[str],
     d["unknown_rate"] = (["ref_unknown"], ["ref_n"], ["ref_n"])
     d["assoc_acc_strict"] = (["assoc_strict"], ["assoc_n"], ["assoc_n"])
     d["assoc_acc_same_label"] = (["assoc_label"], ["assoc_n"], ["assoc_n"])
+    # online-loop evidence diagnostics (M3; independent of the method's decisions)
+    d["free_ev_unchanged"] = (["diag_free_unch"], ["unch_n"], ["unch_n"])
+    d["free_ev_removed"] = (["diag_free_removed"], ["removed_tp", "removed_fn"], ["removed_tp", "removed_fn"])
+    d["free_ev_absent"] = (["diag_free_absent"], ["absent_n"], ["absent_n"])
+    d["seen_ev_absent"] = (["diag_seen_absent"], ["absent_n"], ["absent_n"])
     for b, name in enumerate(bucket_names(cfg["eval"]["disp_buckets"])):
         d[f"moved_R_disp{name}"] = ([f"moved_tp_d{b}"], [f"moved_n_d{b}"], [f"moved_n_d{b}"])
     for k in ("moved", "new"):

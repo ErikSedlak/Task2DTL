@@ -1,0 +1,199 @@
+"""Frame votes from render-and-compare, and viewpoint decorrelation (DESIGN §3, §6.8).
+
+Per processed frame, the reference mesh is rendered at the rescan camera's aligned pose. For a
+node i, P_i = pixels whose first hit is i. Comparing observed depth d_obs with the rendered
+depth d_exp on P_i gives one frame vote:
+
+- `seen`: >= `vote_frac` of the valid pixels are present (|d_obs - d_exp| <= tau_near);
+- `free`: >= `vote_frac` of the valid pixels are seen through (d_obs > d_exp + tau_free);
+- `noinfo`: anything else (occluded / nearer pixels, mixed evidence, too few valid pixels);
+- `unobserved`: |P_i| < `min_mask_px` (out of frustum or hidden behind other reference geometry).
+
+Only free-space evidence may lower confidence (hard rule 3); occlusion, invalid depth and
+out-of-view are no information. Votes count only after viewpoint decorrelation
+(`Decorrelator`). Method side: no rescan annotations are involved.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Hashable, Iterable, Mapping
+from dataclasses import dataclass
+from typing import Any
+
+import numpy as np
+
+SEEN, FREE, NOINFO, UNOBSERVED = "seen", "free", "noinfo", "unobserved"
+VOTE_KINDS = (SEEN, FREE, NOINFO, UNOBSERVED)
+COUNTED_KINDS = (SEEN, FREE)  # kinds that go through the decorrelator
+
+
+@dataclass(frozen=True)
+class FrameVote:
+    """One node's vote in one frame, with the pixel counts it was decided from."""
+
+    kind: str
+    n_px: int  # |P_i|: first-hit pixels (after erosion)
+    n_valid: int  # of those, valid observed and rendered depth
+    n_present: int
+    n_free: int
+
+
+def erode_labels(labels: np.ndarray, r: int) -> np.ndarray:
+    """Per-label erosion: keep a pixel only if its (2r+1)^2 neighbourhood has the same label.
+
+    Removes silhouette pixels of every node at once (others become 0). Image borders are
+    padded with the nearest value, so they do not erode.
+    """
+    if r <= 0:
+        return labels
+    from scipy.ndimage import maximum_filter, minimum_filter
+
+    size = 2 * int(r) + 1
+    lo = minimum_filter(labels, size=size, mode="nearest")
+    hi = maximum_filter(labels, size=size, mode="nearest")
+    return np.where((lo == labels) & (hi == labels), labels, 0)
+
+
+def frame_votes(
+    node_oids: Iterable[int],
+    ref_depth: np.ndarray,
+    ref_labels: np.ndarray,
+    obs_depth: np.ndarray,
+    cfg: Mapping[str, Any],
+) -> dict[int, FrameVote]:
+    """§3 frame votes of the given reference objects in one frame.
+
+    Args:
+        node_oids: Reference objectIds to vote on (anchor / thing nodes).
+        ref_depth: (H, W) rendered reference depth [m], 0 = no hit.
+        ref_labels: (H, W) reference objectId of the first hit, 0 = none.
+        obs_depth: (H, W) observed sensor depth [m], 0 = invalid.
+        cfg: Full config; uses `cfg["visibility"]`.
+
+    Returns:
+        `{objectId: FrameVote}` for every id in `node_oids` (`unobserved` included).
+    """
+    vc = cfg["visibility"]
+    tau_near, tau_free = float(vc["tau_near"]), float(vc["tau_free"])
+    min_px, frac = int(vc["min_mask_px"]), float(vc["vote_frac"])
+    lab = erode_labels(np.asarray(ref_labels, np.int64), int(vc.get("erode_px", 0)))
+    lab = np.where(lab > 0, lab, 0).ravel()
+    d_exp = np.asarray(ref_depth, np.float64).ravel()
+    d_obs = np.asarray(obs_depth, np.float64).ravel()
+    valid = (d_obs > 0) & (d_exp > 0)
+    diff = d_obs - d_exp
+    present = valid & (np.abs(diff) <= tau_near)
+    free = valid & (diff > tau_free)
+
+    oids = [int(o) for o in node_oids]
+    n = max([int(lab.max()) if lab.size else 0, *oids, 0]) + 1
+    c_px = np.bincount(lab, minlength=n)
+    c_val = np.bincount(lab, weights=valid, minlength=n)
+    c_pre = np.bincount(lab, weights=present, minlength=n)
+    c_fre = np.bincount(lab, weights=free, minlength=n)
+
+    out: dict[int, FrameVote] = {}
+    for o in oids:
+        npx, nv, npre, nfr = int(c_px[o]), int(c_val[o]), int(c_pre[o]), int(c_fre[o])
+        if o <= 0 or npx < min_px:
+            kind = UNOBSERVED
+        elif nv < min_px:
+            kind = NOINFO
+        elif npre >= frac * nv:
+            kind = SEEN
+        elif nfr >= frac * nv:
+            kind = FREE
+        else:
+            kind = NOINFO
+        out[o] = FrameVote(kind, npx, nv, npre, nfr)
+    return out
+
+
+class Decorrelator:
+    """Counts an event only from a new enough viewpoint (DESIGN §3).
+
+    Per key (e.g. `(node_id, "free")` or a voxel), the camera pose of the last *counted* event
+    is stored. A new event counts if the camera centre moved >= `d_dec` or the viewing
+    direction (camera +z axis in the world) turned >= `theta_dec_deg` since then. The first
+    event of a key always counts. Repeating one viewpoint therefore adds one counted event.
+    """
+
+    def __init__(self, d_dec: float, theta_dec_deg: float, enabled: bool = True):
+        """
+        Args:
+            d_dec: Minimum camera-centre distance [m].
+            theta_dec_deg: Minimum viewing-direction change [deg].
+            enabled: False = every event counts (decorrelation-off ablation).
+        """
+        self.d_dec = float(d_dec)
+        self.cos_dec = float(np.cos(np.radians(theta_dec_deg)))
+        self.enabled = bool(enabled)
+        self._last: dict[Hashable, tuple[np.ndarray, np.ndarray]] = {}
+
+    @classmethod
+    def from_config(cls, cfg: Mapping[str, Any]) -> Decorrelator:
+        """Built from `cfg["decorrelation"]`."""
+        d = cfg["decorrelation"]
+        return cls(float(d["d_dec"]), float(d["theta_dec_deg"]), bool(d.get("enabled", True)))
+
+    def counts(self, key: Hashable, cam_pose: np.ndarray) -> bool:
+        """Whether an event of `key` seen from `cam_pose` (4x4 camera->world) counts.
+
+        A counted event becomes the new reference viewpoint of its key.
+        """
+        c = np.asarray(cam_pose[:3, 3], float)
+        z = np.asarray(cam_pose[:3, 2], float)
+        z = z / (np.linalg.norm(z) or 1.0)
+        prev = self._last.get(key)
+        if self.enabled and prev is not None:
+            pc, pz = prev
+            if np.linalg.norm(c - pc) < self.d_dec and float(np.dot(z, pz)) > self.cos_dec:
+                return False
+        self._last[key] = (c, z)
+        return True
+
+
+@dataclass
+class NodeVotes:
+    """Vote tally of one reference node over the processed frames."""
+
+    raw_seen: int = 0
+    raw_free: int = 0
+    noinfo: int = 0
+    seen: int = 0  # counted (decorrelated)
+    free: int = 0  # counted (decorrelated)
+    n_observed_frames: int = 0  # frames with a vote other than unobserved
+    first_free_frame: int | None = None  # first counted free vote
+    last_seen_frame: int | None = None  # last raw seen vote
+
+    def add(self, kind: str, counted: bool, frame_idx: int) -> None:
+        """Record one frame vote (`counted` = passed the decorrelator; seen / free only)."""
+        if kind == UNOBSERVED:
+            return
+        self.n_observed_frames += 1
+        if kind == NOINFO:
+            self.noinfo += 1
+        elif kind == SEEN:
+            self.raw_seen += 1
+            self.seen += bool(counted)
+            self.last_seen_frame = int(frame_idx)
+        elif kind == FREE:
+            self.raw_free += 1
+            if counted:
+                self.free += 1
+                if self.first_free_frame is None:
+                    self.first_free_frame = int(frame_idx)
+
+    def to_json(self) -> dict[str, Any]:
+        """Plain dict (for diagnostics)."""
+        return dict(self.__dict__)
+
+
+def has_free_evidence(v: NodeVotes | None, cfg: Mapping[str, Any]) -> bool:
+    """>= k_free counted free votes (§3 removed / unknown split)."""
+    return v is not None and v.free >= int(cfg["states"]["k_free"])
+
+
+def confirmed_in_place(v: NodeVotes | None, cfg: Mapping[str, Any]) -> bool:
+    """§3: >= k_seen counted seen votes and no counted free vote."""
+    return v is not None and v.seen >= int(cfg["states"]["k_seen"]) and v.free == 0
