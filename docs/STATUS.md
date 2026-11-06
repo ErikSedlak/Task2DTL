@@ -157,9 +157,8 @@ DESIGN.md (the spec) and DECISIONS.md (the dated log, with the reasons) stay the
 
 ### M7 — ablations
 - `--frac/--seed` already work (`select_frames`, a contiguous chunk with its start drawn from `[seed, crc32(rescan)]`). The alignment cache key includes the frame ids, so each chunk gets its own ICP pre-pass, as §7.3 requires.
-- Relchange set (`eval_relchange_train.txt`) needs the **tier-2 download** (63 scans: semseg, PLY, sequence; ≈ 3 GB; `splits/download_tier2.txt`). **Not done yet.**
-  - Its 23 references already have their textures, but no meshes or sequences.
-  - Start it early: any session can run it in the background with the command in DESIGN §2.2.
+- **Tier-2 download done (2026-11-06):** all 63 relchange scans (23 references + 40 rescans) have semseg, PLY and `sequence.zip`. That is 189 files, 4.0 GB, downloaded in 16 min. Every zip passes `testzip`, and every scan loads with `load_scan` + `open_sequence`. Textures for the 23 references were already there.
+  - `configs/default.yaml` `m1.meta_only_splits` still lists the relchange split as metadata-only. Now that meshes exist, it could get the full GT pass (`lsg m1`). Optional; the relation eval at M5/M7 does not depend on it.
 
 ### M8 — write-up
 - State in the limitations: **12 door swings in val are articulation changes, out of scope** (not scored; doors are structure, §3).

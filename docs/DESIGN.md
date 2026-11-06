@@ -92,7 +92,7 @@ Most-moved classes: chair 80, pillow 31, armchair 23, table 22, ottoman 20, coff
 | `eval_val.txt` | all 110 validation pairs (47 refs) with 3DSSG relations | main evaluation, change types |
 | `eval_relchange_train.txt` | 40 train pairs with the most parent-changed moved things (73 events) | relation-update evaluation only; never tuned on |
 | `download_tier1.txt` | 162 scan IDs (dev + val) | downloaded (M0) |
-| `download_tier2.txt` | 63 more scan IDs (relchange set) | download in week 1–2 |
+| `download_tier2.txt` | 63 more scan IDs (relchange set) | downloaded 2026-11-06 (189 files, 4.0 GB) |
 | `download_textures.txt` | the **72 reference scans** of the three pair lists above (written by `lsg splits textures`, M1) | texture files for the appearance residual (§3, §6.6); downloaded at M1 (216 files, 1.1 GB) |
 
 **Class priors (§6.10)** and the **CLIP vocabulary (§6.6)** come from train-split metadata (3RScan.json + 3DSSG objects), **excluding** the references in `eval_relchange_train.txt` and `dev_train.txt`. This needs no downloads.
@@ -443,7 +443,7 @@ The depth-only vs depth + appearance ablation is required by the brief and is no
 7. **Texture rendering**: OBJ/PLY correspondence unverified; texture seams and exposure differences between visits. Mitigation: check at M6, exposure-robust features, compare only where depth agrees, ≥ 3 agreeing views.
 8. **Compute**: GTX 1650 with 4 GB. CLIP ViT-B/32 and DINOv2 ViT-S/14 fit, but per-frame patch features for 110 pairs take hours. Mitigation: features only on the processed (strided) frames, a feature cache in `cache/`, appearance only in FULL and its ablation.
 9. **Schedule**: v2 adds perception, online processing and appearance to a fixed 27 Nov end. Mitigation: cut order (§9); M0's early finish is the buffer.
-10. **Download time and disk**: tier 1 done; tier 2 ≈ 3 GB; textures ≈ 1.2 GB.
+10. **Download time and disk**: tier 1 done; tier 2 done (4.0 GB, 16 min); textures done (1.1 GB).
 
 ## 12. Open questions for the organisers (non-blocking)
 
