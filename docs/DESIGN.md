@@ -418,6 +418,7 @@ The depth-only vs depth + appearance ablation is required by the brief and is no
 - a real full-frame detector (Grounding DINO + SAM 2 over whole frames). Perception candidates come from residuals; Grounding DINO is at most an optional alternative *labeller* for candidate crops;
 - estimating poses or alignment beyond the ICP refinement of `T_align`;
 - rotation-only moved detection;
+- articulation changes such as door swings (12 moved doors in val; doors are structure, so they are not scored; DECISIONS 2026-11-06);
 - multi-visit chains (ref → rescan₁ → rescan₂ …);
 - multi-room hierarchy / `place` level;
 - LLM queries;

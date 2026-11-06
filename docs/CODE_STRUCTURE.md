@@ -13,7 +13,7 @@ M0 built the foundation: reading the data, drawing ("rendering") a scanned room 
 ```
 Task2/
 ├── configs/default.yaml     all tunable numbers (thresholds, ICP, relation rules, eval definitions, gates)
-├── docs/                    DESIGN (spec), DECISIONS (log), AI_USAGE, this file
+├── docs/                    DESIGN (spec), DECISIONS (log), STATUS (finished / open items), AI_USAGE, this file
 ├── splits/                  lists of scan ids / (reference, rescan) pairs to use
 ├── src/lsg/                 the Python package (run as `uv run lsg …`)
 │   ├── cli.py               the `lsg` command

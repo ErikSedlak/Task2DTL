@@ -3,6 +3,7 @@
 Source of truth: `docs/DESIGN.md` (spec), `docs/DECISIONS.md` (dated log). If code and spec disagree, stop and ask; don't silently change the spec. Log every non-trivial choice in `DECISIONS.md` (date, decision, why, alternatives).
 
 ## Workflow
+- Each milestone runs in a fresh chat: **start by reading `docs/STATUS.md`** (what is finished, open items per milestone). **Before finishing**, update it: finished items, new items deferred to later milestones.
 - Work **one milestone at a time** (M0…M8 in DESIGN §9). A milestone is done only when its acceptance check passes; paste the check's output into the PR/commit message.
 - Small commits. No new dependencies without a line in DECISIONS.md.
 - Log AI use and compute cost per milestone in `docs/AI_USAGE.md` (what was generated, what was hand-checked, time on GPU).
