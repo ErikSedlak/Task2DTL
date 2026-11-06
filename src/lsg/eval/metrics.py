@@ -271,7 +271,8 @@ def score_pair(
                 c[f"moved_n_d{b}"] += 1
                 c[f"moved_tp_d{b}"] += hit
             if hit and o.centroid_new is not None and n.centroid is not None:
-                loc.append(float(np.linalg.norm(np.asarray(n.centroid, float) - o.centroid_new)))
+                # rounded to 1 µm: fresh multi-threaded ICP differs at ~1e-15 m between runs (§7.5)
+                loc.append(round(float(np.linalg.norm(np.asarray(n.centroid, float) - o.centroid_new)), 6))
         elif st == "moved":
             c["moved_fp"] += 1
         if s == "removed":
