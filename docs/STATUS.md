@@ -7,13 +7,51 @@ Handoff file between milestone sessions: each milestone is done in a fresh chat.
 DESIGN.md (the spec) and DECISIONS.md (the dated log, with the reasons) stay the source of truth. This file is the to-do view on top of them.
 
 ## Current state (2026-11-06)
-- **M0 ✅** (commit `dd66381`), **M1 ✅** (commits `5ed8260` code, `b025428` docs) and **M2 ✅** (commits `49b9b61` + `4577e4b` code, then the docs commit) are done.
-- **Next: M3** — online loop (`change.online`, `visibility`, `Decorrelator`), deferred commitment, snapshots, B1 (oracle).
+- **M0 ✅** (commit `dd66381`), **M1 ✅** (commits `5ed8260` code, `b025428` docs), **M2 ✅** (commits `49b9b61` + `4577e4b` code, then the docs commit) and **M3 ✅** (commit `6e71d0c` code, then the docs commit) are done.
+- **Next: M4** — perception end-to-end (`perception/`: residual points, `VoxelEvidence`, clustering, CLIP labelling, `PerceptionSource`); B0 + B1 in perception mode.
 - All commits are on local `main`. Not pushed as of 2026-11-06.
 
 ---
 
 ## Finished
+
+### M3 (2026-11-06), acceptance passed — `uv run lsg eval --split dev_train --obs oracle --method B1` → `outputs/m3_dev_final/metrics.json`; val report `outputs/m3_final/metrics.json` (git `6e71d0c`, clean)
+
+**Acceptance results:**
+
+| Check | Result |
+|---|---|
+| Decorrelation unit test | `test_visibility.py::test_same_viewpoint_30x_counts_once` (30 identical poses → 1 counted); end-to-end in `test_online.py` (30 raw free → 1 counted → `unknown`; decorrelation off → `removed`) |
+| Synthetic scene | `test_online.py`: box removed → ≥ 2 counted free votes → B1 `removed` at the end; removed but occluded → `unknown`; out of frustum → `unknown` (B0: `removed` in all three) |
+| Dev: B1 false-deletion < B0 | **16.7%** (2 / 12) vs 100% (12 / 12) |
+| Determinism | two dev B1 runs (`m3_dev_B1`, `m3_dev_B1b`) → identical `metrics` |
+
+**B1 vs B0, oracle, val** (110 pairs, reported once, nothing tuned):
+
+| | removed P / R | false-deletion | unchanged acc / kept | unknown rate |
+|---|---|---|---|---|
+| B0 (`m2_final`) | 21.2 / 69.9 | 95.0 | 80.9 / 80.9 | 0 |
+| **B1** (`m3_final`) | **66.0 / 45.2** | **9.5** (n = 737) | 80.9 / **92.9** | 31.6 |
+
+- Moved, new and association are unchanged from B0, because B1 uses the same matching.
+- Evidence diagnostics on val: 60.3% of GT-removed objects get ≥ 2 counted free votes. So do 6.3% of GT-unchanged and 10.3% of absent-unlisted objects. 20.1% of absent-unlisted objects get a counted *seen* vote, i.e. they are seen in place: annotation gaps.
+- ICP-rejected pairs (5): free evidence on unchanged 6.7% vs 6.3% elsewhere, so no fake free votes (open item closed).
+- Dev diagnostic (DECISIONS M3): 4 / 34 unchanged objects with free evidence; erosion 0 / 1 / 2 px changes nothing, so `erode_px` stays 0. The 4 are a probable unlisted pillow move (§2.1) and three mixed-evidence "item"s.
+
+**Code:**
+- `change/visibility.py`: `frame_votes`, `FrameVote`, `erode_labels`, `Decorrelator`, `NodeVotes`, `has_free_evidence`, `confirmed_in_place`.
+- `change/online.py`: `run_online` → `OnlineResult` (obs, votes, snapshots, timings); `tentative_state` / `tentative_graph`.
+- `change/baselines.py`: `b1`; shared `_match_b0`; every method takes `votes=`; `METHODS = {"B0", "B1"}`.
+- `change/pipeline.py`: `collect_observations` removed.
+- `eval/harness.py`: runs `run_online` with one reference `Renderer` per group; snapshots behind `snapshots=`; timings under `run.per_pair[].time_s.online_*`.
+- `eval/metrics.py`: `score_pair(votes=)` → `diag_*` counts; metrics `free_ev_unchanged / _removed / _absent`, `seen_ev_absent`.
+- CLI: `lsg eval --snapshots`, `lsg run --no-snapshots`, `--method B0|B1`.
+
+**Config:** `visibility.vote_frac`, `visibility.erode_px`; new blocks `decorrelation`, `states`, `online`.
+
+**Tests:** 100 fast (≈ 8 s) + 4 slow (≈ 2 min) pass. New: `test_visibility.py`, `test_online.py`, `test_b1.py`, a diagnostics test in `test_metrics.py`, the slow `test_m3_oracle_b1_one_dev_pair`. `test_no_leak.py` also imports `change.online` / `change.visibility`.
+
+**Docs:** DECISIONS "2026-11-06 — M3"; DESIGN §3 / §4 / §6.4 / §6.7 / §6.8 / CLI / §9; CODE_STRUCTURE; AI_USAGE.
 
 ### M2 (2026-11-06), acceptance passed — `uv run lsg eval --split eval_val --obs oracle --method B0` → `outputs/m2_final/metrics.json` (git `4577e4b`, clean)
 
@@ -106,17 +144,11 @@ DESIGN.md (the spec) and DECISIONS.md (the dated log, with the reasons) stay the
 
 ## Open items by milestone
 
-### M3 — online loop, B1
-- **Plug into M2:**
-  - `change.online.run_online` replaces `change.pipeline.collect_observations`. Pass a real `obs.RefRender` to `ObsSource.observe` (it is `None` now).
-  - Reuse `select_frames`, `prepare_pair` and the alignment cache. Add `"B1"` to `change.baselines.METHODS`; the harness picks methods from there.
-  - B1 reuses B0's matching (`greedy_label_match`).
-- **B1 acceptance baseline:** "B1 false-deletion rate < B0's on dev". B0 dev = **100%** (12 / 12), val = 95.0%.
-- **Determinism:** keep floats that derive from ICP out of the `metrics` block, or round them (see the localisation-error rounding, DECISIONS M2). Reruns use the cached `T_align`.
-- **ICP rejections:** refinement was rejected on 5 / 110 val pairs, which keep the raw `T_align` (2.9–3.8 cm residual). Check whether these pairs produce fake `free` votes; the per-pair `align` info is in the `run` block of metrics.json.
-- `RefContext.floor_z` (= `graph.relations.estimate_floor_z`) is available wherever heights are needed (CLAUDE.md: heights are relative to the floor).
-
 ### M4 — perception
+- **Plug into M3:**
+  - `PerceptionSource.observe(frame, ref_render)` gets the reference render (`RefRender.depth`, `.labels`) from `run_online`. No second render is needed for the residual (§3 step 1).
+  - The harness runs `run_online` once per mode. Votes do not depend on the mode, so for `--obs perception,oracle` one loop could feed both sources; optional speed-up.
+  - The voxel multi-view filter (§3 step 4) can reuse `change.visibility.Decorrelator` with voxel keys.
 - **Door swings → false "new" candidates.**
   - In val, 12 doors are in `rigid`. Nearly all rotate 4°–120° about the vertical axis (hinge swings).
   - Structure is rendered from the *reference* mesh. An opened door therefore leaves "nearer" residuals, and the §3 step-2 structure filter (walls / ceiling / floor only) does not remove them.
@@ -131,6 +163,8 @@ DESIGN.md (the spec) and DECISIONS.md (the dated log, with the reasons) stay the
 - `dssg.label_to_nyu40` uses **all** of `objects.json`. That is fine for eval's class mapping. The method's CLIP vocabulary must still come from train metadata only (§2.3).
 
 ### M5 — association, moved test, update_graph, relation eval
+- **Confirmed-in-place skip (B2)** uses `change.visibility.confirmed_in_place` (≥ k_seen counted seen, no counted free). On dev, 23 / 34 unchanged objects are confirmed and 4 / 34 have ≥ 2 counted free votes (DECISIONS M3). Check that B2 does not turn these into `removed` when their match fails.
+- B1's B0 matching still pairs unseen reference nodes with far same-label observations (false-move rate 2.4% on val). B2's Hungarian with a position term should fix this.
 - **Decide the §7.2(c) definition** ("things whose GT parent changed"). Breakdown (DESIGN §2.2, DECISIONS M1):
 
   | Split | Gained | Lost | Swapped | Structure-only |
@@ -152,10 +186,13 @@ DESIGN.md (the spec) and DECISIONS.md (the dated log, with the reasons) stay the
 - `next_to` rule (AABB gap ≤ 0.15 m) is provisional and exported only.
 
 ### M6 — confidence, texture rendering, appearance
+- **Thin / soft removed objects get `seen`, not `free`.** Example: dev pillow r50 on e2847ff7 (GT removed): 23 counted seen, 0 free. On val, 39.7% of GT-removed objects have < 2 counted free votes. Some are unseen; some are where depth cannot tell, which is the case the appearance residual targets. Measure with `free_ev_removed` before and after.
+- Log-odds confidence (§6.11) builds on `NodeVotes` counted seen / free. The per-visit clip and class priors are still to do. `Node.confidence` is still None.
 - OBJ ↔ PLY vertex/face correspondence is still **unverified** (DESIGN §2.1). Check it before using textures.
 - Textures are in `data/<ref>/mesh.refined.v2.obj|.mtl|_0.png` for all 72 references.
 
 ### M7 — ablations
+- Switches already in place: `decorrelation.enabled` (on / off), `visibility.tau_free` (sweep), `visibility.erode_px`. **Immediate vs deferred commitment** is not implemented yet. Idea: a method variant that commits `removed` at the first frame with ≥ k_free counted free votes, and keeps it even if the node is matched later.
 - `--frac/--seed` already work (`select_frames`, a contiguous chunk with its start drawn from `[seed, crc32(rescan)]`). The alignment cache key includes the frame ids, so each chunk gets its own ICP pre-pass, as §7.3 requires.
 - **Tier-2 download done (2026-11-06):** all 63 relchange scans (23 references + 40 rescans) have semseg, PLY and `sequence.zip`. That is 189 files, 4.0 GB, downloaded in 16 min. Every zip passes `testzip`, and every scan loads with `load_scan` + `open_sequence`. Textures for the 23 references were already there.
   - `configs/default.yaml` `m1.meta_only_splits` still lists the relchange split as metadata-only. Now that meshes exist, it could get the full GT pass (`lsg m1`). Optional; the relation eval at M5/M7 does not depend on it.
@@ -176,5 +213,5 @@ DESIGN.md (the spec) and DECISIONS.md (the dated log, with the reasons) stay the
   3. *optionally*, after M7, add a separate "door open/closed changed" diagnostic on door nodes (n = 12 in val), not mixed into moved F1.
 
   Erik has not decided on point 3 yet.
-- **AI_USAGE.md:** "Erik: (fill in)" is still open for the M0, M1 and M2 rows.
+- **AI_USAGE.md:** "Erik: (fill in)" is still open for the M0, M1, M2 and M3 rows.
 - **DECISIONS 2026-11-05 "Milestones re-scoped to M1–M8"** is still marked "provisional — Erik to confirm".

@@ -128,7 +128,7 @@ while read id; do for t in mesh.refined.v2.obj mesh.refined.mtl mesh.refined_0.p
   - `present`: |d_obs − d_exp| ≤ τ_near = 0.10 m *(tune)*;
   - `free` (seen through): d_obs > d_exp + τ_free = 0.15 m *(tune; same-scan false rate 0.4% of pixels)*;
   - `occluded` / `nearer`: d_obs < d_exp − τ_near. On a node's pixels this is occlusion (no information). Anywhere, it is residual evidence for something new in front (§ Candidate below, with τ_new).
-- **Frame vote** for node i. P_i,f = pixels where i is the first hit. A vote is cast only if |P_i,f| ≥ 15 px *(tune)*:
+- **Frame vote** for node i. P_i,f = pixels where i is the first hit. A vote is cast only if |P_i,f| ≥ 15 px *(tune)*, and only from ≥ 15 pixels with valid observed depth (fewer → `no-info`; M3):
   - `seen` if present ≥ 50% of valid pixels;
   - `free` if free ≥ 50% of valid pixels;
   - `no-info` otherwise;
@@ -184,7 +184,7 @@ while read id; do for t in mesh.refined.v2.obj mesh.refined.mtl mesh.refined_0.p
 - `obs_token`:
   - oracle mode: the shuffled oracle instance id, written only for evaluation mapping and never read by the method;
   - perception mode: the candidate id `c<k>`.
-- **Snapshots** are written every N frames *(config)* to `outputs/<run_id>/snapshots/<ref>_<rescan>/frame_XXXXXX.json`. They use the same schema with `meta.frame_idx` set and `meta.tentative: true`.
+- **Snapshots** are written every N processed frames *(config `online.snapshot_every`)* and after the last frame, to `outputs/<run_id>/snapshots/<mode>/<ref>_<rescan>/frame_XXXXXX.json` (M3). They use the same schema with `meta.frame_idx` set and `meta.tentative: true`. Tentative states are vote-only (`removed` with ≥ k_free counted free votes, `unchanged` if confirmed in place, else `unknown`), because association is deferred to the end.
 
 ## 5. Ground truth (only in `src/lsg/eval/`)
 
@@ -220,7 +220,7 @@ Per pair (ref R, rescan S). O_R and O_S are the objectIds in their semseg files.
 
 ## 6. Modules and interfaces (inputs → outputs; no implementation here)
 
-`src/lsg/` — every function is pure where possible and works in the reference frame. ✅ = exists (M0–M2).
+`src/lsg/` — every function is pure where possible and works in the reference frame. ✅ = exists (M0–M3).
 
 1. `io` ✅
    - `scan3r.load_meta(root) -> Meta` (3RScan.json, column-major transforms) ✅;
@@ -252,7 +252,7 @@ Per pair (ref R, rescan S). O_R and O_S are the objectIds in their semseg files.
      - `observe(frame, ref_render) -> None`, called per processed frame, in time order;
      - `finish() -> list[ObsInstance]`.
    - Implementations: `oracle.OracleSource` ✅, `perception.PerceptionSource` (M4). The change logic depends only on this interface.
-   - Also `RefContext` (reference scan, G_ref, floor_z) and `SeqInfo` (rescan id, intrinsics, **refined** `T_align`, processed frame ids). `ref_render` is None until M3.
+   - Also `RefContext` (reference scan, G_ref, floor_z) and `SeqInfo` (rescan id, intrinsics, **refined** `T_align`, processed frame ids). `ref_render` (`RefRender`: reference depth + objectId labels at the frame's aligned pose) is passed by `run_online` from M3 on.
 5. `oracle` (upper bound) ✅ (M2)
    - `OracleSource`: renders the rescan's own labelled mesh at each frame, collecting per-instance masks, points (vertices of hit triangles, *these frames only*, mapped with the refined `T_align`) and crops (optional, off by default). A pixel counts only where the sensor depth is valid. IDs are shuffled with a seeded permutation; `token_map()` is read only by `eval/`.
    - It is the only reader of rescan labels outside `eval/`.
@@ -269,19 +269,20 @@ Per pair (ref R, rescan S). O_R and O_S are the objectIds in their semseg files.
      - `.topk(crops) -> label_topk` from the K = 5 largest projected upright crops;
      - vocabulary = reference-graph labels ∪ the most frequent 3RScan thing/anchor labels (train metadata, §2.3).
    - `source.PerceptionSource`: assembles the above into `ObsInstance`s (points, masks by projecting the cluster, crops, `label_topk`).
-7. `change.pipeline` ✅ (M2) and `change.online` (M3)
-   - `pipeline.select_frames` (stride + §7.3 chunk); `pipeline.prepare_pair` (G_ref + cached refined `T_align`; it gets only the raw `T_align` matrix, never the rescan's change lists); `pipeline.collect_observations` (the M2 frame loop, replaced by `run_online` at M3).
-   - `baselines.b0` ✅ (§8; greedy one-to-one same-label matching).
-   - `run_online(G_ref, ref_ctx, seq, obs_source, cfg, frame_ids) -> OnlineResult` (votes, obs instances, snapshots). Per processed frame, in time order:
+7. `change.pipeline` ✅ (M2) and `change.online` ✅ (M3)
+   - `pipeline.select_frames` (stride + §7.3 chunk); `pipeline.prepare_pair` (G_ref + cached refined `T_align`; it gets only the raw `T_align` matrix, never the rescan's change lists); (M2's `collect_observations` was replaced by `run_online` at M3).
+   - `baselines.b0` ✅ (§8; greedy one-to-one same-label matching); `baselines.b1` ✅ (M3; B0 matching + the §3 removed / unknown rule from counted free votes). Every method is `method(G_ref, obs, cfg, rescan_id, obs_mode, votes=)`.
+   - `run_online(ref_ctx, seq_info, seq, obs_source, cfg, snapshot_dir=None, obs_mode=None, renderer=None) -> OnlineResult` ✅ (obs instances, per-node `NodeVotes`, snapshot paths, timings). G_ref comes from `ref_ctx.graph` and the frame ids from `seq_info` (M3). Per processed frame, in time order:
      1. render the reference (depth, labels, and colour if appearance is on);
      2. compute frame votes (`change.visibility`);
      3. apply decorrelation and update confidence (`change.confidence`);
      4. call `obs_source.observe` (residual accumulation in perception mode);
      5. write a snapshot every N frames.
    - At the end it calls `obs_source.finish()`, then association, then classification. States become final only then.
-8. `change.visibility`
-   - `frame_votes(nodes, render, frame, cfg) -> dict[node_id, Vote]` (one frame, §3 rules; `unobserved` included).
-   - `Decorrelator(d_dec, θ_dec)`: per key (node, vote kind) or voxel, the pose of the last counted event; `.counts(key, cam_pose) -> bool`.
+8. `change.visibility` ✅ (M3)
+   - `frame_votes(node_oids, ref_depth, ref_labels, obs_depth, cfg) -> dict[objectId, FrameVote]` (one frame, §3 rules; `unobserved` included). A vote needs ≥ `min_mask_px` first-hit pixels (else `unobserved`) **and** ≥ `min_mask_px` valid ones (else `noinfo`). Optional per-label mask erosion `visibility.erode_px` (default 0).
+   - `Decorrelator(d_dec, θ_dec, enabled)`: per key (node, vote kind) or voxel, the pose of the last counted event; `.counts(key, cam_pose) -> bool` (centre moved ≥ d_dec or optical axis turned ≥ θ_dec).
+   - `NodeVotes` (raw and counted seen / free, noinfo, first free / last seen frame); `has_free_evidence`, `confirmed_in_place`.
 9. `change.association`
    - `associate(ref_nodes, obs_instances, cfg, mode) -> (pairs, unmatched_ref, unmatched_obs)`.
    - Only reference nodes **not confirmed in place** take part.
@@ -315,8 +316,8 @@ Per pair (ref R, rescan S). O_R and O_S are the objectIds in their semseg files.
     - `topdown_png(G_ref, G_upd)`: static before/after figure for slides/report.
 
 CLI:
-- `uv run lsg run --pair R S --obs perception|oracle --method full --frac 1.0 --seed 0` ✅ (oracle, B0);
-- `uv run lsg eval --split eval_val --obs perception,oracle --method … [--workers N]` ✅ (oracle, B0);
+- `uv run lsg run --pair R S --obs perception|oracle --method full --frac 1.0 --seed 0 [--no-snapshots]` ✅ (oracle, B0 / B1; writes snapshots);
+- `uv run lsg eval --split eval_val --obs perception,oracle --method … [--workers N] [--snapshots]` ✅ (oracle, B0 / B1);
 - `uv run lsg ablate …`;
 - `uv run lsg splits textures` ✅;
 - `uv run lsg graph --scan R --mode gt|geometric [--out f.json]` ✅;
@@ -405,7 +406,7 @@ Expected story:
 | M0 ✅ | done 5 Nov | loaders, renderer, `T_align` (+ ICP refinement), overlay script; finalise §2.1 | **Passed** (commit `dd66381`): (1) aligned depth median 1.9–2.2 cm < 3 cm; (2) structure 1.6–3.0 cm < 5 cm (metres); (3) `rigid` → rescan frame, 17/21 < 5 cm; (4) overlays checked; (5) pytest green |
 | M1 ✅ | done 5 Nov | reference graph (GT + geometric relations), `gt_changes`, GT statistics; `lsg splits textures` + texture download started | **Passed** (`lsg m1`, git 5ed8260): val counts 390 / 96 / 224 raw (171 new scored); histogram saved → τ_eval_move = 0.10 m (134 / 370 val moves `dont_care`); rule parent accuracy on reference scans 92.9% dev (n = 28, tuned) / 85.2% val (n = 575; 85.9% without floor parents), type accuracy given parent 100% / 85.3%; `download_textures.txt` lists 72 references, all downloaded |
 | M2 ✅ | done 6 Nov | `obs` interface + `OracleSource`; eval harness (both matching rules, size buckets, localisation error, bootstrap); B0 (oracle) | **Passed** (`lsg eval --split eval_val --obs oracle --method B0`, git 4577e4b): metrics.json written in **69 s** cold (alignment cache empty; 44 s cached; 4 workers), GT support 235 moved / 73 removed / 171 new / 1,401 unchanged / 737 absent-unlisted; `test_metrics.py` 5-object toy case incl. the perception rule; **no-leak test** (`test_no_leak.py`: AST import scan of all method-side packages, fresh-interpreter import closure, rescan-annotation reads in `perception/`); two cold runs + one cached run → identical `metrics`. B0 oracle on val: moved F1 30.0%, removed P 21.2% / R 69.9%, new F1 70.1%, **false-deletion rate 95.0%** |
-| M3 | 13 + 16 Nov | online loop (`change.online`, `visibility`, `Decorrelator`), deferred commitment, snapshots; B1 (oracle) | **Decorrelation unit test**: the same viewpoint repeated 30× gives 1 counted vote. **Synthetic scene**: box removed → free votes → `removed` at end; box occluded / out of frustum → `unknown`. On dev, B1's false-deletion rate < B0's. **Determinism**: two runs → identical `metrics` |
+| M3 ✅ | done 6 Nov | online loop (`change.online`, `visibility`, `Decorrelator`), deferred commitment, snapshots; B1 (oracle) | **Passed** (git 6e71d0c): **decorrelation unit test** (`test_visibility.py`: the same viewpoint 30× → 1 counted vote; also end-to-end in `test_online.py`: 30 raw free → 1 counted → `unknown`); **synthetic scene** (`test_online.py`: box removed → ≥ 2 counted free votes → `removed` at the end; occluded / out of frustum → `unknown`, B0 → `removed`); **dev**: B1 false-deletion rate **16.7%** (2 / 12) < B0's 100%; **determinism**: two dev runs → identical `metrics`. B1 oracle on val (reported once): false-deletion rate **9.5%** (B0 95.0%), removed P 66.0% / R 45.2%, unchanged kept 92.9%, unknown rate 31.6% |
 | M4 | 17–18 Nov | perception end-to-end: residual points, `VoxelEvidence`, clustering, CLIP labelling, `PerceptionSource`; B0 + B1 in perception mode | **Synthetic**: box added → exactly one candidate, centroid error < 5 cm. Overlay PNGs of candidate clusters on 3 dev frames. Candidate recall vs GT new / moved-to objects on dev reported (no threshold yet). No-leak test passes on the real `perception/` code |
 | M5 | 19–20 Nov | association changes (confirmed-in-place skip, soft label term), ICP moved test (B2, both modes); `update_graph` + relation eval | Association accuracy ≥ B0 on dev (both modes); moved F1 ≥ B1 on dev (both modes); relation table (a/b/c) for R0 vs R1 on val; JSON validates against the schema |
 | M6 | 23–24 Nov | confidence + priors (FULL); texture rendering + appearance residual (DINOv2 patch features; thin-node free-like votes; thin-object voxels) | **Texture render check**: on a reference scan's *own* sequence, rendered vs observed colour overlay for 3 frames visibly aligned; median patch-feature similarity reported; OBJ/PLY correspondence checked (§2.1). **Synthetic**: a 2 cm flat textured "book" removed from a table → missed by depth-only, caught by depth + appearance |
