@@ -120,6 +120,7 @@ def refine_from_sequence(
     ref_faces: np.ndarray,
     T_init: np.ndarray,
     cfg: dict[str, Any],
+    frame_ids: list[int] | None = None,
 ) -> tuple[np.ndarray, dict[str, Any]]:
     """One-call alignment refinement for a rescan: build its point cloud, then run ICP.
 
@@ -129,10 +130,12 @@ def refine_from_sequence(
         T_init: 3RScan's `T_align` for this rescan.
         cfg: The `alignment` config block (uses `frame_step`, `voxel`, `max_depth` and the
             ICP settings).
+        frame_ids: Frames of the processed chunk (§7.3: the pre-pass sees only the chunk);
+            every `frame_step`-th of them builds the cloud. Default: the whole sequence.
 
     Returns:
         Same as `refine_alignment`.
     """
-    ids = seq.frame_ids[:: int(cfg["frame_step"])]
+    ids = list(seq.frame_ids if frame_ids is None else frame_ids)[:: int(cfg["frame_step"])]
     pts = depth_points(seq, ids, float(cfg["voxel"]), float(cfg["max_depth"]))
     return refine_alignment(pts, mesh_target(ref_vertices, ref_faces), T_init, cfg)

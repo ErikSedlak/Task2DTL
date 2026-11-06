@@ -38,13 +38,18 @@ def new_run_id(prefix: str) -> str:
     return f"{prefix}_{_dt.datetime.now().strftime('%Y%m%d-%H%M%S')}"
 
 
-def write_metrics(run_dir: Path, metrics: dict[str, Any], cfg: dict[str, Any]) -> Path:
+def write_metrics(
+    run_dir: Path, metrics: dict[str, Any], cfg: dict[str, Any], extra: dict[str, Any] | None = None
+) -> Path:
     """Write `run_dir/metrics.json` with the results plus everything needed to reproduce them.
 
     Args:
         run_dir: Output folder of this run (created if missing).
-        metrics: Results; numpy scalars/arrays and Paths are converted automatically.
+        metrics: Results; numpy scalars/arrays and Paths are converted automatically. This
+            block must be identical for the same config + seed (DESIGN §7.5).
         cfg: The config used, stored in full together with its hash.
+        extra: Run information that may differ between reruns (wall time, cache hits),
+            stored next to `metrics` under `"run"`.
 
     Returns:
         Path of the written file.
@@ -59,6 +64,8 @@ def write_metrics(run_dir: Path, metrics: dict[str, Any], cfg: dict[str, Any]) -
         "config": cfg,
         "metrics": metrics,
     }
+    if extra is not None:
+        payload["run"] = extra
     out = run_dir / "metrics.json"
     out.write_text(json.dumps(payload, indent=2, default=_json_default), encoding="utf-8")
     return out

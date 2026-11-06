@@ -75,6 +75,40 @@ def _cmd_graph(args: argparse.Namespace) -> int:
     return 0 if not problems else 1
 
 
+def _modes(s: str) -> list[str]:
+    """`"perception,oracle"` -> `["perception", "oracle"]`."""
+    return [m.strip() for m in s.split(",") if m.strip()]
+
+
+def _cmd_eval(args: argparse.Namespace) -> int:
+    """`lsg eval --split S --obs oracle --method B0`: run + score a split, write metrics.json."""
+    from lsg.eval.harness import format_summary, run_split
+
+    try:
+        res = run_split(load_config(args.config), args.split, obs_modes=_modes(args.obs), method=args.method,
+                        frac=args.frac, seed=args.seed, workers=args.workers, run_id=args.run_id)  # fmt: skip
+    except NotImplementedError as e:
+        print(f"not available yet: {e}")
+        return 2
+    print(format_summary(res))
+    return 0
+
+
+def _cmd_run(args: argparse.Namespace) -> int:
+    """`lsg run --pair R S --obs oracle --method B0`: one pair, same outputs as `lsg eval`."""
+    from lsg.eval.harness import format_summary, run_eval
+
+    try:
+        res = run_eval(load_config(args.config), [tuple(args.pair)], obs_modes=_modes(args.obs),
+                       method=args.method, frac=args.frac, seed=args.seed, workers=1,
+                       run_id=args.run_id, split_name=f"pair {args.pair[0]} {args.pair[1]}")  # fmt: skip
+    except NotImplementedError as e:
+        print(f"not available yet: {e}")
+        return 2
+    print(format_summary(res))
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     """Entry point of the `lsg` command (see `[project.scripts]` in pyproject.toml).
 
@@ -109,6 +143,23 @@ def main(argv: list[str] | None = None) -> int:
     gr.add_argument("--out", default=None)
     gr.add_argument("--config", default=None)
     gr.set_defaults(func=_cmd_graph)
+
+    for name, helptext in (("eval", "run a method on a split and score it (DESIGN §7)"),
+                           ("run", "run a method on one (reference, rescan) pair and score it")):
+        sp_ = sub.add_parser(name, help=helptext)
+        if name == "eval":
+            sp_.add_argument("--split", required=True, help="split name (eval_val, dev_train) or file")
+            sp_.add_argument("--workers", type=int, default=None, help="processes (default: config)")
+            sp_.set_defaults(func=_cmd_eval)
+        else:
+            sp_.add_argument("--pair", nargs=2, required=True, metavar=("REF", "RESCAN"))
+            sp_.set_defaults(func=_cmd_run)
+        sp_.add_argument("--obs", default="oracle", help="comma list of oracle,perception")
+        sp_.add_argument("--method", default="B0")
+        sp_.add_argument("--frac", type=float, default=1.0, help="observed fraction (contiguous chunk)")
+        sp_.add_argument("--seed", type=int, default=0)
+        sp_.add_argument("--config", default=None)
+        sp_.add_argument("--run-id", default=None)
 
     args = p.parse_args(argv)
     return args.func(args)

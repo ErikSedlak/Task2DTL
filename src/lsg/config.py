@@ -60,3 +60,8 @@ def data_root(cfg: dict[str, Any] | None = None) -> Path:
 def outputs_root(cfg: dict[str, Any] | None = None) -> Path:
     """Folder where runs write `outputs/<run_id>/` (git-ignored). Default `./outputs`."""
     return _resolve((cfg or {}).get("outputs_root", "./outputs"))
+
+
+def cache_root(cfg: dict[str, Any] | None = None) -> Path:
+    """Folder for cached intermediate results (git-ignored). Default `./cache`."""
+    return _resolve((cfg or {}).get("cache_root", "./cache"))

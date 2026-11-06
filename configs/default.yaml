@@ -2,6 +2,7 @@
 # are starting points and may only be tuned on splits/dev_train.txt.
 data_root: ./data          # overridden by env LSG_DATA
 outputs_root: ./outputs
+cache_root: ./cache        # refined alignments etc. (git-ignored)
 
 frames:
   stride: 3                # DESIGN §3 (tune)
@@ -56,6 +57,22 @@ eval:                      # evaluation protocol (DESIGN §5, §7) - definitions
   tau_eval_move: 0.10      # [m] GT moves below this are dont_care for moved/unchanged (fixed M1)
   small_max_extent: 0.5    # [m] thing with largest AABB extent below this = "small"
   disp_buckets: [0.1, 0.3, 1.0]    # [m] moved-recall buckets [0.1,0.3), [0.3,1), >=1
+  match_new_dist: 0.30     # [m] perception new matching: centroid distance gate (§5)
+  match_new_iou: 0.25      # perception new matching: 3D AABB IoU gate (§5)
+  bootstrap_n: 1000        # resamples over pairs for 95% CIs (§7.1)
+  bootstrap_seed: 0
+  workers: 4               # processes for `lsg eval` (one reference group per task)
+  save_graphs: true        # write G_upd per pair to outputs/<run>/graphs/
+
+oracle:                    # OracleSource, DESIGN §6.5 (upper bound)
+  min_points: 50           # drop instances with fewer observed mesh vertices (tune)
+  seed: 0                  # token permutation seed (mixed with the rescan id)
+  crops: false             # colour crops (not used by the change logic before M4/M6)
+  crop_k: 5
+
+baselines:
+  b0:
+    near_dist: 0.5         # [m] same-label obs within this -> unchanged, farther -> moved (§8)
 
 m1:
   count_split: splits/eval_val.txt

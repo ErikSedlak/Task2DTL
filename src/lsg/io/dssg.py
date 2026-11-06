@@ -80,3 +80,21 @@ def load_relations(root: str | Path, scan_id: str) -> list[tuple[int, int, str]]
                 seen.add(t)
                 out.append(t)
     return out
+
+
+@lru_cache(maxsize=2)
+def label_to_nyu40(root: str | Path) -> dict[str, int]:
+    """Most frequent nyu40 id per object label over all scans of `3DSSG/objects.json`.
+
+    A class-vocabulary mapping (no instance data), used by the perception matching rule
+    (DESIGN §5) when a prediction carries a label but no nyu40. Ties go to the smaller id.
+    """
+    from collections import Counter
+
+    counts: dict[str, Counter] = {}
+    for entries in _index(str(Path(root) / "3DSSG" / "objects.json")).values():
+        for sc in entries:
+            for o in sc["objects"]:
+                if "nyu40" in o:
+                    counts.setdefault(str(o["label"]), Counter())[int(o["nyu40"])] += 1
+    return {lab: min(c.items(), key=lambda kv: (-kv[1], kv[0]))[0] for lab, c in counts.items()}

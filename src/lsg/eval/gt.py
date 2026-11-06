@@ -45,6 +45,8 @@ class GTObject:
     M_ref: np.ndarray | None = None  # T_align @ T_rigid: motion in the reference frame
     centroid_ref: np.ndarray | None = None
     centroid_new: np.ndarray | None = None  # rescan instance centroid, mapped with raw T_align
+    aabb_new_min: np.ndarray | None = None  # AABB of the rescan instance points (raw T_align)
+    aabb_new_max: np.ndarray | None = None
 
 
 @dataclass
@@ -162,6 +164,9 @@ def gt_changes(
         s_inst = S.instances.get(oid)
         if s_inst is not None:
             o.centroid_new = apply(T, s_inst.centroid[None])[0]
+            P_new = apply(T, S.instance_points(oid))
+            if len(P_new):
+                o.aabb_new_min, o.aabb_new_max = P_new.min(axis=0), P_new.max(axis=0)
         if oid in rigid and rigid[oid].T is not None:
             o.M_ref = T @ rigid[oid].T
             if inst is not None:

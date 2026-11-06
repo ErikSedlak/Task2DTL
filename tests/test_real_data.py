@@ -50,3 +50,30 @@ def test_val_gt_counts_reproduce_design(real_data_root):
         c.update(gt_changes(meta[s], R, S, oR, load_objects(real_data_root, s), cfg).counts())
     assert (c["rigid_raw"], c["removed_raw"], c["new_raw"], c["new"]) == (390, 96, 224, 171)
     assert c["dont_care_small_move"] == 134
+
+
+@pytest.mark.slow
+def test_m2_oracle_b0_one_dev_pair_deterministic(real_data_root, tmp_path):
+    """M2 end-to-end on one dev pair: oracle + B0, scored; two runs give identical `metrics`."""
+    import copy
+    import json
+
+    from lsg.config import load_config
+    from lsg.eval.harness import run_eval
+
+    cfg = copy.deepcopy(load_config())
+    cfg["outputs_root"] = str(tmp_path)
+    pair = ("0ad2d39b-79e2-2212-99ae-830c292cd079", RESCAN)
+    a = run_eval(cfg, [pair], ["oracle"], "B0", workers=1, run_id="a")
+    b = run_eval(cfg, [pair], ["oracle"], "B0", workers=1, run_id="b")
+    ma = json.loads((tmp_path / "a" / "metrics.json").read_text())
+    mb = json.loads((tmp_path / "b" / "metrics.json").read_text())
+    assert ma["metrics"] == mb["metrics"]
+    assert ma["config_hash"] == mb["config_hash"] and "run" in ma
+    s = a["summary"]["oracle"]
+    assert s["n_pairs"] == 1 and s["counts"]["ref_n"] > 10
+    for k in ("moved_F1", "removed_P", "new_R", "false_deletion_rate", "false_move_rate",
+              "unchanged_kept", "assoc_acc_strict", "moved_R_small"):
+        assert k in s["metrics"]
+    assert (tmp_path / "a" / "graphs" / "oracle" / f"{pair[0]}_{pair[1]}.json").is_file()
+    assert b["per_pair"][0]["n_obs"] == a["per_pair"][0]["n_obs"] > 5
