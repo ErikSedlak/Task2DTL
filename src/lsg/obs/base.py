@@ -103,6 +103,23 @@ class RefContext:
     scan: Scan
     graph: Graph
     floor_z: float
+    nyu40: dict[int, int] = field(default_factory=dict)  # reference objectId -> nyu40 (3DSSG, PLY fallback)
+
+    def object_nyu40(self, oid: int) -> int | None:
+        """nyu40 of a reference object: `nyu40` map first, else the PLY instance summary."""
+        if oid in self.nyu40:
+            return int(self.nyu40[oid])
+        inst = self.scan.instances.get(oid)
+        return int(inst.nyu40) if inst is not None else None
+
+    def faces_of(self, oids) -> tuple[np.ndarray, np.ndarray]:
+        """Sub-mesh (vertices, faces) of the reference faces labelled with one of `oids`.
+
+        Reference annotations are allowed method input (DESIGN §1); this accessor lets
+        `perception/` use them without touching per-face label arrays itself.
+        """
+        keep = np.isin(self.scan.face_labels, np.asarray(sorted(int(o) for o in oids), np.int64))
+        return self.scan.vertices, self.scan.faces[keep]
 
 
 @dataclass

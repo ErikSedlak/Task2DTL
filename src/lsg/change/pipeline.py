@@ -21,7 +21,7 @@ import numpy as np
 
 from lsg.config import cache_root
 from lsg.geom.align import refine_from_sequence
-from lsg.graph.build import build_reference_graph
+from lsg.graph.build import build_reference_graph, object_nyu40
 from lsg.io.scan3r import Scan, SequenceReader
 from lsg.obs.base import RefContext, SeqInfo
 
@@ -117,6 +117,7 @@ def prepare_pair(
     if G_ref is None:
         G_ref = build_reference_graph(ref_scan, objs_R, rels_R, "gt", cfg)
     T, ainfo = refined_alignment(seq, ref_scan, rescan_id, T_raw, cfg, frame_ids)
-    ctx = RefContext(ref_scan.scan_id, ref_scan, G_ref, float(G_ref.meta["floor_z"]))
+    nyu = {int(oid): object_nyu40(int(oid), ref_scan, objs_R) for oid in ref_scan.instances}
+    ctx = RefContext(ref_scan.scan_id, ref_scan, G_ref, float(G_ref.meta["floor_z"]), nyu)
     info = SeqInfo(rescan_id, Path(root), seq.info, T, list(frame_ids))
     return ctx, info, ainfo

@@ -14,7 +14,8 @@ import pytest
 
 SRC = Path(__file__).resolve().parents[1] / "src" / "lsg"
 FORBIDDEN_PKGS = ("lsg.oracle", "lsg.eval")
-METHOD_SIDE = ["perception", "obs", "change", "graph", "geom", "io", "classes.py", "config.py", "runinfo.py"]
+METHOD_SIDE = ["perception", "obs", "change", "graph", "geom", "io", "classes.py", "config.py", "runinfo.py",
+               "train_meta.py"]
 # rescan-annotation access that perception must never contain
 FORBIDDEN_CALLS = {"load_scan", "load_relations", "load_objects", "gt_changes"}
 FORBIDDEN_ATTRS = {"rigid", "removed", "nonrigid", "semseg_labels", "vertex_object_id", "face_labels"}
@@ -101,7 +102,10 @@ def method_side_files() -> list[Path]:
 
 def test_method_side_exists():
     assert (SRC / "perception" / "__init__.py").is_file()
-    assert len(method_side_files()) >= 15
+    assert len(method_side_files()) >= 20
+    # the real perception code is scanned, not just the package stub (M4)
+    names = {f.name for f in (SRC / "perception").glob("*.py")}
+    assert {"residual.py", "voxels.py", "cluster.py", "labeler.py", "source.py"} <= names
 
 
 def test_method_side_never_imports_oracle_or_eval():
@@ -117,7 +121,8 @@ def test_perception_reads_no_rescan_annotations():
 def test_runtime_import_closure_is_clean():
     """Importing the method side must not pull in oracle/eval transitively."""
     code = (
-        "import sys, lsg.perception, lsg.obs, lsg.change.pipeline, lsg.change.baselines, lsg.change.online,"
+        "import sys, lsg.perception, lsg.perception.source, lsg.perception.residual, lsg.perception.voxels,"
+        " lsg.perception.cluster, lsg.perception.labeler, lsg.train_meta, lsg.obs, lsg.change.pipeline, lsg.change.baselines, lsg.change.online,"
         " lsg.change.visibility, lsg.graph.build;"
         "bad=[m for m in sys.modules if m.startswith(('lsg.oracle','lsg.eval'))];"
         "print(','.join(bad)); sys.exit(1 if bad else 0)"

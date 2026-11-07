@@ -212,3 +212,38 @@ def test_vote_evidence_diagnostics(gt):
     assert M["free_ev_absent"]["value"] == 0.0 and M["seen_ev_absent"]["value"] == 1.0
     c0 = score_pair(good_prediction(), gt, "oracle", CFG, obs_truth=TRUTH)["counts"]
     assert c0["diag_votes"] == 0 and c0["diag_free_unch"] == 0
+
+
+def _cand(token, label, c, h=0.1, nyu=None):
+    from lsg.obs import ObsInstance
+
+    lo, hi = box(c, h)
+    return ObsInstance(token, label, [(label, 1.0)], nyu, np.stack([lo, hi]))
+
+
+def test_perception_obs_truth_and_candidate_counts(gt):
+    from lsg.eval.metrics import candidate_counts, perception_obs_truth
+
+    cands = [
+        _cand("c0", "chair", (1.25, 0, 0)),  # moved-to of chair 1, right label
+        _cand("c1", "bag", (2.05, 0, 0)),  # GT new box 20, wrong label
+        _cand("c2", "table", (1.0, 1.0, 0)),  # on the unchanged table's rescan instance
+        _cand("c3", "lamp", (9, 9, 9)),  # unexplained (person, mesh hole, ...)
+    ]
+    truth = perception_obs_truth(cands, gt, CFG)
+    assert truth == {"c0": (1, "chair"), "c2": (3, "table")}  # c1's label does not match box
+    c = candidate_counts(cands, gt, CFG)
+    assert c["diag_cand"] == 1 and c["diag_cand_n"] == 4
+    assert (c["diag_cand_new_n"], c["diag_cand_new_hit"], c["diag_cand_new_lab"]) == (2, 1, 0)
+    assert (c["diag_cand_moved_n"], c["diag_cand_moved_hit"], c["diag_cand_moved_lab"]) == (1, 1, 1)
+    assert c["diag_cand_explained"] == 3
+    # through score_pair + aggregate (association uses the perception truth)
+    G = graph([node("r1", "chair", "moved", (1.25, 0, 0), token="c0"), node("n0", "bag", "new", (2.05, 0, 0))])
+    sc = score_pair(G, gt, "perception", CFG, obs_truth=truth, visible={1, 3}, candidates=cands)
+    assert sc["counts"]["assoc_n"] == 1 and sc["counts"]["assoc_strict"] == 1  # r3 has no node here
+    M = aggregate([sc], CFG)["metrics"]
+    assert M["cand_recall_new"]["value"] == 0.5 and M["cand_recall_moved_labelled"]["value"] == 1.0
+    assert M["cand_per_pair"]["value"] == 4.0 and M["cand_explained"]["value"] == 0.75
+    # oracle pairs carry no candidate diagnostics
+    so = score_pair(G, gt, "oracle", CFG)
+    assert so["counts"]["diag_cand"] == 0 and aggregate([so], CFG)["metrics"]["cand_recall_new"]["value"] is None

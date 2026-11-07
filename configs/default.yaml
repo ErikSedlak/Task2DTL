@@ -85,6 +85,34 @@ oracle:                    # OracleSource, DESIGN §6.5 (upper bound)
   crops: false             # colour crops (not used by the change logic before M4/M6)
   crop_k: 5
 
+train_meta:                # train-split metadata for vocabulary / priors (DESIGN §2.3)
+  exclude_splits: [splits/dev_train.txt, splits/eval_relchange_train.txt]   # their rooms never count
+
+perception:                # PerceptionSource, DESIGN §3 candidate + §6.6 (tune on dev only)
+  tau_new: 0.10            # [m] nearer pixel: d_obs < d_exp - tau_new (step 1)
+  max_depth: 4.0           # [m] ignore far, noisy depth
+  surf_dist: 0.05          # [m] drop residual points this close to the reference mesh (step 2)
+  struct_dist: 0.10        # [m] drop points this close to reference structure surfaces (step 2)
+  struct_exclude_nyu40: [2, 20]   # floor, floor mat: objects stand on them (handled by surf_dist)
+  voxel: 0.04              # [m] voxel size (step 3)
+  min_views: 3             # decorrelated viewpoints per kept voxel (step 4; `decorrelation` block)
+  link_voxels: 2           # voxels within this Chebyshev distance [voxels] are connected (1 = 26-conn.)
+  min_voxels: 5            # drop clusters with fewer kept voxels (step 5)
+  door_filter: true        # drop clusters inside a reference door's swing region (M4, Erik)
+  door_frac: 0.5           # share of a cluster's voxels inside a swing region -> dropped
+  door_margin: 0.10        # [m] added to the swing radius (door width)
+  crop_k: 5                # colour crops per candidate (largest masks)
+  crop_margin: 0.10        # crop box enlarged by this share per side
+  min_crop_px: 8           # [depth px] smaller masks give no crop
+  clip:
+    model: ViT-B-32-quickgelu   # openai weights were trained with QuickGELU
+    pretrained: openai
+    device: cuda           # falls back to CPU if CUDA is unavailable
+    prompt: "a photo of a {}"
+    vocab_top_n: 100       # most frequent train thing/anchor labels added to the G_ref labels
+    topk: 5
+    cache: true            # cache/clip/<key>.json
+
 baselines:
   b0:
     near_dist: 0.5         # [m] same-label obs within this -> unchanged, farther -> moved (§8)

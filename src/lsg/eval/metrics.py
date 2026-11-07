@@ -25,7 +25,7 @@ from typing import Any
 import numpy as np
 
 from lsg.eval.gt import GTLabels
-from lsg.graph.model import Graph, Node, ref_node_id
+from lsg.graph.model import Graph, Node, bbox_dict, ref_node_id
 
 SIZES = ("small", "large")
 
@@ -83,11 +83,14 @@ def _pred_nyu(n: Node, label_nyu: Mapping[str, int] | None) -> int | None:
     return (label_nyu or {}).get(n.label)
 
 
-def perception_compatible(n: Node, g: GTBox, cfg: Mapping[str, Any], label_nyu=None) -> tuple[bool, float, float]:
+def perception_compatible(
+    n: Node, g: GTBox, cfg: Mapping[str, Any], label_nyu=None, use_label: bool = True
+) -> tuple[bool, float, float]:
     """§5 perception rule for one (prediction, GT instance) pair.
 
     Compatible if (same label or same nyu40) and (centroid distance <= `match_new_dist` or
-    AABB IoU >= `match_new_iou`).
+    AABB IoU >= `match_new_iou`). `use_label=False` drops the class condition (class-agnostic
+    candidate recall, M4).
 
     Returns:
         (compatible, IoU, centroid distance).
@@ -101,12 +104,13 @@ def perception_compatible(n: Node, g: GTBox, cfg: Mapping[str, Any], label_nyu=N
     if n.bbox_3d is not None and g.aabb_min is not None:
         iou = aabb_iou(n.bbox_3d["min"], n.bbox_3d["max"], g.aabb_min, g.aabb_max)
     ecfg = cfg["eval"]
-    ok = same_class and (d <= float(ecfg["match_new_dist"]) or iou >= float(ecfg["match_new_iou"]))
+    near = d <= float(ecfg["match_new_dist"]) or iou >= float(ecfg["match_new_iou"])
+    ok = (same_class or not use_label) and near
     return ok, iou, d
 
 
 def greedy_perception_match(
-    preds: Sequence[Node], gts: Sequence[GTBox], cfg: Mapping[str, Any], label_nyu=None
+    preds: Sequence[Node], gts: Sequence[GTBox], cfg: Mapping[str, Any], label_nyu=None, use_label: bool = True
 ) -> dict[str, int]:
     """One-to-one matching of predictions to GT instances, greedy by IoU (then distance).
 
@@ -116,7 +120,7 @@ def greedy_perception_match(
     cand = []
     for n in preds:
         for g in gts:
-            ok, iou, d = perception_compatible(n, g, cfg, label_nyu)
+            ok, iou, d = perception_compatible(n, g, cfg, label_nyu, use_label)
             if ok:
                 cand.append((-iou, d, n.id, g.id))
     cand.sort()
@@ -191,6 +195,70 @@ def match_new(
     return {"tp": tp, "fp": fp, "ignored": sorted(ign), "fn": fn}
 
 
+def obs_node(o: Any) -> Node:
+    """An `ObsInstance` as a pseudo graph node (for the §5 matching rule)."""
+    return Node(id=o.token, level="thing", label=o.label, nyu40=o.nyu40,
+                bbox_3d=bbox_dict(o.aabb_min, o.aabb_max), centroid=[float(v) for v in o.centroid])  # fmt: skip
+
+
+def _box(i: int, o: Any) -> GTBox:
+    """`GTBox` of a reference object's rescan instance."""
+    return GTBox(i, o.label, o.nyu40, o.centroid_new, o.aabb_new_min, o.aabb_new_max)
+
+
+def gt_rescan_boxes(gt: GTLabels) -> list[GTBox]:
+    """Every scored GT rescan instance in the reference frame: GT new objects plus the rescan
+    instances of reference things/anchors (any status). Ids are rescan objectIds."""
+    return _gt_new_boxes(gt) + [_box(i, o) for i, o in sorted(gt.objects.items()) if o.centroid_new is not None]
+
+
+def perception_obs_truth(
+    obs: Sequence[Any], gt: GTLabels, cfg: Mapping[str, Any], label_nyu: Mapping[str, int] | None = None
+) -> dict[str, tuple[int, str]]:
+    """Perception `obs_truth`: candidate token -> (GT rescan objectId, GT label) by the §5 rule.
+
+    One-to-one, greedy by IoU, against GT new objects and the rescan instances of reference
+    objects. Feeds the association metric (a reference node's `obs_token` is correct if its
+    candidate matches the node's own rescan instance).
+    """
+    boxes = gt_rescan_boxes(gt)
+    lab = {b.id: b.label for b in boxes}
+    m = greedy_perception_match([obs_node(o) for o in obs if len(o.points)], boxes, cfg, label_nyu)
+    return {t: (gid, lab[gid]) for t, gid in m.items()}
+
+
+CAND_KEYS = ("diag_cand", "diag_cand_n", "diag_cand_new_n", "diag_cand_new_hit", "diag_cand_new_lab",
+             "diag_cand_moved_n", "diag_cand_moved_hit", "diag_cand_moved_lab", "diag_cand_explained")  # fmt: skip
+
+
+def candidate_counts(
+    obs: Sequence[Any], gt: GTLabels, cfg: Mapping[str, Any], label_nyu: Mapping[str, int] | None = None
+) -> dict[str, int]:
+    """Candidate diagnostics of one pair (perception, M4; method-independent).
+
+    Targets = GT new objects and the rescan instances of GT-moved objects ("moved-to").
+    - `*_hit`: targets matched by a candidate, class-agnostic (centroid <= `match_new_dist` or
+      IoU >= `match_new_iou`), one-to-one greedy over all targets jointly;
+    - `*_lab`: the same with the §5 label condition;
+    - `diag_cand_explained`: candidates within the geometric gate of *any* GT rescan instance
+      (many-to-one); the rest are unexplained (people, mesh holes, structure, unannotated).
+    """
+    nodes = [obs_node(o) for o in obs if len(o.points)]
+    new = _gt_new_boxes(gt)
+    moved = [_box(i, o) for i, o in sorted(gt.objects.items()) if o.status == "moved" and o.centroid_new is not None]
+    new_ids = {b.id for b in new}
+    c = {"diag_cand": 1, "diag_cand_n": len(nodes), "diag_cand_new_n": len(new), "diag_cand_moved_n": len(moved)}
+    for suffix, use_label in (("hit", False), ("lab", True)):
+        hit = set(greedy_perception_match(nodes, new + moved, cfg, label_nyu, use_label).values())
+        c[f"diag_cand_new_{suffix}"] = len(hit & new_ids)
+        c[f"diag_cand_moved_{suffix}"] = len(hit - new_ids)
+    allb = gt_rescan_boxes(gt)
+    c["diag_cand_explained"] = sum(
+        any(perception_compatible(n, b, cfg, None, use_label=False)[0] for b in allb) for n in nodes
+    )
+    return c
+
+
 # --------------------------------------------------------------------------------------------
 # per-pair counts
 # --------------------------------------------------------------------------------------------
@@ -203,7 +271,7 @@ def count_keys(cfg: Mapping[str, Any]) -> list[str]:
     keys += ["new_ignored", "unch_n", "unch_strict", "unch_kept", "absent_n", "absent_del", "absent_move",
              "ref_n", "ref_unknown", "ref_no_node", "assoc_n", "assoc_strict", "assoc_label",
              "moved_no_disp", "diag_free_unch", "diag_free_removed", "diag_free_absent",
-             "diag_seen_absent", "diag_votes"]  # fmt: skip
+             "diag_seen_absent", "diag_votes", *CAND_KEYS]  # fmt: skip
     keys += [f"moved_{x}_d{b}" for b in range(nb) for x in ("n", "tp")]
     keys += [f"{k}_{x}_{s}" for k in ("moved", "new") for s in SIZES for x in ("n", "tp")]
     return keys
@@ -218,6 +286,7 @@ def score_pair(
     visible: set[int] | None = None,
     label_nyu: Mapping[str, int] | None = None,
     votes: Mapping[str, Any] | None = None,
+    candidates: Sequence[Any] | None = None,
 ) -> dict[str, Any]:
     """Counts of one pair (module docstring for the definitions).
 
@@ -236,6 +305,7 @@ def score_pair(
             independent evidence diagnostics: GT-unchanged / removed / absent-unlisted
             objects with >= `states.k_free` counted free votes, and absent-unlisted objects
             with any counted seen vote (`diag_votes` = 1 if votes were given).
+        candidates: Perception `ObsInstance`s; adds the `candidate_counts` diagnostics.
 
     Returns:
         `{"counts": {name: int}, "loc_errors": [m], "new_match": match_new(...)}`.
@@ -317,6 +387,8 @@ def score_pair(
     for gid, g in gt.new.items():
         c[f"new_n_{g.size}"] += 1
         c[f"new_tp_{g.size}"] += gid in matched
+    if candidates is not None:
+        c.update(candidate_counts(candidates, gt, cfg, label_nyu))
     return {"counts": {k: int(v) for k, v in c.items()}, "loc_errors": loc, "new_match": m}
 
 
@@ -345,6 +417,13 @@ def metric_defs(cfg: Mapping[str, Any]) -> dict[str, tuple[list[str], list[str],
     d["free_ev_removed"] = (["diag_free_removed"], ["removed_tp", "removed_fn"], ["removed_tp", "removed_fn"])
     d["free_ev_absent"] = (["diag_free_absent"], ["absent_n"], ["absent_n"])
     d["seen_ev_absent"] = (["diag_seen_absent"], ["absent_n"], ["absent_n"])
+    # perception candidate diagnostics (M4)
+    d["cand_per_pair"] = (["diag_cand_n"], ["diag_cand"], ["diag_cand_n"])
+    d["cand_recall_new"] = (["diag_cand_new_hit"], ["diag_cand_new_n"], ["diag_cand_new_n"])
+    d["cand_recall_moved"] = (["diag_cand_moved_hit"], ["diag_cand_moved_n"], ["diag_cand_moved_n"])
+    d["cand_recall_new_labelled"] = (["diag_cand_new_lab"], ["diag_cand_new_n"], ["diag_cand_new_n"])
+    d["cand_recall_moved_labelled"] = (["diag_cand_moved_lab"], ["diag_cand_moved_n"], ["diag_cand_moved_n"])
+    d["cand_explained"] = (["diag_cand_explained"], ["diag_cand_n"], ["diag_cand_n"])
     for b, name in enumerate(bucket_names(cfg["eval"]["disp_buckets"])):
         d[f"moved_R_disp{name}"] = ([f"moved_tp_d{b}"], [f"moved_n_d{b}"], [f"moved_n_d{b}"])
     for k in ("moved", "new"):

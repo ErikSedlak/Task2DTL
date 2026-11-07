@@ -36,6 +36,19 @@ def _cmd_m1(args: argparse.Namespace) -> int:
     return 0 if all(a["pass"] is True for a in res["acceptance"].values()) else 1
 
 
+def _cmd_m4(args: argparse.Namespace) -> int:
+    """`lsg m4`: perception on dev (B0 / B1, both modes), candidate recall, overlays, sweep.
+
+    Returns:
+        Exit code 0 if the overlay check passes (recall is reported, without a threshold).
+    """
+    from lsg.eval.m4_checks import format_summary, run_m4
+
+    res = run_m4(load_config(args.config), run_id=args.run_id, sweep=not args.no_sweep)
+    print(format_summary(res))
+    return 0 if res["acceptance"]["overlays_3_dev_frames"]["pass"] else 1
+
+
 def _cmd_splits_textures(args: argparse.Namespace) -> int:
     """`lsg splits textures`: write the reference scans that need textures (DESIGN §2.3)."""
     from lsg.config import REPO_ROOT
@@ -132,6 +145,12 @@ def main(argv: list[str] | None = None) -> int:
     m1.add_argument("--run-id", default=None)
     m1.set_defaults(func=_cmd_m1)
 
+    m4 = sub.add_parser("m4", help="M4: perception on dev, candidate recall, overlays")
+    m4.add_argument("--config", default=None)
+    m4.add_argument("--run-id", default=None)
+    m4.add_argument("--no-sweep", action="store_true", help="skip the door-filter / min_voxels sweep")
+    m4.set_defaults(func=_cmd_m4)
+
     sp = sub.add_parser("splits", help="split-file helpers")
     sps = sp.add_subparsers(dest="splits_cmd", required=True)
     tx = sps.add_parser("textures", help="write splits/download_textures.txt")
@@ -158,7 +177,7 @@ def main(argv: list[str] | None = None) -> int:
             sp_.add_argument("--pair", nargs=2, required=True, metavar=("REF", "RESCAN"))
             sp_.add_argument("--no-snapshots", action="store_true", help="skip tentative snapshots")
             sp_.set_defaults(func=_cmd_run)
-        sp_.add_argument("--obs", default="oracle", help="comma list of oracle,perception")
+        sp_.add_argument("--obs", default="oracle", help="comma list of oracle,perception (e.g. perception,oracle)")
         sp_.add_argument("--method", default="B0", help="B0 | B1")
         sp_.add_argument("--frac", type=float, default=1.0, help="observed fraction (contiguous chunk)")
         sp_.add_argument("--seed", type=int, default=0)

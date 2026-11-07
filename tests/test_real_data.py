@@ -106,3 +106,47 @@ def test_m3_oracle_b1_one_dev_pair(real_data_root, tmp_path):
     assert len(snaps) >= 2
     g = Graph.load(snaps[0])
     assert g.meta["tentative"] is True and validate(g) == []
+
+
+@pytest.mark.slow
+def test_m4_perception_b1_one_dev_pair(real_data_root, tmp_path):
+    """M4 on one dev pair: perception mode end to end (CLIP labels, cached), deterministic,
+    candidate diagnostics present, graphs valid, new nodes carry `label_topk`."""
+    import copy
+    import json
+
+    from lsg.config import load_config
+    from lsg.eval.harness import run_eval
+    from lsg.graph.model import Graph, validate
+
+    cfg = copy.deepcopy(load_config())
+    cfg["outputs_root"] = str(tmp_path)
+    pair = ("0ad2d39b-79e2-2212-99ae-830c292cd079", "0ad2d3a1-79e2-2212-9b99-a96495d9f7fe")
+    a = run_eval(cfg, [pair], ["perception"], "B1", workers=1, run_id="a")
+    run_eval(cfg, [pair], ["perception"], "B1", workers=1, run_id="b")
+    ma = json.loads((tmp_path / "a" / "metrics.json").read_text())
+    mb = json.loads((tmp_path / "b" / "metrics.json").read_text())
+    assert ma["metrics"] == mb["metrics"]
+    c = a["summary"]["perception"]["counts"]
+    assert c["diag_cand"] == 1 and c["diag_cand_n"] >= 1
+    G = Graph.load(tmp_path / "a" / "graphs" / "perception" / f"{pair[0]}_{pair[1]}.json")
+    assert validate(G) == [] and G.meta["obs_mode"] == "perception"
+    assert all(n.label_topk for n in G.nodes if n.state == "new")
+    assert all(n.obs_token is None or n.obs_token.startswith("c") for n in G.nodes)
+    cand = json.loads((tmp_path / "a" / "candidates" / f"{pair[0]}_{pair[1]}.json").read_text())
+    assert len(cand["candidates"]) == c["diag_cand_n"]
+
+
+@pytest.mark.slow
+def test_clip_labeler_real_model(tmp_path):
+    """Real CLIP (downloads the weights once): top-k well-formed, sorted, cached."""
+    from lsg.perception.labeler import CLIPLabeler
+
+    lab = CLIPLabeler(["chair", "table", "pillow", "lamp"], "ViT-B-32-quickgelu", "openai", "cuda",
+                      cache_dir=tmp_path)  # fmt: skip
+    img = np.zeros((120, 90, 3), np.uint8)
+    img[30:90, 20:70] = (200, 30, 30)
+    top = lab.topk([img, img[::-1]], 3)
+    assert len(top) == 3 and len({a for a, _ in top}) == 3
+    assert all(top[i][1] >= top[i + 1][1] for i in range(2)) and 0 < sum(s for _, s in top) <= 1.0001
+    assert lab.topk([img, img[::-1]], 3) == top and lab.n_cached == 1
