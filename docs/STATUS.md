@@ -6,14 +6,68 @@ Handoff file between milestone sessions: each milestone is done in a fresh chat.
 
 DESIGN.md (the spec) and DECISIONS.md (the dated log, with the reasons) stay the source of truth. This file is the to-do view on top of them.
 
-## Current state (2026-11-06)
-- **M0 ✅** (commit `dd66381`), **M1 ✅** (commits `5ed8260` code, `b025428` docs), **M2 ✅** (commits `49b9b61` + `4577e4b` code, then the docs commit) and **M3 ✅** (commit `6e71d0c` code, then the docs commit) are done.
-- **Next: M4** — perception end-to-end (`perception/`: residual points, `VoxelEvidence`, clustering, CLIP labelling, `PerceptionSource`); B0 + B1 in perception mode.
-- All commits are on local `main`. Not pushed as of 2026-11-06.
+## Current state (2026-11-07)
+- **M0 ✅** (commit `dd66381`), **M1 ✅** (commits `5ed8260` code, `b025428` docs), **M2 ✅** (commits `49b9b61` + `4577e4b` code, then the docs commit), **M3 ✅** (commit `6e71d0c` code, then the docs commit) and **M4 ✅** (commit `9d67e8b` code, then the docs commit) are done.
+- **Next: M5** — association (confirmed-in-place skip, Hungarian, soft label term), ICP moved test (B2, both modes), `update_graph` + relation eval.
+- `origin/main` is at `b237be2` (M3 docs). The M4 commits are on local `main` only; not pushed as of 2026-11-07.
 
 ---
 
 ## Finished
+
+### M4 (2026-11-07), acceptance passed — `uv run lsg m4` → `outputs/m4_final/metrics.json` + 3 overlay PNGs; val report `outputs/m4_val_B1`, `outputs/m4_val_B0` (all git `9d67e8b`, clean)
+
+**Acceptance results:**
+
+| Check | Result |
+|---|---|
+| Synthetic: box added → exactly one candidate, centroid error < 5 cm | `test_perception.py::test_box_added_gives_exactly_one_candidate`: 1 candidate, **2.1 cm** from the box's observable-surface centroid (xy 0.0 cm; 5.1 cm from the solid centre, all in z, DECISIONS M4) |
+| Overlay PNGs on 3 dev frames | `outputs/m4_final/m4_overlay_*.png` (0ad2d3a1 frame 51, 19eda6f4 frame 81, e2847ff7 frame 339), inspected: masks cover the moved chair / bin, moved-to markers inside |
+| Candidate recall on dev (B1, perception) | new **66.7%** (2 / 3; labelled 66.7%), moved-to **66.7%** (10 / 15; labelled 26.7%); 27.3 candidates per pair, 36.6% explained by a GT instance |
+| Determinism | three `lsg m4` runs (two before the commit, one at `9d67e8b`) and two val runs per method → identical `metrics` (apart from output paths) |
+| No-leak test on the real `perception/` code | `test_no_leak.py` (also checks that residual / voxels / cluster / labeler / source exist and are scanned; import closure includes them and `train_meta`) |
+
+**B0 / B1 on val, perception vs oracle** (110 pairs, reported once, nothing tuned; oracle rows identical to M2 / M3):
+
+| | moved P / R | removed P / R | new P / R | unch. acc / kept | false-del. | unknown | assoc strict |
+|---|---|---|---|---|---|---|---|
+| B0 oracle | 38.2 / 24.7 | 21.2 / 69.9 | 85.0 / 59.6 | 80.9 / 80.9 | 95.0 | 0 | 91.4 |
+| B0 perception | 22.4 / 8.1 | 4.2 / 91.8 | 3.3 / 12.9 | 2.2 / 2.2 | 95.9 | 0 | 2.0 |
+| B1 oracle | 38.2 / 24.7 | 66.0 / 45.2 | 85.0 / 59.6 | 80.9 / 92.9 | 9.5 | 31.6 | 91.4 |
+| **B1 perception** | 22.4 / 8.1 | 17.7 / 57.5 | 3.3 / 12.9 | 2.2 / **90.4** | **9.4** | 81.2 | 2.0 |
+
+- Val candidates: 7.8 per pair, 45.8% explained by a GT instance. Recall: new 27.5% (labelled 17.5%, n = 171), moved-to 46.4% (labelled 22.1%, n = 235).
+- Door filter on val: 115 of 969 clusters dropped, in 35 pairs.
+- Perception B0 / B1 are weak because of B0's matching, not the removal rule:
+  - unchanged objects produce no candidate, so they are never matched;
+  - same-label candidates pull far nodes into `moved` (localisation error median 1.64 m);
+  - new candidates are absorbed by same-label nodes.
+
+**Code:**
+- `perception/residual.py`: `nearer_mask`, `nearer_points`, `SurfaceFilter`.
+- `perception/voxels.py`: `VoxelEvidence`, `pack_keys` / `unpack_keys`.
+- `perception/cluster.py`: `connected_components` (Chebyshev link), `cluster`, `Candidate`, `door_regions`, `drop_door_clusters`.
+- `perception/labeler.py`: `CLIPLabeler` (cached), `StubLabeler`.
+- `perception/source.py`: `PerceptionSource`.
+- `train_meta.py`: `clip_vocab_table`, `perception_vocab`, `train_scans`, `label_table`.
+- `obs/base.py`: `RefContext.nyu40`, `.object_nyu40()`, `.faces_of()`. `change/pipeline.prepare_pair` fills `nyu40`.
+- `eval/metrics.py`: `perception_obs_truth`, `candidate_counts`, `gt_rescan_boxes`, `obs_node`; `score_pair(candidates=)`; metrics `cand_*`; `use_label=` on the §5 rule.
+- `eval/harness.py`:
+  - perception mode with `_TeeSource` (visibility-only oracle for `visible`);
+  - `make_labeler`;
+  - `outputs/<run>/candidates/*.json`;
+  - per-pair `run.perception` stats, `clip_device`, CLIP crop / cache counts.
+- `eval/m4_checks.py` + CLI `lsg m4 [--no-sweep]`.
+
+**Config:** new blocks `train_meta` and `perception` (incl. `perception.clip`).
+
+**Dependencies:** `torch` 2.5.1 + `torchvision` 0.20.1 (cu121 index), `open_clip_torch`.
+
+**Tests:**
+- 115 fast (≈ 10 s) + 6 slow (≈ 2 min) pass.
+- New: `test_perception.py` (14), shared `tests/synth.py` (helpers moved out of `test_online.py`), a candidate-metrics toy test, the slow `test_m4_perception_b1_one_dev_pair` and `test_clip_labeler_real_model`.
+
+**Docs:** DECISIONS "2026-11-07 — M4"; DESIGN §3 / §6.4 / §6.6 / §6.13 / CLI / §9; CODE_STRUCTURE; AI_USAGE.
 
 ### M3 (2026-11-06), acceptance passed — `uv run lsg eval --split dev_train --obs oracle --method B1` → `outputs/m3_dev_final/metrics.json`; val report `outputs/m3_final/metrics.json` (git `6e71d0c`, clean)
 
@@ -144,24 +198,6 @@ DESIGN.md (the spec) and DECISIONS.md (the dated log, with the reasons) stay the
 
 ## Open items by milestone
 
-### M4 — perception
-- **Plug into M3:**
-  - `PerceptionSource.observe(frame, ref_render)` gets the reference render (`RefRender.depth`, `.labels`) from `run_online`. No second render is needed for the residual (§3 step 1).
-  - The harness runs `run_online` once per mode. Votes do not depend on the mode, so for `--obs perception,oracle` one loop could feed both sources; optional speed-up.
-  - The voxel multi-view filter (§3 step 4) can reuse `change.visibility.Decorrelator` with voxel keys.
-- **Door swings → false "new" candidates.**
-  - In val, 12 doors are in `rigid`. Nearly all rotate 4°–120° about the vertical axis (hinge swings).
-  - Structure is rendered from the *reference* mesh. An opened door therefore leaves "nearer" residuals, and the §3 step-2 structure filter (walls / ceiling / floor only) does not remove them.
-  - Fix: add reference **door** surfaces (nyu40 8), probably all structure classes, to the structure filter, or drop candidates overlapping a reference door's swing region.
-  - Check the effect on dev, then log it in DECISIONS.
-- `perception/` may import `lsg.graph` (relations / build). It must not import `eval/` or `oracle/`.
-- `PerceptionSource` implements `obs.ObsSource`, with tokens `c<k>`. `test_no_leak.py` already scans `perception/` for imports **and** for rescan-annotation reads (`load_scan`, `.rigid`, `"semseg"`, …). Keep it green.
-- **Harness work for perception mode** (`eval/harness.py` raises `NotImplementedError` for it now):
-  - `obs_truth`: token → GT rescan instance, using the §5 rule against GT new instances **and** the rescan instances of reference objects (`GTObject.centroid_new / aabb_new_*`);
-  - `visible`: GT-visible rescan ids for the association denominator; run `OracleSource`'s visibility pass inside `eval/`;
-  - `label_nyu = dssg.label_to_nyu40(root)` for `match_new`.
-- `dssg.label_to_nyu40` uses **all** of `objects.json`. That is fine for eval's class mapping. The method's CLIP vocabulary must still come from train metadata only (§2.3).
-
 ### M5 — association, moved test, update_graph, relation eval
 - **Confirmed-in-place skip (B2)** uses `change.visibility.confirmed_in_place` (≥ k_seen counted seen, no counted free). On dev, 23 / 34 unchanged objects are confirmed and 4 / 34 have ≥ 2 counted free votes (DECISIONS M3). Check that B2 does not turn these into `removed` when their match fails.
 - B1's B0 matching still pairs unseen reference nodes with far same-label observations (false-move rate 2.4% on val). B2's Hungarian with a position term should fix this.
@@ -184,12 +220,25 @@ DESIGN.md (the spec) and DECISIONS.md (the dated log, with the reasons) stay the
 - B0 keeps the reference relations unchanged; `update_graph` should be added on top.
 - Methods must keep setting `obs_token` on associated reference nodes: the association metric reads it.
 - `next_to` rule (AABB gap ≤ 0.15 m) is provisional and exported only.
+- **Perception needs B2 most** (M4 val): with B0 matching, perception's unchanged strict accuracy is 2.2% and association 2.0%, because unchanged objects produce no candidates.
+  - Confirmed-in-place must carry unchanged objects in perception mode: 23 / 34 on dev are confirmed by votes alone.
+  - Hungarian with a position term must stop far same-label candidates from becoming `moved` (perception moved localisation error median 1.64 m on val).
+  - The soft label term should use `label_topk`. Candidate labels are often wrong but in the top-5: on dev, moved-to recall is 66.7% class-agnostic vs 26.7% labelled.
+- **False candidates** (dev: 63% unexplained; val: 54%). They are mostly plants (moving foliage, poor reconstruction), black TV screens (reference mesh holes) and clutter.
+  - Possible fixes: residual inside the bbox of a confirmed-in-place reference node → not a candidate (mesh-hole / foliage guard); or a minimum candidate size per label.
+  - Measure with `cand_explained` and new P on dev only.
+- **Door filter cost:** it dropped the moved rack on 0ad2d3a1 (next to a door; dev moved-to recall 73.3% → 66.7%). On val it drops 115 of 969 clusters. Revisit `door_frac` / radius on dev if moved recall near doors matters.
+- `min_voxels` sweep on dev (3 / 5 / 10): moved-to recall 73.3 / 66.7 / 66.7%, candidates per pair 33.3 / 27.3 / 22.0. Spec value 5 kept, no tuning at M4.
 
 ### M6 — confidence, texture rendering, appearance
 - **Thin / soft removed objects get `seen`, not `free`.** Example: dev pillow r50 on e2847ff7 (GT removed): 23 counted seen, 0 free. On val, 39.7% of GT-removed objects have < 2 counted free votes. Some are unseen; some are where depth cannot tell, which is the case the appearance residual targets. Measure with `free_ev_removed` before and after.
 - Log-odds confidence (§6.11) builds on `NodeVotes` counted seen / free. The per-visit clip and class priors are still to do. `Node.confidence` is still None.
 - OBJ ↔ PLY vertex/face correspondence is still **unverified** (DESIGN §2.1). Check it before using textures.
 - Textures are in `data/<ref>/mesh.refined.v2.obj|.mtl|_0.png` for all 72 references.
+- **GPU availability is intermittent.** The GTX 1650 is a hybrid-laptop dGPU. It was powered down at the start of M4 and was unavailable for the val run (CLIP fell back to CPU: 3,912 crops, ~6 min for B1 val incl. everything). DINOv2 patch features per frame need the GPU.
+  - Check `torch.cuda.is_available()` before long runs; the `run` block records `clip_device`.
+  - Consider a Windows power setting / NVIDIA control panel "High-performance GPU" for python.exe.
+- Thin removed objects: perception mode gets the same votes as oracle (B1 removal identical), so the appearance residual helps both modes equally.
 
 ### M7 — ablations
 - Switches already in place: `decorrelation.enabled` (on / off), `visibility.tau_free` (sweep), `visibility.erode_px`. **Immediate vs deferred commitment** is not implemented yet. Idea: a method variant that commits `removed` at the first frame with ≥ k_free counted free votes, and keeps it even if the node is matched later.
@@ -213,5 +262,5 @@ DESIGN.md (the spec) and DECISIONS.md (the dated log, with the reasons) stay the
   3. *optionally*, after M7, add a separate "door open/closed changed" diagnostic on door nodes (n = 12 in val), not mixed into moved F1.
 
   Erik has not decided on point 3 yet.
-- **AI_USAGE.md:** "Erik: (fill in)" is still open for the M0, M1, M2 and M3 rows.
+- **AI_USAGE.md:** "Erik: (fill in)" is still open for the M0, M1, M2, M3 and M4 rows.
 - **DECISIONS 2026-11-05 "Milestones re-scoped to M1–M8"** is still marked "provisional — Erik to confirm".

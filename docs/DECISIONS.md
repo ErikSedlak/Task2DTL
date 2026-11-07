@@ -132,3 +132,73 @@ Format: **date — decision.** Why. *Alternatives considered.* (status: fixed / 
   
   (fixed)
 - **No new dependencies** (`scipy.ndimage` for erosion is part of scipy, already a dependency). (fixed)
+
+## 2026-11-07 — M4 (Claude Code, confirmed by Erik where noted)
+- **Dependencies: `torch` 2.5.1 + `torchvision` 0.20.1, CUDA 12.1 build, and `open_clip_torch`** (Erik: CUDA build now).
+  - Source: an explicit `pytorch-cu121` index in `pyproject.toml` (`[[tool.uv.index]]` + `[tool.uv.sources]`). torch 2.5 works with `numpy<2`.
+  - open_clip pulls in `timm`, `huggingface_hub`, `ftfy` and `regex`. The CLIP weights (~600 MB) go to the user's HF cache on first use.
+  - torch is imported lazily, inside `perception.labeler` only. Fast tests and oracle runs never load it.
+  - `device: cuda` falls back to CPU when CUDA is unavailable. On this laptop the GTX 1650 was powered down at first (`torch.cuda.is_available()` False, device status "Unknown"); a few minutes later it was available without any change. The `clip_device` field in the `run` block records which device each run used.
+  - *Alt: CPU-only torch now (~200 MB), CUDA at M6.* (fixed)
+- **CLIP model = `ViT-B-32-quickgelu` with `openai` weights.** The OpenAI checkpoint was trained with QuickGELU. Plain `ViT-B-32` loads it with GELU, and open_clip warns about the mismatch. (fixed)
+- **Clustering = connected components** (Erik; no scikit-learn): scipy `cKDTree.query_pairs` (Chebyshev metric) + `scipy.sparse.csgraph.connected_components`.
+  - Two kept voxels are linked if their Chebyshev distance is ≤ `link_voxels` = **2** voxels. The plan said 26-connectivity (link 1).
+  - Why 2: in the synthetic tests, one box and one wall-adjacent block each split into 2 clusters. Grazing-angle sampling of the top face, and side-face edges seen from fewer than 3 viewpoints, leave one-voxel gaps inside one surface. Link 2 bridges these gaps; it also merges objects closer than ~8 cm.
+  - *Alt: DBSCAN (eps = 2 voxels, same effect, extra dependency); 26-connectivity (splits objects).* (provisional, tune on dev)
+- **Structure filter (§3 step 2)** = points ≤ `struct_dist` = 10 cm from reference faces of **every structure class except floor and floor mat** (nyu40 2, 20). That covers walls, ceiling, doors, windows, pictures, curtains, … Floor and floor mat are excluded so objects standing on the floor survive; their bottom ~5 cm already falls under the 5 cm surface filter. (provisional, tune on dev)
+- **Door swing-region filter** (Erik: surface filter + swing region; STATUS M4 open item).
+  - Rule: a cluster is dropped if ≥ 50% of its voxels lie inside a reference door's swing region. The region is two vertical cylinders of radius door width + 10 cm, one around each possible hinge edge (the ends of the longer horizontal AABB side), over the door's height ± 10 cm.
+  - Dev effect (3 pairs, B1, `min_voxels` 5): 12 clusters dropped (27.3 instead of 31.3 candidates per pair).
+    - 3 of them correspond to GT instances: the **moved rack** on 0ad2d3a1 (GT moved 0.28 m, standing next to the door), plus a plant and clothes (both nonrigid, `dont_care`).
+    - 9 are unexplained by any GT instance. The 295-voxel cluster on e2847ff7 next to door 12 is consistent with a swung leaf. Door swings are not annotated in the dev rescans, so this cannot be confirmed from GT.
+    - Moved-to candidate recall 73.3% → 66.7% (n = 15); new recall unchanged.
+  - Kept **on** (Erik's choice). The cost (objects standing within a door width of a hinge) is now measured; revisit with val's `door_dropped` counts.
+  - *Alt: surface filter only.* (provisional)
+- **Reference annotations in `perception/` go through `RefContext`**: new fields `nyu40` (3DSSG, PLY fallback; filled in `prepare_pair`) and `faces_of(oids)`.
+  - The no-leak test bans `.face_labels` in `perception/` by attribute name; it cannot tell reference from rescan. The reference sub-mesh is therefore built in `obs/`.
+  - Reference annotations are allowed method input (DESIGN §1); the ban stays as it is. (fixed)
+- **CLIP vocabulary** = reference-graph labels ∪ the 100 most frequent thing/anchor labels of the train split (`lsg.train_meta`).
+  - Source: 3RScan.json `type == "train"` scans (references and rescans), excluding the rooms of `dev_train.txt` and `eval_relchange_train.txt`; labels from 3DSSG `objects.json`.
+  - A label's nyu40 comes from the G_ref node if there is one, else from the train majority.
+  - The module lives outside `perception/`, which may not read 3DSSG.
+  - It reads train *rescans'* object labels, i.e. training data of other rooms. The rescan under evaluation is never read.
+  - *Alt: train references only.* (fixed)
+- **CLIP labelling.** Per candidate, the image embeddings of the 5 largest-mask crops are normalised and averaged, then softmaxed against `"a photo of a {label}"`. The top-5 is stored, rounded to 1e-4 with ties broken by label, and cached in `cache/clip/` (key = crop pixels + model + vocabulary). Candidates without a usable crop get the label `object` and an empty `label_topk`. (provisional)
+- **Candidate geometry and masks.**
+  - Points: one mean residual point per kept voxel (≈ surface sampling, like GT's vertex means).
+  - Masks: the pixels whose residual point fell into one of the cluster's voxels. They are recorded during `observe`; no re-projection pass.
+  - Crops: mask bounding box +10% per side, depth → colour pixels by the per-axis resolution scale (as `OracleSource`), then `rot90(k=-1)`.
+  - Pixels without a reference hit (`d_exp = 0`) are never nearer pixels; depth > 4 m is ignored. (provisional)
+- **Synthetic acceptance check** (box added → exactly one candidate, centroid error < 5 cm) is measured against the **observable-surface centroid** (top + 4 sides, area-weighted). This is the analogue of eval's GT centroids, which are means of reconstructed mesh vertices, and object bottoms are never observed.
+  - Result: 1 candidate, error **2.1 cm** (xy 0.0 cm).
+  - Against the solid cube centre the error is 5.1 cm, all of it in z: the top face is seen, the bottom never, and the lowest 5 cm are cut by `surf_dist`. (fixed)
+- **Perception eval wiring.**
+  - `obs_truth`: §5 rule, one-to-one, greedy by IoU, of candidates against GT new ∪ the rescan instances of reference objects.
+  - `visible`: a visibility-only `OracleSource` fed by the same online loop (eval-side `_TeeSource`); it never reaches the method.
+  - `label_nyu = dssg.label_to_nyu40`.
+  - **Candidate diagnostics** (method-independent; perception pairs only):
+    - recall vs GT new and vs GT moved-to (the rescan instance of GT-moved objects), class-agnostic (centroid ≤ 0.30 m or IoU ≥ 0.25, one-to-one over all targets jointly) and with the §5 label rule;
+    - candidates per pair;
+    - share of candidates within the geometric gate of *any* GT rescan instance ("explained").
+  - Per-pair candidate lists go to `outputs/<run>/candidates/`. (fixed)
+- **M4 dev results** (`lsg m4`, reported, nothing tuned).
+  - Candidate recall (B1, perception): new **66.7%** (2 / 3), labelled 66.7%; moved-to **66.7%** (10 / 15), labelled 26.7%.
+  - 27.3 candidates per pair, of which 36.6% are explained by a GT instance.
+  - Unexplained candidates are mostly plants (foliage moves and is poorly reconstructed), black TV screens (mesh holes) and clutter.
+  - Sweep: `min_voxels` 3 / 5 / 10 → 33.3 / 27.3 / 22.0 candidates per pair, moved-to recall 73.3 / 66.7 / 66.7%. Spec value 5 kept.
+  - B0 / B1 in perception mode are as expected for the B0 matching. Unchanged objects produce no candidates, so B0 deletes them (false-deletion rate 91.7%) and B1 keeps them `unknown` (unchanged kept 85.3%, false-deletion 16.7%). Labelled candidates of new objects are taken over as same-label `moved` matches (new R 0 / 3).
+  - B2's confirmed-in-place skip and Hungarian matching (M5) are what make perception usable.
+  - Determinism: the default-config sweep run and `eval_B1` gave identical perception `metrics`. A slow test runs one dev pair twice. (fixed)
+- **M4 val report, B0 / B1 in both modes** (`outputs/m4_val_B1`, `m4_val_B0`; run once, nothing tuned). The oracle rows reproduce M2 (B0) and M3 (B1) exactly.
+  - Perception B1:
+    - moved P 22.4 / R 8.1%; removed P 17.7 / R 57.5%; new P 3.3 / R 12.9%;
+    - unchanged strict 2.2%, kept 90.4%; false-deletion **9.4%** (n = 737; B0 perception 95.9%); false-move 3.7%; unknown rate 81.2%; association 2.0% strict.
+  - Candidates: 7.8 per pair, 45.8% explained by a GT instance. Recall: new **27.5%** (labelled 17.5%, n = 171), moved-to **46.4%** (labelled 22.1%, n = 235).
+  - Door filter: 115 of 969 clusters dropped, in 35 of 110 pairs.
+  - The gap to oracle is mostly the B0 matching:
+    - perception sees only changed regions, so unchanged objects are never matched (strict accuracy 2%);
+    - same-label candidates pull far reference nodes into `moved` (localisation error median 1.64 m, n = 19);
+    - new candidates are absorbed by same-label nodes.
+  - The B1 removal rule works identically in both modes (same votes).
+  - CLIP ran on CPU for this run (CUDA unavailable at the time; `run.per_pair[].clip_device`). The CLIP cache key does not include the device, so the first computed labels are reused; a cold GPU run could differ in the 4th decimal of the scores. (fixed)
+- **No new dependency besides torch / torchvision / open_clip_torch** (scipy's KD-tree and csgraph were already available). (fixed)

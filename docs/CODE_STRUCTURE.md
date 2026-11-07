@@ -1,12 +1,12 @@
 # Code structure — what is where and what it does
 
-State: end of milestone M3 (2026-11-06). Covers everything in `src/lsg/`, `tests/` and `configs/`. For *why* things are done this way, see `DESIGN.md` (the spec) and `DECISIONS.md` (the log); this file only explains *what* the code does.
+State: end of milestone M4 (2026-11-07). Covers everything in `src/lsg/`, `tests/` and `configs/`. For *why* things are done this way, see `DESIGN.md` (the spec) and `DECISIONS.md` (the log); this file only explains *what* the code does.
 
 ## 1. The project in one paragraph
 
 3RScan contains rooms that were scanned several times. The first scan of a room is the **reference**; later visits are **rescans**. Between visits, furniture moves, objects disappear and new ones appear. The goal is to take the reference room's scene graph (objects + "cup is on the table" relations), look at a rescan's camera frames, and update the graph: which objects are unchanged, moved, removed, unknown (not seen) or new.
 
-M0 built the foundation: reading the data, drawing ("rendering") a scanned room from any camera position, lining up the rescan with the reference, and checking on real data that all of this is correct. M1 added the reference scene graph (objects + support relations, from annotations or from geometry) and the ground truth of what changed between two visits. M2 added the observation interface (what the method sees of a rescan), the oracle version of it, the first (naive) change detector B0, and the scoring harness `lsg eval`. M3 added the online frame loop: every rescan frame is compared with the rendered reference, each object gets "seen" / "seen through" votes, votes from nearly the same camera position count once, and B1 deletes an object only if it was seen through from at least two different viewpoints. Otherwise the object becomes `unknown`.
+M0 built the foundation: reading the data, drawing ("rendering") a scanned room from any camera position, lining up the rescan with the reference, and checking on real data that all of this is correct. M1 added the reference scene graph (objects + support relations, from annotations or from geometry) and the ground truth of what changed between two visits. M2 added the observation interface (what the method sees of a rescan), the oracle version of it, the first (naive) change detector B0, and the scoring harness `lsg eval`. M3 added the online frame loop: every rescan frame is compared with the rendered reference, each object gets "seen" / "seen through" votes, votes from nearly the same camera position count once, and B1 deletes an object only if it was seen through from at least two different viewpoints. Otherwise the object becomes `unknown`. M4 added perception mode: the method finds rescan objects itself, from places where the measured depth is nearer than the rendered reference (something new stands there), keeps only spots seen from several viewpoints, groups them into candidate objects and names each one with CLIP from colour crops.
 
 ## 2. Folder map
 
@@ -19,6 +19,7 @@ Task2/
 │   ├── cli.py               the `lsg` command
 │   ├── config.py            loads the YAML config, finds data/outputs folders
 │   ├── runinfo.py           run names, git commit, writes metrics.json
+│   ├── train_meta.py        train-split metadata: the CLIP vocabulary (later: class priors)
 │   ├── classes.py           which object classes are "structure", "anchor", "thing"
 │   ├── io/                  READING DATA
 │   │   ├── scan3r.py        3RScan: metadata, meshes + labels, camera frames
@@ -44,13 +45,19 @@ Task2/
 │   │   ├── gt.py            ground truth per pair: moved / removed / new / ...
 │   │   ├── gt_stats.py      M1 checks: GT counts, displacement histogram, rule sanity
 │   │   ├── metrics.py       scoring: matching rules, per-pair counts, averages + bootstrap CIs
-│   │   └── harness.py       `lsg eval` / `lsg run`: method + observations + GT -> metrics.json
+│   │   ├── harness.py      `lsg eval` / `lsg run`: method + observations + GT -> metrics.json
+│   │   └── m4_checks.py     `lsg m4`: perception on dev, candidate recall, overlay PNGs, sweep
 │   ├── oracle/              ground-truth rescan objects: the upper-bound mode
 │   │   └── source.py        OracleSource
-│   └── perception/          (stub; M4) finds rescan objects from depth/colour alone: the headline mode
+│   └── perception/          finds rescan objects from depth/colour alone: the headline mode
+│       ├── residual.py      "nearer" depth pixels -> 3D points, minus reference surfaces / structure
+│       ├── voxels.py        4 cm voxel grid counting distinct viewpoints per voxel
+│       ├── cluster.py       groups kept voxels into candidates; door swing-region filter
+│       ├── labeler.py       CLIP zero-shot labels from colour crops (cached)
+│       └── source.py        PerceptionSource: the above as an ObsSource
 ├── tests/                   automated tests (`uv run pytest -q`)
 ├── data/      (git-ignored) the downloaded dataset
-├── cache/     (git-ignored) refined alignments (cache/align/), later model features
+├── cache/     (git-ignored) refined alignments (cache/align/), CLIP labels (cache/clip/)
 └── outputs/   (git-ignored) results of runs: outputs/<run_id>/metrics.json, PNGs, graphs/
 ```
 
@@ -176,6 +183,21 @@ The big JSON files are parsed only once per run and then reused.
 - `RefContext` (the reference scan + its graph) and `SeqInfo` (rescan id, camera parameters, the refined `T_align`, which frames are processed) bundle what the method is allowed to know.
 - `PackedMasks` stores the per-frame masks bit-packed (8x smaller) but reads like a dict of boolean images.
 
+### `train_meta.py` — what the method may learn from the train split
+- `clip_vocab_table(root, cfg)`: thing/anchor labels of the train scans with their class id and count. The rooms of the dev and relchange pair lists are excluded, and validation / test scans are never read.
+- `perception_vocab(G_ref, table, top_n)`: the labels CLIP chooses from = the reference graph's labels plus the 100 most frequent train labels.
+
+### `perception/` — finding objects without annotations (headline mode, M4)
+The rule: no imports from `oracle/` / `eval/`, and no rescan annotations. Inputs are the reference (mesh, labels, graph) and the rescan's depth, colour, poses and `T_align`.
+
+| File | What it does |
+|---|---|
+| `residual.py` | Per frame: pixels where the camera measured something at least 10 cm **in front of** the rendered reference surface ("nearer"), turned into 3D points. Points within 5 cm of the reference mesh are dropped, and so are points within 10 cm of walls, doors, windows and other structure (not the floor, so objects standing on it survive). `SurfaceFilter` does the distance tests. |
+| `voxels.py` | `VoxelEvidence`: puts the points into 4 cm cubes and counts from how many *different* viewpoints each cube was hit, with the same 30 cm / 20° rule as the votes. A person walking by or sensor noise hits a cube from one viewpoint only; real objects are seen from many. |
+| `cluster.py` | Cubes seen from ≥ 3 viewpoints are grouped into candidates (cubes at most 2 cubes apart belong together); groups of fewer than 5 cubes are dropped. Groups lying mostly in the swing area of a reference door are dropped too: a door opened since the reference visit would otherwise look like a new object. |
+| `labeler.py` | `CLIPLabeler`: shows CLIP the colour crops of a candidate and scores them against "a photo of a {label}" for every vocabulary label; keeps the top 5. Results are cached in `cache/clip/`, so reruns give identical labels. `StubLabeler` gives fixed answers for tests. |
+| `source.py` | `PerceptionSource`: runs the above frame by frame (`observe`) and at the end (`finish`) turns each candidate into an `ObsInstance`: points, per-frame masks, 5 upright crops, CLIP label, token `c0`, `c1`, … |
+
 ### `oracle/source.py` — the upper-bound observations
 - `OracleSource` renders the rescan's own **annotated** mesh from each rescan camera. Every object that shows up (where the sensor also has valid depth) becomes an `ObsInstance` with its real label and the mesh vertices that were seen. Objects with fewer than 50 seen vertices are dropped.
 - Object ids are replaced by shuffled tokens (`o0`, `o1`, ...) so the method cannot cheat by id; `token_map()` undoes the shuffle and is only used by `eval/`.
@@ -207,9 +229,15 @@ The big JSON files are parsed only once per run and then reused.
 - `score_pair(G_upd, gt, ...)`: counts for one pair: hits / false alarms / misses for moved, removed and new; unchanged right / kept; false deletions and false moves on objects the rescan annotation doesn't mention; how often the method paired an object with the right observation; moved recall per distance and size bucket; how far off the new position of a correctly detected move is.
 - `aggregate(...)`: sums the counts over all pairs, turns them into percentages, and adds a 95% confidence interval by resampling pairs (bootstrap). Every number comes with its support `n`.
 
+### `eval/m4_checks.py` — the M4 checks (`uv run lsg m4`)
+- Runs B0 and B1 on the dev pairs in both modes and reports how many real changes got a candidate: **candidate recall** against new objects and against the new places of moved objects, with and without requiring the right label.
+- Draws one overlay PNG per dev pair: the colour frame with the candidates coloured and labelled, plus yellow markers where GT says a new / moved object is.
+- Sweeps the door filter (on / off) and the minimum cluster size (3 / 5 / 10) as a diagnostic.
+
 ### `eval/harness.py` — `lsg eval` and `lsg run`
 - For every pair: load the GT, prepare the pair, run the online loop with the oracle, run the method with the observations and votes, score, and save the updated graph to `outputs/<run>/graphs/<mode>/` (snapshots to `outputs/<run>/snapshots/<mode>/` if asked).
 - Besides the scores it reports *evidence diagnostics* that do not depend on the method: how many truly unchanged / removed / absent objects got free (seen-through) evidence.
+- Perception mode: the frames also go to a hidden `OracleSource` (only to know which GT objects were visible, for the association score; the method never sees it). Candidates are matched to GT objects with the §5 rule (same label or class, and close). The candidate lists are saved to `outputs/<run>/candidates/`.
 - Pairs of the same reference run in one worker process (4 in parallel by default). Results are sorted back into a fixed order, so the `metrics` block of metrics.json is identical across reruns; timings go into a separate `run` block.
 
 ### `cli.py` — the command line
@@ -217,7 +245,8 @@ The big JSON files are parsed only once per run and then reused.
 - `uv run lsg m1` runs the M1 checks (about 70 s). Exit code 0 means all four passed.
 - `uv run lsg splits textures` writes `splits/download_textures.txt`.
 - `uv run lsg graph --scan <reference id> --mode gt|geometric [--out file.json]` exports one reference graph and validates it.
-- `uv run lsg eval --split eval_val --obs oracle --method B0|B1 [--workers N] [--frac F --seed S] [--snapshots]` runs and scores a whole split (~65 s for val); `uv run lsg run --pair <ref> <rescan> --obs oracle --method B1 [--no-snapshots]` does one pair and writes snapshots. Both print a results table and write `outputs/<run>/metrics.json`. `--obs perception` answers "arrives at M4" for now.
+- `uv run lsg eval --split eval_val --obs oracle --method B0|B1 [--workers N] [--frac F --seed S] [--snapshots]` runs and scores a whole split (~65 s for val); `uv run lsg run --pair <ref> <rescan> --obs oracle --method B1 [--no-snapshots]` does one pair and writes snapshots. Both print a results table and write `outputs/<run>/metrics.json`. `--obs perception,oracle` runs both modes.
+- `uv run lsg m4 [--no-sweep]` runs the M4 checks on dev (~4 min, GPU for CLIP if available).
 - Later milestones add `lsg ablate`.
 
 ## 6. The one rule that shapes the layout
@@ -247,15 +276,15 @@ These may only be read inside `eval/` (scoring, checks) and `oracle/` (the upper
 | `test_pipeline.py` | Frame chunks; alignment cache hits and misses. |
 | `test_visibility.py` | Frame votes on hand-made depth maps (seen, free, occluded, too few pixels, invalid depth, the 50% rule, erosion); decorrelation (same viewpoint 30× → 1 vote, 30 cm / 20° limits, independent keys, off switch); vote tallies. |
 | `test_online.py` | A synthetic room with real ray casting: a removed box → free votes → `removed`; removed but occluded / out of view → `unknown` (B0 deletes all three); one viewpoint repeated → 1 vote; tentative snapshots switch from `unknown` to `removed` mid-walk; works with `OracleSource`. |
+| `test_perception.py` | Synthetic room with real ray casting: a box added → exactly one candidate, centroid within 5 cm (of its visible surface); unchanged room → none; one viewpoint repeated → none (decorrelation); object flat against a wall filtered, 30 cm off the wall kept; swung door dropped by the swing region (kept with the filter off); crops reach the labeller; CLIP top-k order, ties and cache; nearer-pixel rules; voxel view counting; clustering; door regions; train vocabulary excludes dev/relchange rooms and val. Shared scene helpers live in `synth.py`. |
 | `test_b1.py` | B1's rule on hand-made votes (2 counted free → removed, 1 → unknown, matched nodes as in B0). |
-| `test_real_data.py` | *(slow, needs `data/`)* Renders a real dev frame and compares with its depth; val GT counts reproduce DESIGN §2.2; one dev pair end-to-end with oracle + B0, twice, with identical `metrics`; one dev pair with B1: deterministic, no more false deletions than B0, snapshots valid. |
+| `test_real_data.py` | *(slow, needs `data/`)* Renders a real dev frame and compares with its depth; val GT counts reproduce DESIGN §2.2; one dev pair end-to-end with oracle + B0, twice, with identical `metrics`; one dev pair with B1: deterministic, no more false deletions than B0, snapshots valid; one dev pair in perception mode (B1) twice: identical `metrics`, candidate files, valid graphs; real CLIP on two crops. |
 
-Run with `uv run pytest -q` (100 tests, ~8 s); the slow ones with `uv run pytest -q -m slow` (~2 min).
+Run with `uv run pytest -q` (115 tests, ~10 s); the slow ones with `uv run pytest -q -m slow` (6 tests, ~2 min).
 
 ## 8. What is not built yet
 
 Planned in DESIGN §6 and §9 (spec v2), in order:
-- M4: perception mode: finding new/moved objects from depth differences and naming them with CLIP (`perception/`);
 - M5: object matching, moved test, graph update + relations (`change/`, `graph/`);
 - M6: confidence and priors; texture rendering + appearance comparison for thin objects (`perception/appearance`);
 - M7: all ablations; M8: visualisation (`viz/`) and write-up.

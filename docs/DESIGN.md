@@ -141,7 +141,7 @@ while read id; do for t in mesh.refined.v2.obj mesh.refined.mtl mesh.refined_0.p
   2. **Back-project and filter.** Back-project them to the reference frame. Drop points within 5 cm of the reference mesh surface. Drop points near structure surfaces (wall, ceiling, floor), except points standing on the floor.
   3. **Voxel grid:** accumulate the remaining points in a 4 cm *(tune)* grid.
   4. **Multi-view filter:** keep a voxel only if it was hit from ≥ 3 decorrelated viewpoints. This filters people, sensor noise and mesh holes.
-  5. **Cluster:** at the end, cluster the kept voxels (DBSCAN or connected components *(tune)*), and drop clusters below a minimum size *(tune)*.
+  5. **Cluster:** at the end, cluster the kept voxels: connected components, two voxels linked if their Chebyshev distance is ≤ `link_voxels` = 2 voxels *(tune)* (M4: bridges one-voxel gaps of sparse grazing-angle sampling inside one surface). Drop clusters below `min_voxels` = 5 *(tune)*. Drop clusters with ≥ 50% of their voxels inside a reference door's swing region (M4, door swings).
 
   Each remaining cluster is a candidate. Appearance mismatches off reference nodes, on supporting surfaces, add thin-object voxels (§6.6).
 - **Appearance residual**: the reference texture is rendered at the rescan pose and compared with the observed colour, only where depth agrees (`present`).
@@ -220,7 +220,7 @@ Per pair (ref R, rescan S). O_R and O_S are the objectIds in their semseg files.
 
 ## 6. Modules and interfaces (inputs → outputs; no implementation here)
 
-`src/lsg/` — every function is pure where possible and works in the reference frame. ✅ = exists (M0–M3).
+`src/lsg/` — every function is pure where possible and works in the reference frame. ✅ = exists (M0–M4).
 
 1. `io` ✅
    - `scan3r.load_meta(root) -> Meta` (3RScan.json, column-major transforms) ✅;
@@ -251,24 +251,24 @@ Per pair (ref R, rescan S). O_R and O_S are the objectIds in their semseg files.
      - `begin(ref_ctx, seq_info)`;
      - `observe(frame, ref_render) -> None`, called per processed frame, in time order;
      - `finish() -> list[ObsInstance]`.
-   - Implementations: `oracle.OracleSource` ✅, `perception.PerceptionSource` (M4). The change logic depends only on this interface.
-   - Also `RefContext` (reference scan, G_ref, floor_z) and `SeqInfo` (rescan id, intrinsics, **refined** `T_align`, processed frame ids). `ref_render` (`RefRender`: reference depth + objectId labels at the frame's aligned pose) is passed by `run_online` from M3 on.
+   - Implementations: `oracle.OracleSource` ✅, `perception.PerceptionSource` ✅ (M4). The change logic depends only on this interface.
+   - Also `RefContext` (reference scan, G_ref, floor_z, per-object nyu40; `faces_of(oids)` gives a reference sub-mesh, M4) and `SeqInfo` (rescan id, intrinsics, **refined** `T_align`, processed frame ids). `ref_render` (`RefRender`: reference depth + objectId labels at the frame's aligned pose) is passed by `run_online` from M3 on.
 5. `oracle` (upper bound) ✅ (M2)
    - `OracleSource`: renders the rescan's own labelled mesh at each frame, collecting per-instance masks, points (vertices of hit triangles, *these frames only*, mapped with the refined `T_align`) and crops (optional, off by default). A pixel counts only where the sensor depth is valid. IDs are shuffled with a seeded permutation; `token_map()` is read only by `eval/`.
    - It is the only reader of rescan labels outside `eval/`.
    - Instances with < 50 observed points *(tune)* are dropped.
-6. `perception` (headline). **Must never import `oracle/` or `eval/`, and never read rescan semseg, rescan PLY labels, rescan 3DSSG or the `rigid/removed/nonrigid` lists.**
-   - `residual.nearer_points(frame, d_exp, ref_ctx, cfg) -> points`: §3 candidate steps 1–2 (τ_new, surface and structure filters).
-   - `voxels.VoxelEvidence(voxel=0.04)`: `.add(points, cam_pose)` counts decorrelated viewpoints per voxel; `.kept(min_views=3)`.
-   - `cluster.cluster(voxels, cfg) -> list[Candidate]`: DBSCAN (scikit-learn) or connected components, min size *(tune)*.
+6. `perception` (headline) ✅ (M4, except `appearance`). **Must never import `oracle/` or `eval/`, and never read rescan semseg, rescan PLY labels, rescan 3DSSG or the `rigid/removed/nonrigid` lists.**
+   - `residual.nearer_points(depth, d_exp, K, pose_ref, filt, cfg) -> (points, pixels)` ✅: §3 candidate steps 1–2. `SurfaceFilter(ref_ctx, cfg)`: drop points ≤ `surf_dist` = 5 cm from the reference mesh and ≤ `struct_dist` = 10 cm from reference structure faces (all structure classes incl. doors, except floor and floor mat). `d_exp` comes from `run_online`'s reference render; pixels without a reference hit are excluded; depth > 4 m is ignored.
+   - `voxels.VoxelEvidence(voxel=0.04, d_dec, θ_dec)` ✅: `.add(points, cam_pose)` counts decorrelated viewpoints per voxel (the `Decorrelator` rule, vectorised); `.kept(min_views=3)`; per-voxel mean point.
+   - `cluster.cluster(voxel_idx, coords, points, cfg) -> list[Candidate]` ✅: connected components (scipy KD-tree + sparse graph, Chebyshev link ≤ `link_voxels`), `min_voxels` *(tune)*; `door_regions` / `drop_door_clusters`: swing region = vertical cylinders of radius door width + 10 cm around both possible hinge edges.
    - `appearance`:
      - `.mismatch(rgb_obs, rgb_exp, present_mask, cfg) -> mismatch map`;
      - features: DINOv2 ViT-S/14 patch features (default; upright for the network, mapped back to the stored orientation) or normalised colour (fallback);
      - output (i): free-like votes on thin-node pixels; output (ii): thin-object voxels off-node on supporting surfaces.
-   - `labeler.CLIPLabeler(vocab, model="ViT-B/32")`:
-     - `.topk(crops) -> label_topk` from the K = 5 largest projected upright crops;
-     - vocabulary = reference-graph labels ∪ the most frequent 3RScan thing/anchor labels (train metadata, §2.3).
-   - `source.PerceptionSource`: assembles the above into `ObsInstance`s (points, masks by projecting the cluster, crops, `label_topk`).
+   - `labeler.CLIPLabeler(vocab, model="ViT-B-32-quickgelu", pretrained="openai")` ✅ (`open_clip_torch`, frozen):
+     - `.topk(crops, k) -> label_topk`: mean normalised image embedding of the K = 5 largest upright crops → softmax over `"a photo of a {label}"` → top-k; cached in `cache/clip/`;
+     - vocabulary = reference-graph labels ∪ the 100 most frequent thing/anchor labels of train metadata (`lsg.train_meta`, §2.3; outside `perception/`, which may not read 3DSSG).
+   - `source.PerceptionSource(labeler, label_nyu, cfg)` ✅: assembles the above into `ObsInstance`s. Points = one mean point per voxel; masks = the pixels whose residual point fell into one of the cluster's voxels (stored during `observe`, no re-projection); crops = upright colour crops of the 5 largest masks (depth → colour by resolution scale, +10% margin); label = CLIP top-1; nyu40 from the vocabulary; tokens `c<k>` by cluster size.
 7. `change.pipeline` ✅ (M2) and `change.online` ✅ (M3)
    - `pipeline.select_frames` (stride + §7.3 chunk); `pipeline.prepare_pair` (G_ref + cached refined `T_align`; it gets only the raw `T_align` matrix, never the rescan's change lists); (M2's `collect_observations` was replaced by `run_online` at M3).
    - `baselines.b0` ✅ (§8; greedy one-to-one same-label matching); `baselines.b1` ✅ (M3; B0 matching + the §3 removed / unknown rule from counted free votes). Every method is `method(G_ref, obs, cfg, rescan_id, obs_mode, votes=)`.
@@ -307,6 +307,7 @@ Per pair (ref R, rescan S). O_R and O_S are the objectIds in their semseg files.
 13. `eval`
     - `gt.gt_changes(scan_meta, R, S, objs_R, objs_S, cfg) -> GTLabels` (§5) ✅; `gt.gt_parent_changes` ✅; `gt_stats.run_m1` (`lsg m1`) ✅;
     - `metrics.match_new(pred_new, gt, mode, cfg)` (§5 matching rules) ✅;
+    - `metrics.perception_obs_truth` (perception token → GT rescan instance, §5 rule against GT new ∪ rescan instances of reference objects) and `metrics.candidate_counts` (candidate recall vs GT new / moved-to, class-agnostic and labelled; share of candidates explained by any GT instance) ✅ (M4);
     - `metrics.score_pair(G_upd, gt, mode, cfg, obs_truth)` → per-pair counts, and `metrics.aggregate` (micro-average + bootstrap CI), including localisation error and size buckets ✅ (the spec's `score_changes`);
     - `harness.run_eval` / `run_split` (`lsg eval`, `lsg run`) ✅;
     - `score_relations(G_upd, gt_rel) -> dict`;
@@ -316,12 +317,12 @@ Per pair (ref R, rescan S). O_R and O_S are the objectIds in their semseg files.
     - `topdown_png(G_ref, G_upd)`: static before/after figure for slides/report.
 
 CLI:
-- `uv run lsg run --pair R S --obs perception|oracle --method full --frac 1.0 --seed 0 [--no-snapshots]` ✅ (oracle, B0 / B1; writes snapshots);
-- `uv run lsg eval --split eval_val --obs perception,oracle --method … [--workers N] [--snapshots]` ✅ (oracle, B0 / B1);
+- `uv run lsg run --pair R S --obs perception,oracle --method full --frac 1.0 --seed 0 [--no-snapshots]` ✅ (both modes, B0 / B1; writes snapshots; perception also writes `candidates/<ref>_<rescan>.json`);
+- `uv run lsg eval --split eval_val --obs perception,oracle --method … [--workers N] [--snapshots]` ✅ (both modes, B0 / B1);
 - `uv run lsg ablate …`;
 - `uv run lsg splits textures` ✅;
 - `uv run lsg graph --scan R --mode gt|geometric [--out f.json]` ✅;
-- `uv run lsg m0` ✅, `uv run lsg m1` ✅.
+- `uv run lsg m0` ✅, `uv run lsg m1` ✅, `uv run lsg m4 [--no-sweep]` ✅.
 
 ## 7. Evaluation protocol
 
@@ -407,7 +408,7 @@ Expected story:
 | M1 ✅ | done 5 Nov | reference graph (GT + geometric relations), `gt_changes`, GT statistics; `lsg splits textures` + texture download started | **Passed** (`lsg m1`, git 5ed8260): val counts 390 / 96 / 224 raw (171 new scored); histogram saved → τ_eval_move = 0.10 m (134 / 370 val moves `dont_care`); rule parent accuracy on reference scans 92.9% dev (n = 28, tuned) / 85.2% val (n = 575; 85.9% without floor parents), type accuracy given parent 100% / 85.3%; `download_textures.txt` lists 72 references, all downloaded |
 | M2 ✅ | done 6 Nov | `obs` interface + `OracleSource`; eval harness (both matching rules, size buckets, localisation error, bootstrap); B0 (oracle) | **Passed** (`lsg eval --split eval_val --obs oracle --method B0`, git 4577e4b): metrics.json written in **69 s** cold (alignment cache empty; 44 s cached; 4 workers), GT support 235 moved / 73 removed / 171 new / 1,401 unchanged / 737 absent-unlisted; `test_metrics.py` 5-object toy case incl. the perception rule; **no-leak test** (`test_no_leak.py`: AST import scan of all method-side packages, fresh-interpreter import closure, rescan-annotation reads in `perception/`); two cold runs + one cached run → identical `metrics`. B0 oracle on val: moved F1 30.0%, removed P 21.2% / R 69.9%, new F1 70.1%, **false-deletion rate 95.0%** |
 | M3 ✅ | done 6 Nov | online loop (`change.online`, `visibility`, `Decorrelator`), deferred commitment, snapshots; B1 (oracle) | **Passed** (git 6e71d0c): **decorrelation unit test** (`test_visibility.py`: the same viewpoint 30× → 1 counted vote; also end-to-end in `test_online.py`: 30 raw free → 1 counted → `unknown`); **synthetic scene** (`test_online.py`: box removed → ≥ 2 counted free votes → `removed` at the end; occluded / out of frustum → `unknown`, B0 → `removed`); **dev**: B1 false-deletion rate **16.7%** (2 / 12) < B0's 100%; **determinism**: two dev runs → identical `metrics`. B1 oracle on val (reported once): false-deletion rate **9.5%** (B0 95.0%), removed P 66.0% / R 45.2%, unchanged kept 92.9%, unknown rate 31.6% |
-| M4 | 17–18 Nov | perception end-to-end: residual points, `VoxelEvidence`, clustering, CLIP labelling, `PerceptionSource`; B0 + B1 in perception mode | **Synthetic**: box added → exactly one candidate, centroid error < 5 cm. Overlay PNGs of candidate clusters on 3 dev frames. Candidate recall vs GT new / moved-to objects on dev reported (no threshold yet). No-leak test passes on the real `perception/` code |
+| M4 ✅ | done 7 Nov | perception end-to-end: residual points, `VoxelEvidence`, clustering, CLIP labelling, `PerceptionSource`; B0 + B1 in perception mode | **Passed** (`lsg m4` → `outputs/m4_final`, git 9d67e8b): **synthetic** box added → exactly one candidate, centroid error 2.1 cm vs the observable-surface centroid (5.1 cm vs the solid centre, all in z; DECISIONS M4); **overlay PNGs** on 3 dev frames, inspected; **candidate recall on dev** (B1, perception): new 66.7% (2 / 3), moved-to 66.7% (10 / 15; labelled 26.7%), 27.3 candidates per pair; **no-leak test** on the real `perception/` code. Val (reported once): perception B1 false-deletion 9.4%, unchanged kept 90.4%, candidate recall new 27.5% / moved-to 46.4%; B0 matching limits perception (unchanged strict 2.2%, new P 3.3%) until B2 |
 | M5 | 19–20 Nov | association changes (confirmed-in-place skip, soft label term), ICP moved test (B2, both modes); `update_graph` + relation eval | Association accuracy ≥ B0 on dev (both modes); moved F1 ≥ B1 on dev (both modes); relation table (a/b/c) for R0 vs R1 on val; JSON validates against the schema |
 | M6 | 23–24 Nov | confidence + priors (FULL); texture rendering + appearance residual (DINOv2 patch features; thin-node free-like votes; thin-object voxels) | **Texture render check**: on a reference scan's *own* sequence, rendered vs observed colour overlay for 3 frames visibly aligned; median patch-feature similarity reported; OBJ/PLY correspondence checked (§2.1). **Synthetic**: a 2 cm flat textured "book" removed from a table → missed by depth-only, caught by depth + appearance |
 | M7 | 25 Nov | all ablations (§8) on val + relchange, both modes | Full results table (oracle + perception rows) with CIs; ablation plots; determinism re-checked on one pair |
