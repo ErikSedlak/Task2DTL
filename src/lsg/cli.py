@@ -57,7 +57,22 @@ def _cmd_m5(args: argparse.Namespace) -> int:
     """
     from lsg.eval.m5_checks import format_summary, run_m5
 
-    res = run_m5(load_config(args.config), run_id=args.run_id, sweep=not args.no_sweep, val=not args.no_val)
+    res = run_m5(load_config(args.config), run_id=args.run_id, sweep=not args.no_sweep, val=not args.no_val,
+                 full_val=args.full_val)  # fmt: skip
+    print(format_summary(res))
+    return 0 if all(a["pass"] for a in res["acceptance"].values()) else 1
+
+
+def _cmd_m6(args: argparse.Namespace) -> int:
+    """`lsg m6`: OBJ/PLY check, texture render check, B2 / FULL variants on dev, sweep, FULL on val.
+
+    Returns:
+        Exit code 0 if every acceptance check passes.
+    """
+    from lsg.eval.m6_checks import format_summary, run_m6
+
+    res = run_m6(load_config(args.config), run_id=args.run_id, sweep=not args.no_sweep, val=not args.no_val,
+                 objply=not args.no_objply, full_val=args.full_val)  # fmt: skip
     print(format_summary(res))
     return 0 if all(a["pass"] for a in res["acceptance"].values()) else 1
 
@@ -72,6 +87,24 @@ def _cmd_splits_textures(args: argparse.Namespace) -> int:
     out = REPO_ROOT / (args.out or sc["texture_list"])
     ids = write_texture_list([REPO_ROOT / f for f in sc["texture_sources"]], out)
     print(f"wrote {len(ids)} reference ids to {out}")
+    return 0
+
+
+def _cmd_splits_subset(args: argparse.Namespace) -> int:
+    """`lsg splits subset`: seeded one-rescan-per-room subset of a pair list (milestone val subset)."""
+    from lsg.config import REPO_ROOT
+    from lsg.io.scan3r import read_pairs
+    from lsg.io.splits import subset_pairs, write_pairs
+
+    cfg = load_config(args.config)
+    sc = cfg["splits"]["milestone_val"]
+    src = REPO_ROOT / (args.split or sc["source"])
+    n, seed = int(args.n if args.n is not None else sc["n_refs"]), int(args.seed if args.seed is not None else sc["seed"])
+    out = REPO_ROOT / (args.out or sc["file"])
+    pairs = subset_pairs(read_pairs(src), n, seed)
+    write_pairs(pairs, out, f"{len(pairs)} pairs: {n} references of {src.name}, one rescan each, seed {seed}\n"
+                            "written by `lsg splits subset`; milestone val checks only (DECISIONS M6)")  # fmt: skip
+    print(f"wrote {len(pairs)} pairs to {out}")
     return 0
 
 
@@ -169,7 +202,16 @@ def main(argv: list[str] | None = None) -> int:
     m5.add_argument("--run-id", default=None)
     m5.add_argument("--no-sweep", action="store_true", help="skip the tau_assoc x w_p dev sweep")
     m5.add_argument("--no-val", action="store_true", help="skip the val run (dev checks only)")
+    m5.add_argument("--full-val", action="store_true", help="all of eval_val instead of the milestone subset")
     m5.set_defaults(func=_cmd_m5)
+    m6 = sub.add_parser("m6", help="M6: texture render check, FULL (confidence + appearance) on dev and val")
+    m6.add_argument("--config", default=None)
+    m6.add_argument("--run-id", default=None)
+    m6.add_argument("--no-sweep", action="store_true", help="skip the L_hit dev sweep")
+    m6.add_argument("--no-val", action="store_true", help="skip the val run (dev checks only)")
+    m6.add_argument("--full-val", action="store_true", help="all of eval_val instead of the milestone subset")
+    m6.add_argument("--no-objply", action="store_true", help="skip the OBJ/PLY check over the 72 references")
+    m6.set_defaults(func=_cmd_m6)
 
     sp = sub.add_parser("splits", help="split-file helpers")
     sps = sp.add_subparsers(dest="splits_cmd", required=True)
@@ -177,6 +219,13 @@ def main(argv: list[str] | None = None) -> int:
     tx.add_argument("--config", default=None)
     tx.add_argument("--out", default=None, help="relative to the repo root")
     tx.set_defaults(func=_cmd_splits_textures)
+    ss = sps.add_parser("subset", help="write the seeded milestone val subset (splits.milestone_val)")
+    ss.add_argument("--config", default=None)
+    ss.add_argument("--split", default=None, help="source pair list (default splits.milestone_val.source)")
+    ss.add_argument("--n", type=int, default=None, help="number of references (one rescan each)")
+    ss.add_argument("--seed", type=int, default=None)
+    ss.add_argument("--out", default=None, help="relative to the repo root")
+    ss.set_defaults(func=_cmd_splits_subset)
 
     gr = sub.add_parser("graph", help="export a reference scene graph as JSON")
     gr.add_argument("--scan", required=True, help="reference scan id")
@@ -198,7 +247,7 @@ def main(argv: list[str] | None = None) -> int:
             sp_.add_argument("--no-snapshots", action="store_true", help="skip tentative snapshots")
             sp_.set_defaults(func=_cmd_run)
         sp_.add_argument("--obs", default="oracle", help="comma list of oracle,perception (e.g. perception,oracle)")
-        sp_.add_argument("--method", default="B0", help="B0 | B1 | B2")
+        sp_.add_argument("--method", default="B0", help="B0 | B1 | B2 | FULL")
         sp_.add_argument("--frac", type=float, default=1.0, help="observed fraction (contiguous chunk)")
         sp_.add_argument("--seed", type=int, default=0)
         sp_.add_argument("--config", default=None)

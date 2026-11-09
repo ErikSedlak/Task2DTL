@@ -179,3 +179,63 @@ def test_m5_b2_both_modes_one_dev_pair(real_data_root, tmp_path):
         assert validate(G) == [] and G.meta["method"] == "B2" and G.meta["relation_policy"] == "update"
     o = a["summary"]["oracle"]["metrics"]
     assert o["assoc_acc_strict"]["value"] >= 0.8 and o["moved_F1"]["value"] >= 0.5
+
+
+@pytest.mark.slow
+def test_m6_full_both_modes_one_dev_pair(real_data_root, tmp_path):
+    """M6 on one dev pair: FULL (confidence + DINOv2 appearance) in both modes, twice ->
+    identical `metrics` (similarities cached, rounded); graphs valid; every reference node has a
+    confidence; appearance ran on the thin nodes."""
+    import copy
+    import json
+
+    from lsg.config import load_config
+    from lsg.eval.harness import run_eval
+    from lsg.graph.model import Graph, validate
+
+    cfg = copy.deepcopy(load_config())
+    cfg["outputs_root"] = str(tmp_path)
+    pair = ("531cff08-0021-28f6-8e08-ba2eeb945e09", "19eda6f4-55aa-29a0-8893-8eac3a4d8193")
+    a = run_eval(cfg, [pair], ["perception", "oracle"], "FULL", workers=1, run_id="a")
+    run_eval(cfg, [pair], ["perception", "oracle"], "FULL", workers=1, run_id="b")
+    ma = json.loads((tmp_path / "a" / "metrics.json").read_text())
+    mb = json.loads((tmp_path / "b" / "metrics.json").read_text())
+    assert ma["metrics"] == mb["metrics"]
+    for mode in ("perception", "oracle"):
+        assert a["summary"][mode]["counts"]["graph_invalid"] == 0
+        G = Graph.load(tmp_path / "a" / "graphs" / mode / f"{pair[0]}_{pair[1]}.json")
+        assert validate(G) == [] and G.meta["method"] == "FULL"
+        assert all(n.confidence is not None for n in G.nodes if n.level in ("anchor", "thing"))
+    runs = ma["run"]["per_pair"]
+    assert all(r["online"]["thin_nodes"] > 0 and r["online"]["appearance_frames"] > 0 for r in runs)
+
+
+@pytest.mark.slow
+def test_dinov2_texture_render_on_own_sequence(real_data_root):
+    """M6 render check in miniature: the reference texture rendered at a reference frame's own
+    pose is similar to the photo (DINOv2 patch cosine median over all patches > 0.5; 0.55 measured)
+    and clearly more similar than at a 40 cm shifted pose (0.26)."""
+    from lsg.config import load_config
+    from lsg.geom.render import TextureRenderer
+    from lsg.io.scan3r import load_textured_mesh
+    from lsg.perception.appearance import DinoV2Features, patch_similarity, render_size, resize
+
+    cfg = load_config()
+    ref = "531cff08-0021-28f6-8e08-ba2eeb945e09"
+    tr = TextureRenderer(load_textured_mesh(real_data_root, ref))
+    ext = DinoV2Features(cfg["appearance"]["model"], cfg["appearance"]["device"])
+    with open_sequence(real_data_root, ref) as seq:
+        f = seq.frame_ids[len(seq.frame_ids) // 5]  # shelf with picture + basket (the middle frame is a mirror)
+        wh = render_size(seq.info.color_wh, 448)
+        K = seq.info.K_color.copy()
+        K[0] *= wh[0] / seq.info.color_wh[0]
+        K[1] *= wh[1] / seq.info.color_wh[1]
+        P = seq.pose(f)
+        obs = resize(seq.color(f), wh)
+        good = patch_similarity(obs, tr.render_color(K, invert(P), *wh)[0], ext)
+        Q = P.copy()
+        Q[:3, 3] += Q[:3, 0] * 0.4  # camera shifted 40 cm sideways
+        bad = patch_similarity(obs, tr.render_color(K, invert(Q), *wh)[0], ext)
+    assert good.shape == (18, 32)
+    print("median sim good / shifted:", np.median(good), np.median(bad))
+    assert np.median(good) > 0.5 and np.median(good) > np.median(bad) + 0.1

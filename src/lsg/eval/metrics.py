@@ -24,6 +24,7 @@ from typing import Any
 
 import numpy as np
 
+from lsg.change.visibility import has_free_evidence
 from lsg.eval.gt import GTLabels
 from lsg.eval.relations import relation_count_keys, relation_metric_defs
 from lsg.graph.model import Graph, Node, bbox_dict, ref_node_id
@@ -229,7 +230,8 @@ def perception_obs_truth(
 
 
 CAND_KEYS = ("diag_cand", "diag_cand_n", "diag_cand_new_n", "diag_cand_new_hit", "diag_cand_new_lab",
-             "diag_cand_moved_n", "diag_cand_moved_hit", "diag_cand_moved_lab", "diag_cand_explained")  # fmt: skip
+             "diag_cand_moved_n", "diag_cand_moved_hit", "diag_cand_moved_lab", "diag_cand_explained",
+             "diag_cand_app_n", "diag_cand_app_explained")  # fmt: skip
 
 
 def candidate_counts(
@@ -254,15 +256,24 @@ def candidate_counts(
         c[f"diag_cand_new_{suffix}"] = len(hit & new_ids)
         c[f"diag_cand_moved_{suffix}"] = len(hit - new_ids)
     allb = gt_rescan_boxes(gt)
-    c["diag_cand_explained"] = sum(
-        any(perception_compatible(n, b, cfg, None, use_label=False)[0] for b in allb) for n in nodes
-    )
+    expl = [any(perception_compatible(n, b, cfg, None, use_label=False)[0] for b in allb) for n in nodes]
+    c["diag_cand_explained"] = sum(expl)
+    kinds = [getattr(o, "kind", "depth") for o in obs if len(o.points)]
+    c["diag_cand_app_n"] = sum(k == "appearance" for k in kinds)
+    c["diag_cand_app_explained"] = sum(e for e, k in zip(expl, kinds) if k == "appearance")
     return c
 
 
 # --------------------------------------------------------------------------------------------
 # per-pair counts
 # --------------------------------------------------------------------------------------------
+
+
+# M6 diagnostics: appearance free-like evidence, thin nodes, confidence means (p x 1000 sums over
+# 1000 x n, so the integer bootstrap machinery gives the mean p)
+THIN_CONF_KEYS = ("diag_freelike_removed", "diag_freelike_unch", "diag_thin_removed_n", "diag_thin_removed_tp",
+                  "diag_thin_removed_free", "diag_thin_unch_n", "diag_thin_unch_kept",
+                  *(f"diag_conf_{g}_{x}" for g in ("unch", "removed", "absent") for x in ("sum", "den", "n")))  # fmt: skip
 
 
 def count_keys(cfg: Mapping[str, Any]) -> list[str]:
@@ -272,7 +283,8 @@ def count_keys(cfg: Mapping[str, Any]) -> list[str]:
     keys += ["new_ignored", "unch_n", "unch_strict", "unch_kept", "absent_n", "absent_del", "absent_move",
              "ref_n", "ref_unknown", "ref_no_node", "assoc_n", "assoc_strict", "assoc_label",
              "moved_no_disp", "diag_free_unch", "diag_free_removed", "diag_free_absent",
-             "diag_seen_absent", "diag_votes", "diag_free_unch_removed", "graph_invalid", *CAND_KEYS]  # fmt: skip
+             "diag_seen_absent", "diag_votes", "diag_free_unch_removed", "graph_invalid", *CAND_KEYS,
+             *THIN_CONF_KEYS]  # fmt: skip
     keys += [f"moved_{x}_d{b}" for b in range(nb) for x in ("n", "tp")]
     keys += [f"{k}_{x}_{s}" for k in ("moved", "new") for s in SIZES for x in ("n", "tp")]
     keys += relation_count_keys()  # §7.2 (M5); 0 when relations were not scored
@@ -319,14 +331,30 @@ def score_pair(
     c = dict.fromkeys(count_keys(cfg), 0)
     nodes = G_upd.node_map()
     loc: list[float] = []
-    k_free = int(cfg.get("states", {}).get("k_free", 2))
     vts = votes or {}
     c["diag_votes"] = int(votes is not None)
 
-    def n_free(oid: int) -> int:
-        """Counted free votes of a reference object (0 without votes)."""
+    def free_ev(oid: int) -> bool:
+        """§3 free evidence of a reference object (counted free + free-like votes; M6)."""
+        return has_free_evidence(vts.get(ref_node_id(oid)), cfg)
+
+    def free_like_ev(oid: int) -> bool:
+        """>= k_free_like counted appearance free-like votes (thin nodes, M6)."""
         v = vts.get(ref_node_id(oid))
-        return int(v.free) if v is not None else 0
+        return v is not None and v.free_like >= int(cfg.get("states", {}).get("k_free_like", 3))
+
+    thin_max = float(cfg.get("appearance", {}).get("thin_max_extent", 0.15))
+
+    def is_thin(n: Node) -> bool:
+        if n.level != "thing" or n.bbox_3d is None:
+            return False
+        return float((np.asarray(n.bbox_3d["max"], float) - np.asarray(n.bbox_3d["min"], float)).min()) < thin_max
+
+    def conf(group: str, n: Node) -> None:
+        if n.confidence is not None:
+            c[f"diag_conf_{group}_sum"] += int(round(1000 * float(n.confidence)))
+            c[f"diag_conf_{group}_den"] += 1000
+            c[f"diag_conf_{group}_n"] += 1
 
     for oid, o in sorted(gt.objects.items()):
         n = nodes.get(ref_node_id(oid))
@@ -341,9 +369,10 @@ def score_pair(
             c["absent_n"] += 1
             c["absent_del"] += st == "removed"
             c["absent_move"] += st == "moved"
-            c["diag_free_absent"] += n_free(oid) >= k_free
+            c["diag_free_absent"] += free_ev(oid)
             v = vts.get(ref_node_id(oid))
             c["diag_seen_absent"] += v is not None and v.seen > 0
+            conf("absent", n)
             continue
         if s == "dont_care":
             continue
@@ -366,15 +395,26 @@ def score_pair(
             c["moved_fp"] += 1
         if s == "removed":
             c["removed_tp" if st == "removed" else "removed_fn"] += 1
-            c["diag_free_removed"] += n_free(oid) >= k_free
+            c["diag_free_removed"] += free_ev(oid)
+            c["diag_freelike_removed"] += free_like_ev(oid)
+            conf("removed", n)
+            if is_thin(n):
+                c["diag_thin_removed_n"] += 1
+                c["diag_thin_removed_tp"] += st == "removed"
+                c["diag_thin_removed_free"] += free_ev(oid)
         elif st == "removed":
             c["removed_fp"] += 1
         if s == "unchanged":
             c["unch_n"] += 1
             c["unch_strict"] += st == "unchanged"
             c["unch_kept"] += st in ("unchanged", "unknown")
-            c["diag_free_unch"] += n_free(oid) >= k_free
-            c["diag_free_unch_removed"] += n_free(oid) >= k_free and st == "removed"
+            c["diag_free_unch"] += free_ev(oid)
+            c["diag_free_unch_removed"] += free_ev(oid) and st == "removed"
+            c["diag_freelike_unch"] += free_like_ev(oid)
+            conf("unch", n)
+            if is_thin(n):
+                c["diag_thin_unch_n"] += 1
+                c["diag_thin_unch_kept"] += st in ("unchanged", "unknown")
         # association: GT-matchable = moved/unchanged objects visible in the processed frames
         if s in ("moved", "unchanged") and oid in vis:
             c["assoc_n"] += 1
@@ -421,6 +461,17 @@ def metric_defs(cfg: Mapping[str, Any]) -> dict[str, tuple[list[str], list[str],
     d["free_ev_unchanged_removed"] = (["diag_free_unch_removed"], ["diag_free_unch"], ["diag_free_unch"])
     d["free_ev_absent"] = (["diag_free_absent"], ["absent_n"], ["absent_n"])
     d["seen_ev_absent"] = (["diag_seen_absent"], ["absent_n"], ["absent_n"])
+    # appearance / thin nodes / confidence (M6)
+    rem = ["removed_tp", "removed_fn"]
+    d["free_like_ev_removed"] = (["diag_freelike_removed"], rem, rem)
+    d["free_like_ev_unchanged"] = (["diag_freelike_unch"], ["unch_n"], ["unch_n"])
+    d["removed_R_thin"] = (["diag_thin_removed_tp"], ["diag_thin_removed_n"], ["diag_thin_removed_n"])
+    d["free_ev_removed_thin"] = (["diag_thin_removed_free"], ["diag_thin_removed_n"], ["diag_thin_removed_n"])
+    d["unchanged_kept_thin"] = (["diag_thin_unch_kept"], ["diag_thin_unch_n"], ["diag_thin_unch_n"])
+    for g, name in (("unch", "unchanged"), ("removed", "removed"), ("absent", "absent")):
+        d[f"conf_mean_{name}"] = ([f"diag_conf_{g}_sum"], [f"diag_conf_{g}_den"], [f"diag_conf_{g}_n"])
+    d["cand_appearance_per_pair"] = (["diag_cand_app_n"], ["diag_cand"], ["diag_cand_app_n"])
+    d["cand_appearance_explained"] = (["diag_cand_app_explained"], ["diag_cand_app_n"], ["diag_cand_app_n"])
     # perception candidate diagnostics (M4)
     d["cand_per_pair"] = (["diag_cand_n"], ["diag_cand"], ["diag_cand_n"])
     d["cand_recall_new"] = (["diag_cand_new_hit"], ["diag_cand_new_n"], ["diag_cand_new_n"])

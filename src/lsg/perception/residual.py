@@ -48,6 +48,14 @@ class SurfaceFilter:
         V, F = ref_ctx.faces_of(self.struct_oids)
         self.struct = Renderer(V, F) if len(F) else None
 
+    def keep_struct(self, pts: np.ndarray) -> np.ndarray:
+        """Bool mask: points farther than `struct_dist` from structure (the surface test is skipped;
+        appearance thin-object points lie on the reference surface by construction, M6)."""
+        ok = np.ones(len(pts), bool)
+        if self.struct is not None and len(pts):
+            ok = self.struct.distance(pts) > self.struct_dist
+        return ok
+
     def keep(self, pts: np.ndarray) -> np.ndarray:
         """Bool mask: points farther than `surf_dist` from the mesh and `struct_dist` from structure."""
         if len(pts) == 0:

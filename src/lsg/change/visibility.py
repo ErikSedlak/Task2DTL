@@ -9,9 +9,15 @@ depth d_exp on P_i gives one frame vote:
 - `noinfo`: anything else (occluded / nearer pixels, mixed evidence, too few valid pixels);
 - `unobserved`: |P_i| < `min_mask_px` (out of frustum or hidden behind other reference geometry).
 
-Only free-space evidence may lower confidence (hard rule 3); occlusion, invalid depth and
-out-of-view are no information. Votes count only after viewpoint decorrelation
-(`Decorrelator`). Method side: no rescan annotations are involved.
+Thin nodes (M6, appearance on): depth cannot tell whether a thing thinner than tau_free is
+still there, so their depth `seen` / `noinfo` vote is replaced by the appearance verdict on the
+comparable pixels (`thin_votes`): mean frame-relative appearance distance > `tau_node` ->
+`free_like`, else `seen`; too few comparable pixels -> `noinfo`. A depth `free` vote stays.
+
+Only free-space evidence (and, for thin nodes, appearance mismatch from >= `k_free_like`
+viewpoints) may lower confidence (hard rule 3); occlusion, invalid depth and out-of-view are
+no information. Votes count only after viewpoint decorrelation (`Decorrelator`). Method side:
+no rescan annotations are involved.
 """
 
 from __future__ import annotations
@@ -22,9 +28,9 @@ from typing import Any
 
 import numpy as np
 
-SEEN, FREE, NOINFO, UNOBSERVED = "seen", "free", "noinfo", "unobserved"
-VOTE_KINDS = (SEEN, FREE, NOINFO, UNOBSERVED)
-COUNTED_KINDS = (SEEN, FREE)  # kinds that go through the decorrelator
+SEEN, FREE, NOINFO, UNOBSERVED, FREE_LIKE = "seen", "free", "noinfo", "unobserved", "free_like"
+VOTE_KINDS = (SEEN, FREE, NOINFO, UNOBSERVED, FREE_LIKE)
+COUNTED_KINDS = (SEEN, FREE, FREE_LIKE)  # kinds that go through the decorrelator
 
 
 @dataclass(frozen=True)
@@ -36,6 +42,8 @@ class FrameVote:
     n_valid: int  # of those, valid observed and rendered depth
     n_present: int
     n_free: int
+    n_comparable: int = 0  # thin nodes: appearance-comparable pixels (M6)
+    n_mismatch: int = 0  # thin nodes: of those, mismatching
 
 
 def erode_labels(labels: np.ndarray, r: int) -> np.ndarray:
@@ -109,6 +117,60 @@ def frame_votes(
     return out
 
 
+def thin_votes(
+    depth_votes: Mapping[int, FrameVote],
+    thin_oids: Iterable[int],
+    ref_labels: np.ndarray,
+    comparable_px: np.ndarray,
+    rel_px: np.ndarray,
+    cfg: Mapping[str, Any],
+    tau_node: float,
+) -> dict[int, FrameVote]:
+    """Replace thin nodes' depth `seen` / `noinfo` votes by the appearance verdict (M6, Erik).
+
+    Over the node's first-hit pixels that are appearance-comparable: mean frame-relative patch
+    distance > `tau_node` -> `free_like`, else `seen`; < `min_mask_px` comparable pixels ->
+    `noinfo`. Depth `free` and `unobserved` votes, and non-thin nodes, are unchanged.
+    (`n_mismatch` records the comparable pixels whose own distance exceeds `tau_node`.)
+
+    Args:
+        depth_votes: `frame_votes` output of the frame.
+        thin_oids: objectIds of thin nodes.
+        ref_labels: (H, W) reference first-hit objectIds (as given to `frame_votes`).
+        comparable_px, rel_px: (H, W) appearance maps (`perception.appearance.AppearanceMap`).
+        cfg: Full config (`visibility`).
+        tau_node: Threshold on the node's mean relative distance (`appearance.tau_node`).
+
+    Returns:
+        A copy of `depth_votes` with the thin nodes' votes replaced.
+    """
+    vc = cfg["visibility"]
+    min_px = int(vc["min_mask_px"])
+    out = dict(depth_votes)
+    thin = [int(o) for o in thin_oids if int(o) in depth_votes and depth_votes[int(o)].kind in (SEEN, NOINFO)]
+    if not thin:
+        return out
+    lab = erode_labels(np.asarray(ref_labels, np.int64), int(vc.get("erode_px", 0)))
+    lab = np.where(lab > 0, lab, 0).ravel()
+    n = max(int(lab.max()) if lab.size else 0, *thin) + 1
+    comp = np.asarray(comparable_px, bool).ravel()
+    rel = np.where(comp, np.asarray(rel_px, np.float64).ravel(), 0.0)
+    c_comp = np.bincount(lab, weights=comp, minlength=n)
+    c_sum = np.bincount(lab, weights=rel, minlength=n)
+    c_mis = np.bincount(lab, weights=comp & (rel > tau_node), minlength=n)
+    for o in thin:
+        v = depth_votes[o]
+        nc, nm = int(c_comp[o]), int(c_mis[o])
+        if nc < min_px:
+            kind = NOINFO
+        elif round(c_sum[o] / nc, 6) > tau_node:
+            kind = FREE_LIKE
+        else:
+            kind = SEEN
+        out[o] = FrameVote(kind, v.n_px, v.n_valid, v.n_present, v.n_free, nc, nm)
+    return out
+
+
 class Decorrelator:
     """Counts an event only from a new enough viewpoint (DESIGN §3).
 
@@ -162,12 +224,15 @@ class NodeVotes:
     noinfo: int = 0
     seen: int = 0  # counted (decorrelated)
     free: int = 0  # counted (decorrelated)
+    raw_free_like: int = 0  # thin nodes: appearance mismatch votes (M6)
+    free_like: int = 0  # counted (decorrelated)
     n_observed_frames: int = 0  # frames with a vote other than unobserved
     first_free_frame: int | None = None  # first counted free vote
+    first_free_like_frame: int | None = None  # first counted free-like vote
     last_seen_frame: int | None = None  # last raw seen vote
 
     def add(self, kind: str, counted: bool, frame_idx: int) -> None:
-        """Record one frame vote (`counted` = passed the decorrelator; seen / free only)."""
+        """Record one frame vote (`counted` = passed the decorrelator; seen / free / free-like)."""
         if kind == UNOBSERVED:
             return
         self.n_observed_frames += 1
@@ -183,6 +248,12 @@ class NodeVotes:
                 self.free += 1
                 if self.first_free_frame is None:
                     self.first_free_frame = int(frame_idx)
+        elif kind == FREE_LIKE:
+            self.raw_free_like += 1
+            if counted:
+                self.free_like += 1
+                if self.first_free_like_frame is None:
+                    self.first_free_like_frame = int(frame_idx)
 
     def to_json(self) -> dict[str, Any]:
         """Plain dict (for diagnostics)."""
@@ -190,10 +261,19 @@ class NodeVotes:
 
 
 def has_free_evidence(v: NodeVotes | None, cfg: Mapping[str, Any]) -> bool:
-    """>= k_free counted free votes (§3 removed / unknown split)."""
-    return v is not None and v.free >= int(cfg["states"]["k_free"])
+    """§3 removed / unknown split: >= k_free counted free + free-like votes, where appearance
+    alone (no counted depth free vote) needs >= `k_free_like` free-like votes (M6).
+
+    Without free-like votes (appearance off) this is the M3 rule `free >= k_free`.
+    """
+    if v is None:
+        return False
+    st = cfg["states"]
+    if v.free + v.free_like < int(st["k_free"]):
+        return False
+    return v.free > 0 or v.free_like >= int(st.get("k_free_like", 3))
 
 
 def confirmed_in_place(v: NodeVotes | None, cfg: Mapping[str, Any]) -> bool:
-    """§3: >= k_seen counted seen votes and no counted free vote."""
-    return v is not None and v.seen >= int(cfg["states"]["k_seen"]) and v.free == 0
+    """§3: >= k_seen counted seen votes and no counted free or free-like vote."""
+    return v is not None and v.seen >= int(cfg["states"]["k_seen"]) and v.free == 0 and v.free_like == 0

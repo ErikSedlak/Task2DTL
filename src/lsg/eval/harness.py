@@ -32,13 +32,15 @@ from lsg.graph.build import build_reference_graph
 from lsg.graph.model import validate
 from lsg.graph.relations import gt_support
 from lsg.io.dssg import label_to_nyu40, load_objects, load_relations
-from lsg.io.scan3r import load_meta, load_scan, open_sequence, read_pairs
+from lsg.geom.render import TextureRenderer
+from lsg.io.scan3r import load_meta, load_scan, load_textured_mesh, open_sequence, read_pairs
 from lsg.obs.base import ObsInstance
 from lsg.oracle.source import OracleSource
+from lsg.perception.appearance import AppearanceRunner, SimilarityCache, make_extractor
 from lsg.perception.labeler import CLIPLabeler
 from lsg.perception.source import PerceptionSource
 from lsg.runinfo import new_run_id, write_metrics
-from lsg.train_meta import clip_vocab_table, perception_vocab
+from lsg.train_meta import class_priors, clip_vocab_table, perception_vocab
 
 MODES = ("oracle", "perception")
 
@@ -68,6 +70,7 @@ class _TeeSource:
 
     def __init__(self, method_src, oracle_src: OracleSource):
         self.src, self.oracle = method_src, oracle_src
+        self.wants_appearance = bool(getattr(method_src, "wants_appearance", False))
 
     def begin(self, ref_ctx, seq_info) -> None:
         self.src.begin(ref_ctx, seq_info)
@@ -94,9 +97,27 @@ def _candidate_rows(obs: Sequence[ObsInstance], truth: dict[str, tuple[int, str]
     return [{"token": o.token, "label": o.label, "label_topk": [[a, round(b, 4)] for a, b in o.label_topk],
              "centroid": [round(float(v), 4) for v in o.centroid],
              "aabb": [[round(float(v), 4) for v in o.aabb_min], [round(float(v), 4) for v in o.aabb_max]],
-             "n_voxels": len(o.points), "n_frames": len(o.masks), "n_crops": len(o.crops),
+             "n_voxels": len(o.points), "n_frames": len(o.masks), "n_crops": len(o.crops), "kind": o.kind,
              "gt": list(truth[o.token]) if o.token in truth else None}
             for o in obs]  # fmt: skip
+
+
+_EXTRACTORS: dict[str, Any] = {}
+
+
+def appearance_on(cfg: dict[str, Any], method: str) -> bool:
+    """The appearance residual runs for FULL with `appearance.enabled` (M6)."""
+    return method == "FULL" and bool(cfg.get("appearance", {}).get("enabled", False))
+
+
+def make_appearance(cfg: dict[str, Any], ref: str, tex: TextureRenderer) -> AppearanceRunner:
+    """Per-rescan runner: shared texture renderer + per-process feature extractor + disk cache."""
+    ac = cfg["appearance"]
+    key = f"{ac.get('features')}|{ac.get('model')}|{ac.get('device')}"
+    if key not in _EXTRACTORS:
+        _EXTRACTORS[key] = make_extractor(cfg)
+    cache = SimilarityCache(cache_root(cfg) / "appearance" if ac.get("cache", True) else None)
+    return AppearanceRunner(tex, _EXTRACTORS[key], cfg, ref, cache)
 
 
 def _eval_group(task: dict[str, Any]) -> list[dict[str, Any]]:
@@ -112,6 +133,8 @@ def _eval_group(task: dict[str, Any]) -> list[dict[str, Any]]:
     main_policy = str(cfg.get("update", {}).get("relations", "update"))
     ref_renderer = Renderer(R.vertices, R.faces, R.face_labels)  # shared by the group's rescans
     method = METHODS[task["method"]]
+    priors = class_priors(root, cfg) if task["method"] == "FULL" else None
+    tex = TextureRenderer(load_textured_mesh(root, ref)) if appearance_on(cfg, task["method"]) else None
     labeler = vocab_nyu = label_nyu = None
     if "perception" in task["modes"]:
         top_n = int(cfg["perception"]["clip"]["vocab_top_n"])
@@ -145,8 +168,9 @@ def _eval_group(task: dict[str, Any]) -> list[dict[str, Any]]:
                     src = oracle
                 snap = (Path(task["run_dir"]) / "snapshots" / mode / f"{ref}_{s}"
                         if task.get("snapshots") and task.get("run_dir") else None)  # fmt: skip
+                app = make_appearance(cfg, ref, tex) if tex is not None else None
                 online = run_online(ctx, info, seq, src, cfg, snapshot_dir=snap, obs_mode=mode,
-                                    renderer=ref_renderer)  # fmt: skip
+                                    renderer=ref_renderer, appearance=app, priors=priors)  # fmt: skip
                 obs = online.obs
                 tm = oracle.token_map()
                 extra_run: dict[str, Any] = {}
@@ -160,7 +184,8 @@ def _eval_group(task: dict[str, Any]) -> list[dict[str, Any]]:
                     truth = {o.token: (tm[o.token], o.label) for o in obs}
                     score_kw = {}
                 t_obs = time.time() - t2
-                G_states = method(G_ref, obs, cfg, rescan_id=s, obs_mode=mode, votes=online.votes, ref_ctx=ctx)
+                G_states = method(G_ref, obs, cfg, rescan_id=s, obs_mode=mode, votes=online.votes, ref_ctx=ctx,
+                                  obs_views=online.obs_views, priors=priors)  # fmt: skip
                 policies = list(POLICIES) if score_rel else [main_policy]
                 graphs = {p: update_graph(G_states, ctx, obs, cfg, p) for p in policies}
                 G_upd = graphs[main_policy]
@@ -175,6 +200,8 @@ def _eval_group(task: dict[str, Any]) -> list[dict[str, Any]]:
                     extra_run["graph_problems"] = problems[:20]
                 if "assoc" in G_upd.meta:
                     extra_run["assoc"] = G_upd.meta["assoc"]
+                if online.stats:
+                    extra_run["online"] = online.stats
                 if cfg["eval"].get("save_graphs", True) and task.get("run_dir"):
                     G_upd.save(Path(task["run_dir"]) / "graphs" / mode / f"{ref}_{s}.json")
                 if mode == "perception" and task.get("run_dir"):

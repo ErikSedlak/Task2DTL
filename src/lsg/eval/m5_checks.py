@@ -6,8 +6,9 @@
 3. Dev diagnostics of B2: confirmed / absorbed / matched counts; GT-unchanged objects with
    free evidence that B2 turns into `removed`.
 4. Optional dev sweep (B2, both modes): `association.tau_assoc` x `association.w_p`.
-5. Val (`splits/eval_val.txt`, reported once, nothing tuned): B2 in both modes with the §7.2
-   relation table R0 (stale) / R1 (geometric) / update.
+5. Val (reported once, nothing tuned): B2 in both modes with the §7.2 relation table R0
+   (stale) / R1 (geometric) / update. Default: the milestone val subset
+   (`splits/eval_val_small.txt`); `full_val=True` for all of `eval_val` (DECISIONS M6).
 
 The unit / synthetic checks are pytest tests (`test_association.py`, `test_classify.py`,
 `test_b2.py`, `test_update.py`, `test_relations_eval.py`). Lives in `eval/` (reads GT).
@@ -21,7 +22,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from lsg.config import REPO_ROOT, outputs_root
+from lsg.config import REPO_ROOT, milestone_val_split, outputs_root
 from lsg.eval.harness import format_summary as eval_summary
 from lsg.eval.harness import run_eval
 from lsg.eval.relations import REL_POLICIES, REL_SUBSETS
@@ -72,7 +73,8 @@ def _assoc_stats(metrics_path: str) -> dict[str, dict[str, int]]:
     return out
 
 
-def run_m5(cfg: dict[str, Any], run_id: str | None = None, sweep: bool = True, val: bool = True) -> dict[str, Any]:
+def run_m5(cfg: dict[str, Any], run_id: str | None = None, sweep: bool = True, val: bool = True,
+           full_val: bool = False) -> dict[str, Any]:  # fmt: skip
     """All M5 checks; writes `outputs/<run_id>/metrics.json`."""
     t0 = time.time()
     rid = run_id or new_run_id("m5")
@@ -104,8 +106,8 @@ def run_m5(cfg: dict[str, Any], run_id: str | None = None, sweep: bool = True, v
                     res["sweep"].append({"mode": mode, "tau_assoc": tau, "w_p": w_p, **_pick(r["summary"][mode])})
 
     if val:
-        vp = read_pairs(REPO_ROOT / "splits" / "eval_val.txt")
-        r = run_eval(cfg, vp, list(MODES), method="B2", run_id=f"{rid}/val_B2", split_name="eval_val")
+        vs = milestone_val_split(cfg, full_val)
+        r = run_eval(cfg, read_pairs(vs), list(MODES), method="B2", run_id=f"{rid}/val_B2", split_name=vs.stem)
         summaries["val_B2"] = r
         res["val"] = {m: {**_pick(r["summary"][m]), "relations": _rel_table(r["summary"][m])} for m in MODES}
         res["val"]["metrics_path"] = r["metrics_path"]

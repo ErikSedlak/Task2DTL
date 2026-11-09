@@ -89,3 +89,60 @@ class FakeSeq:
 
     def frame(self, idx):
         return self._frames[idx]
+
+
+# ---- textured scenes (M6 appearance tests) -----------------------------------------------------
+
+KC = K.copy()
+KC[:2] *= 2  # colour camera: same FOV as depth, twice the resolution
+INTR_TEX = Intrinsics(KC, (2 * W, 2 * H), K, (W, H), 1000.0, 1)
+
+
+def solid(rgb, cell=64):
+    """Uniform texture cell."""
+    return np.broadcast_to(np.asarray(rgb, np.uint8), (cell, cell, 3)).copy()
+
+
+def stripes(rgb_a, rgb_b, cell=64, period=8):
+    """Striped texture cell (a 'printed' book cover)."""
+    t = solid(rgb_a, cell)
+    t[(np.arange(cell) // (period // 2)) % 2 == 1] = rgb_b
+    return t
+
+
+def textured(scan, cells, cell=64):
+    """`TexturedMesh` of a synthetic `Scan`: one atlas cell per objectId (`cells[oid]`, default
+    grey), each object's vertices projected onto its two largest AABB axes inside its cell."""
+    from lsg.io.scan3r import TexturedMesh
+
+    oids = sorted({int(o) for o in scan.face_labels})
+    tex = np.concatenate([cells.get(o, solid((128, 128, 128), cell)) for o in oids], axis=1)
+    n = len(oids)
+    uv_v = np.zeros((len(scan.vertices), 2), np.float32)
+    for k, o in enumerate(oids):
+        vi = np.unique(scan.faces[scan.face_labels == o])
+        P = scan.vertices[vi]
+        mn, ext = P.min(0), np.maximum(P.max(0) - P.min(0), 1e-9)
+        ax = np.argsort(ext)[-2:]
+        t = (P[:, ax] - mn[ax]) / ext[ax]
+        uv_v[vi, 0] = (k + 0.05 + 0.9 * t[:, 0]) / n
+        uv_v[vi, 1] = 0.05 + 0.9 * t[:, 1]
+    return TexturedMesh(scan.scan_id, scan.vertices, scan.faces, uv_v[scan.faces], tex)
+
+
+class TexFakeSeq(FakeSeq):
+    """`FakeSeq` that also renders colour frames from the rescan's textured mesh."""
+
+    def __init__(self, rescan: Scan, tex, poses_ref, T_align=T_ALIGN):
+        from lsg.geom.render import TextureRenderer
+
+        super().__init__(rescan, poses_ref, T_align)
+        self.info = INTR_TEX
+        tr = TextureRenderer(tex)
+        self._color = {}
+        for fid in self.frame_ids:
+            rgb, _ = tr.render_color(KC, invert(self._frames[fid].pose_c2w), 2 * W, 2 * H)
+            self._color[fid] = rgb
+
+    def color(self, idx):
+        return self._color[idx]

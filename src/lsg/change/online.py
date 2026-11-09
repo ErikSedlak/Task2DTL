@@ -7,7 +7,13 @@ counted through the `Decorrelator`, and the frame plus the reference render go t
 decided once, after the last frame, by the method (`change.baselines`) from the final votes and
 observations (deferred commitment, §3).
 
-Method side: imports only `geom`, `graph`, `io`, `obs` (no-leak test).
+With an `appearance` runner (FULL, M6) every frame that shows a thin node (or every frame, if
+the observation source wants appearance for thin-object candidates) also gets an appearance
+map: thin nodes' depth seen / noinfo votes are replaced by the appearance verdict
+(`visibility.thin_votes`), and the map rides along in `RefRender` to the source. After
+`finish()`, `obs_views` counts the decorrelated viewpoints of every observation (§6.11).
+
+Method side: imports only `geom`, `graph`, `io`, `obs`, `change`, `perception`, `train_meta` (no-leak test).
 """
 
 from __future__ import annotations
@@ -21,19 +27,24 @@ from typing import Any
 
 import numpy as np
 
+from lsg.change.confidence import node_logodds, prior_logodds, probability
 from lsg.change.visibility import (
     COUNTED_KINDS,
+    NOINFO,
+    SEEN,
     Decorrelator,
     NodeVotes,
     confirmed_in_place,
     frame_votes,
     has_free_evidence,
+    thin_votes,
 )
 from lsg.geom.render import Renderer
 from lsg.geom.transforms import invert
 from lsg.graph.model import Graph, object_id_of
 from lsg.io.scan3r import iter_frames
 from lsg.obs.base import ObsInstance, ObsSource, RefContext, RefRender, SeqInfo
+from lsg.perception.appearance import tau_node
 
 VOTING_LEVELS = ("anchor", "thing")
 
@@ -47,6 +58,8 @@ class OnlineResult:
     n_frames: int
     snapshots: list[Path] = field(default_factory=list)
     time_s: dict[str, float] = field(default_factory=dict)
+    obs_views: dict[str, int] = field(default_factory=dict)  # token -> decorrelated views (M6)
+    stats: dict[str, Any] = field(default_factory=dict)  # appearance frames, thin nodes, ...
 
 
 def tentative_state(v: NodeVotes | None, cfg: Mapping[str, Any]) -> str:
@@ -69,14 +82,41 @@ def tentative_graph(
     cfg: Mapping[str, Any],
     rescan_id: str | None = None,
     obs_mode: str | None = None,
+    priors: Any = None,
 ) -> Graph:
-    """Snapshot graph (§4): G_ref with tentative vote-only states, `meta.tentative = True`."""
+    """Snapshot graph (§4): G_ref with tentative vote-only states, `meta.tentative = True`.
+
+    With `priors` (FULL, M6) nodes also carry their tentative confidence (unmatched formula).
+    """
     G = copy.deepcopy(G_ref)
     G.meta.update(scan_obs=rescan_id, obs_mode=obs_mode, frame_idx=int(frame_idx), tentative=True)
     for n in G.nodes:
         if n.level in VOTING_LEVELS:
-            n.state = tentative_state(votes.get(n.id), cfg)
+            v = votes.get(n.id)
+            n.state = tentative_state(v, cfg)
+            if priors is not None:
+                n.confidence = probability(node_logodds(prior_logodds(n.label, n.nyu40, priors, cfg), v, cfg))
     return G
+
+
+def observation_views(
+    obs: list[ObsInstance], poses: Mapping[int, np.ndarray], cfg: Mapping[str, Any]
+) -> dict[str, int]:
+    """Decorrelated viewpoints per observation: frames with a mask of >= `min_mask_px` pixels,
+    counted through a fresh `Decorrelator` in time order (§6.11 "seen at the new location")."""
+    min_px = int(cfg["visibility"]["min_mask_px"])
+    out: dict[str, int] = {}
+    for o in obs:
+        dec = Decorrelator.from_config(cfg)
+        n = 0
+        for f in sorted(o.masks):
+            if f not in poses:
+                continue
+            area = o.masks.area(f) if hasattr(o.masks, "area") else int(np.asarray(o.masks[f]).sum())
+            if area >= min_px and dec.counts(o.token, poses[f]):
+                n += 1
+        out[o.token] = n
+    return out
 
 
 def run_online(
@@ -88,6 +128,8 @@ def run_online(
     snapshot_dir: str | Path | None = None,
     obs_mode: str | None = None,
     renderer: Renderer | None = None,
+    appearance: Any = None,
+    priors: Any = None,
 ) -> OnlineResult:
     """Process the rescan's frames in time order (DESIGN §6.7).
 
@@ -101,6 +143,10 @@ def run_online(
             every `online.snapshot_every` processed frames, plus one after the last frame.
         obs_mode: Written to the snapshots' `meta.obs_mode`.
         renderer: Prebuilt reference renderer (built here if None).
+        appearance: `perception.appearance.AppearanceRunner` (FULL with appearance on, M6) or None.
+            Frames that show a thin node with a depth seen / noinfo vote (all frames if the source
+            has `wants_appearance`) get an `AppearanceMap`; thin votes are replaced by its verdict.
+        priors: Class prior table (`train_meta.PriorTable`); snapshots then carry confidence.
 
     Returns:
         `OnlineResult` with the observations, per-node vote tallies and snapshot paths.
@@ -119,6 +165,13 @@ def run_online(
     W, H = seq_info.intrinsics.depth_wh
     T_align = np.asarray(seq_info.T_align, float)
     every = int(cfg.get("online", {}).get("snapshot_every", 0) or 0)
+    thin = ref_ctx.thin_oids(float(cfg["appearance"]["thin_max_extent"])) & set(node_of) if appearance else set()
+    want_all = bool(getattr(obs_source, "wants_appearance", False)) and appearance is not None
+    t_node = tau_node(cfg) if appearance is not None else 0.0
+    if appearance is not None:
+        appearance.begin(seq_info, seq)
+    poses: dict[int, np.ndarray] = {}
+    n_app = 0
     snap_dir = Path(snapshot_dir) if snapshot_dir is not None else None
     snaps: list[Path] = []
     t_render = t_obs = 0.0
@@ -129,30 +182,46 @@ def run_online(
     for frame in iter_frames(seq, idx=seq_info.frame_ids):
         t1 = time.time()
         pose = T_align @ frame.pose_c2w
-        d_exp, lab = r.render(K, invert(pose), W, H)
-        fv = frame_votes(node_of, d_exp, lab, frame.depth, cfg)
+        poses[int(frame.idx)] = pose
+        amap = up = None
+        if appearance is None:
+            d_exp, lab = r.render(K, invert(pose), W, H)
+            fv = frame_votes(node_of, d_exp, lab, frame.depth, cfg)
+        else:
+            d_exp, lab, prim = r.render(K, invert(pose), W, H, return_prim=True)
+            fv = frame_votes(node_of, d_exp, lab, frame.depth, cfg)
+            if want_all or any(fv[o].kind in (SEEN, NOINFO) for o in thin):
+                amap = appearance.frame(frame, pose, d_exp)
+                n_app += 1
+                fv = thin_votes(fv, thin, lab, amap.comparable_px, amap.rel_px, cfg, t_node)
+                up = np.where(prim >= 0, r.face_normal_z()[np.maximum(prim, 0)], 0.0).astype(np.float32)
         for oid, v in fv.items():
             nid = node_of[oid]
             counted = v.kind in COUNTED_KINDS and dec.counts((nid, v.kind), pose)
             votes[nid].add(v.kind, counted, frame.idx)
         t2 = time.time()
-        obs_source.observe(frame, RefRender(d_exp, lab))
+        obs_source.observe(frame, RefRender(d_exp, lab, amap, up))
         t_obs += time.time() - t2
         t_render += t2 - t1
         k += 1
         last_idx = frame.idx
         if snap_dir is not None and every > 0 and k % every == 0:
-            snaps.append(_snapshot(G_ref, votes, frame.idx, cfg, seq_info, obs_mode, snap_dir))
+            snaps.append(_snapshot(G_ref, votes, frame.idx, cfg, seq_info, obs_mode, snap_dir, priors))
     t3 = time.time()
     obs = obs_source.finish()
     t_finish = time.time() - t3
     if snap_dir is not None and last_idx is not None and (every <= 0 or k % every != 0):
-        snaps.append(_snapshot(G_ref, votes, last_idx, cfg, seq_info, obs_mode, snap_dir))
+        snaps.append(_snapshot(G_ref, votes, last_idx, cfg, seq_info, obs_mode, snap_dir, priors))
     times = {"render_votes": t_render, "observe": t_obs, "finish": t_finish, "total": time.time() - t0}
-    return OnlineResult(obs, votes, k, snaps, times)
+    stats: dict[str, Any] = {"thin_nodes": len(thin), "appearance_frames": n_app}
+    if appearance is not None:
+        times["appearance"] = appearance.time_s
+        stats.update(appearance_device=getattr(appearance.ext, "device", None),
+                     appearance_cache_hits=appearance.cache.hits, appearance_cache_misses=appearance.cache.misses)  # fmt: skip
+    return OnlineResult(obs, votes, k, snaps, times, observation_views(obs, poses, cfg), stats)
 
 
-def _snapshot(G_ref, votes, frame_idx, cfg, seq_info, obs_mode, snap_dir: Path) -> Path:
+def _snapshot(G_ref, votes, frame_idx, cfg, seq_info, obs_mode, snap_dir: Path, priors=None) -> Path:
     """Write one tentative snapshot and return its path."""
-    G = tentative_graph(G_ref, votes, frame_idx, cfg, seq_info.rescan_id, obs_mode)
+    G = tentative_graph(G_ref, votes, frame_idx, cfg, seq_info.rescan_id, obs_mode, priors)
     return G.save(snap_dir / f"frame_{int(frame_idx):06d}.json")

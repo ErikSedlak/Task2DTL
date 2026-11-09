@@ -1,4 +1,4 @@
-"""Baselines (DESIGN §8). M2: B0 naive; M3: B1 + visibility; M5: B2 + Hungarian.
+"""Baselines (DESIGN §8). M2: B0 naive; M3: B1 + visibility; M5: B2 + Hungarian; M6: FULL.
 
 B0: nearest same-label observation within `near_dist` -> unchanged; same label farther ->
 moved; unmatched reference node -> removed; unmatched observation -> new. No visibility, no
@@ -13,10 +13,18 @@ B2: confirmed-in-place nodes are `unchanged` and absorb their observations; the 
 matched by Hungarian assignment on label + size + position (`change.association`); matched
 nodes get the ICP moved test, unmatched ones B1's removal rule (`change.classify`).
 
+FULL: B2 + log-odds confidence with class priors (§6.11, `change.confidence`): an unmatched
+node with free evidence is `removed` only if its confidence p < p_del, else `unknown`; every
+node gets `confidence`. With appearance on, the votes it reads already contain the thin nodes'
+appearance verdicts (`change.online`), and perception observations include thin-object
+candidates.
+
 Every method has the signature `method(G_ref, obs, cfg, rescan_id=None, obs_mode=None,
-votes=None, ref_ctx=None) -> G_upd`; `votes` = `OnlineResult.votes` (node id -> `NodeVotes`),
-`ref_ctx` = the reference context (B2 reads the reference node points from it). Relations
-are not touched here; `change.update.update_graph` recomputes them.
+votes=None, ref_ctx=None, obs_views=None, priors=None) -> G_upd`; `votes` =
+`OnlineResult.votes` (node id -> `NodeVotes`), `ref_ctx` = the reference context (B2 / FULL read
+the reference node points from it), `obs_views` = `OnlineResult.obs_views`, `priors` = the
+train class-prior table (FULL only). Relations are not touched here;
+`change.update.update_graph` recomputes them.
 """
 
 from __future__ import annotations
@@ -29,6 +37,7 @@ import numpy as np
 
 from lsg.change.association import absorb_confirmed, associate
 from lsg.change.classify import classify
+from lsg.change.confidence import below_p_del, new_logodds, node_logodds, prior_logodds, probability
 from lsg.change.visibility import NodeVotes, confirmed_in_place, has_free_evidence
 from lsg.classes import node_level
 from lsg.geom.transforms import apply
@@ -150,6 +159,8 @@ def b0(
     obs_mode: str | None = None,
     votes: Mapping[str, NodeVotes] | None = None,
     ref_ctx: RefContext | None = None,
+    obs_views: Mapping[str, int] | None = None,
+    priors: Any = None,
 ) -> Graph:
     """Naive baseline B0 (DESIGN §8). Returns the updated graph G_upd.
 
@@ -182,6 +193,8 @@ def b1(
     obs_mode: str | None = None,
     votes: Mapping[str, NodeVotes] | None = None,
     ref_ctx: RefContext | None = None,
+    obs_views: Mapping[str, int] | None = None,
+    priors: Any = None,
 ) -> Graph:
     """Baseline B1 = B0 matching + visibility removal rule (DESIGN §8). Returns G_upd.
 
@@ -223,6 +236,8 @@ def b2(
     obs_mode: str | None = None,
     votes: Mapping[str, NodeVotes] | None = None,
     ref_ctx: RefContext | None = None,
+    obs_views: Mapping[str, int] | None = None,
+    priors: Any = None,
 ) -> Graph:
     """Baseline B2 = confirmed-in-place skip + Hungarian + ICP moved test (DESIGN §8, §6.9-10).
 
@@ -236,9 +251,14 @@ def b2(
 
     Without `ref_ctx`, ICP falls back to centroid offsets. `obs_mode` None is treated as oracle.
     """
+    return _b2_core(G_ref, obs, cfg, rescan_id, obs_mode, votes, ref_ctx, "B2")[0]
+
+
+def _b2_core(G_ref, obs, cfg, rescan_id, obs_mode, votes, ref_ctx, method):
+    """B2's states; returns (G, ids of matched nodes, ids of confirmed nodes)."""
     mode = obs_mode or "oracle"
     G = copy.deepcopy(G_ref)
-    G.meta.update(scan_obs=rescan_id, obs_mode=obs_mode, method="B2", tentative=False, frame_idx=None)
+    G.meta.update(scan_obs=rescan_id, obs_mode=obs_mode, method=method, tentative=False, frame_idx=None)
     vs = votes or {}
     nodes = [n for n in G.nodes if n.level in SCORED_LEVELS]
     usable = [o for o in obs if obs_level(o) != "structure" and len(o.points)]
@@ -274,7 +294,49 @@ def b2(
     add_new_nodes(G, unmatched_obs, rescan_id)
     G.meta["assoc"] = {"confirmed": len(conf), "absorbed": len(ab.absorbed), "matched": len(pairs),
                        "icp_fallback": sum(bool(dec[n.id].info.get("fallback")) for n, _, _ in pairs)}  # fmt: skip
+    return G, {n.id for n, _, _ in pairs}, conf_ids
+
+
+def full(
+    G_ref: Graph,
+    obs: Sequence[ObsInstance],
+    cfg: Mapping[str, Any],
+    rescan_id: str | None = None,
+    obs_mode: str | None = None,
+    votes: Mapping[str, NodeVotes] | None = None,
+    ref_ctx: RefContext | None = None,
+    obs_views: Mapping[str, int] | None = None,
+    priors: Any = None,
+) -> Graph:
+    """FULL = B2 + log-odds confidence with class priors (DESIGN §8, §6.11).
+
+    B2's association and ICP moved test; an unmatched node with §3 free evidence is `removed`
+    only if p = sigmoid(l) < `confidence.p_del`, else `unknown` (kept). Every reference and new
+    node gets `confidence` (`change.confidence`): unmatched / confirmed nodes from their counted
+    votes, matched nodes from their observation's decorrelated views (`obs_views`; free votes at
+    the old place ignored), new nodes from their views alone. `priors` = `train_meta.PriorTable`
+    (None or `confidence.class_priors: false` -> `fallback_p`).
+    """
+    G, matched, conf_ids = _b2_core(G_ref, obs, cfg, rescan_id, obs_mode, votes, ref_ctx, "FULL")
+    vs = votes or {}
+    views = obs_views or {}
+    n_veto = 0
+    for n in G.nodes:
+        if n.level not in SCORED_LEVELS:
+            continue
+        if n.state == "new":
+            n.confidence = probability(new_logodds(int(views.get(n.obs_token or "", 0)), cfg))
+            continue
+        l0 = prior_logodds(n.label, n.nyu40, priors, cfg)
+        is_m = n.id in matched
+        tv = views.get(n.obs_token) if (is_m and n.obs_token is not None and n.obs_token in views) else None
+        l = node_logodds(l0, vs.get(n.id), cfg, matched=is_m, views=tv)
+        if n.state == "removed" and not below_p_del(l, cfg):
+            n.state = "unknown"
+            n_veto += 1
+        n.confidence = probability(l)
+    G.meta["assoc"]["conf_veto"] = n_veto
     return G
 
 
-METHODS = {"B0": b0, "B1": b1, "B2": b2}
+METHODS = {"B0": b0, "B1": b1, "B2": b2, "FULL": full}

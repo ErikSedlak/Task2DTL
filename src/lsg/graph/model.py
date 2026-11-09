@@ -179,6 +179,8 @@ def validate(g: Graph) -> list[str]:
                 probs.append(f"{n.id}: centroid must have 3 values")
         if n.T_move is not None and np.asarray(n.T_move, dtype=float).shape != (4, 4):
             probs.append(f"{n.id}: T_move must be 4x4")
+        if n.confidence is not None and not (0.0 <= float(n.confidence) <= 1.0):
+            probs.append(f"{n.id}: confidence must be in [0, 1]")
         if n.label_topk is not None and not all(
             isinstance(x, (list, tuple)) and len(x) == 2 and isinstance(x[0], str) for x in n.label_topk
         ):

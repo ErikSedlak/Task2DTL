@@ -564,6 +564,7 @@ dependencies = [
     { name = "pillow" },
     { name = "pyyaml" },
     { name = "scipy" },
+    { name = "timm" },
     { name = "torch" },
     { name = "torchvision" },
 ]
@@ -582,6 +583,7 @@ requires-dist = [
     { name = "pillow", specifier = ">=10.0" },
     { name = "pyyaml", specifier = ">=6.0" },
     { name = "scipy", specifier = ">=1.11" },
+    { name = "timm", specifier = ">=1.0" },
     { name = "torch", specifier = ">=2.5,<2.6", index = "https://download.pytorch.org/whl/cu121" },
     { name = "torchvision", specifier = ">=0.20,<0.21", index = "https://download.pytorch.org/whl/cu121" },
 ]

@@ -27,6 +27,13 @@ def load_config(path: str | os.PathLike | None = None) -> dict[str, Any]:
         return yaml.safe_load(f) or {}
 
 
+def milestone_val_split(cfg: dict[str, Any], full: bool = False) -> Path:
+    """Val pair list for milestone checks: the seeded subset (`splits.milestone_val.file`), or the
+    full `eval_val` with `full=True` (final tables, M7). DECISIONS M6 (Erik)."""
+    mv = cfg["splits"]["milestone_val"]
+    return REPO_ROOT / (mv["source"] if full else mv["file"])
+
+
 def config_hash(cfg: dict[str, Any]) -> str:
     """Short fingerprint of a config, stored in every metrics.json (CLAUDE.md hard rule 4).
 

@@ -509,3 +509,82 @@ def load_scan(root: str | Path, scan_id: str, with_intrinsics: bool = True) -> S
         intrinsics=intr,
         semseg_labels=labels,
     )
+
+
+# --------------------------------------------------------------------------------------------
+# Textured reference mesh (OBJ + texture atlas; reference scans only, M6)
+# --------------------------------------------------------------------------------------------
+
+
+@dataclass
+class TexturedMesh:
+    """A reference scan's textured mesh (`mesh.refined.v2.obj` + `mesh.refined_0.png`).
+
+    Geometry is in the scan's own mesh frame (as the PLY). `corner_uv[k, j]` is the texture
+    coordinate (u, v in [0, 1], v = 0 at the image bottom, OBJ convention) of corner j of face k.
+    """
+
+    scan_id: str
+    vertices: np.ndarray  # (N, 3) float64
+    faces: np.ndarray  # (M, 3) int64
+    corner_uv: np.ndarray  # (M, 3, 2) float32
+    texture: np.ndarray  # (H, W, 3) uint8
+
+
+def read_obj(path: str | Path) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Read the triangles of a Wavefront OBJ with texture coordinates.
+
+    Supports `v`, `vt` and triangle `f` lines of the forms `a/b/c`, `a/b` and `a//c`
+    (1-based indices; negative indices are not used by 3RScan and raise). Other lines
+    (`vn`, `mtllib`, `usemtl`, comments) are ignored; one material is assumed.
+
+    Returns:
+        vertices (N, 3) float64, faces (M, 3) int64 (0-based vertex indices), corner_uv
+        (M, 3, 2) float32 (zeros where a face corner has no `vt`).
+    """
+    V: list[str] = []
+    VT: list[str] = []
+    F: list[str] = []
+    with open(path, encoding="ascii", errors="replace") as fh:
+        for line in fh:
+            if line.startswith("v "):
+                V.append(line[2:])
+            elif line.startswith("vt "):
+                VT.append(line[3:])
+            elif line.startswith("f "):
+                F.append(line[2:])
+    verts = np.array(" ".join(V).split(), dtype=np.float64).reshape(-1, 3) if V else np.zeros((0, 3))
+    uv = np.array([s.split()[:2] for s in VT], dtype=np.float32) if VT else np.zeros((0, 2), np.float32)
+    toks = [t for s in F for t in s.split()]
+    if len(toks) != 3 * len(F):
+        raise ValueError(f"{path}: only triangle faces are supported")
+    vi = np.empty(len(toks), np.int64)
+    ti = np.full(len(toks), -1, np.int64)
+    for k, t in enumerate(toks):
+        parts = t.split("/")
+        vi[k] = int(parts[0])
+        if len(parts) > 1 and parts[1]:
+            ti[k] = int(parts[1])
+    if (vi <= 0).any() or (ti == 0).any() or (ti < -1).any():
+        raise ValueError(f"{path}: negative or zero OBJ indices are not supported")
+    faces = (vi - 1).reshape(-1, 3)
+    corner = np.zeros((len(toks), 2), np.float32)
+    has = ti > 0
+    if has.any():
+        corner[has] = uv[ti[has] - 1]
+    return verts, faces, corner.reshape(-1, 3, 2)
+
+
+def load_textured_mesh(root: str | Path, scan_id: str) -> TexturedMesh:
+    """Load `mesh.refined.v2.obj` + `mesh.refined_0.png` of a **reference** scan (~3 s).
+
+    The texture is reference-scan data (method input, DESIGN §1); rescans have no textures here.
+    """
+    from PIL import Image
+
+    d = Path(root) / scan_id
+    V, F, UV = read_obj(d / "mesh.refined.v2.obj")
+    Image.MAX_IMAGE_PIXELS = None
+    with Image.open(d / "mesh.refined_0.png") as im:
+        tex = np.asarray(im.convert("RGB"))
+    return TexturedMesh(scan_id, V, F, UV, tex)

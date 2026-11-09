@@ -105,7 +105,7 @@ def test_method_side_exists():
     assert len(method_side_files()) >= 20
     # the real perception code is scanned, not just the package stub (M4)
     names = {f.name for f in (SRC / "perception").glob("*.py")}
-    assert {"residual.py", "voxels.py", "cluster.py", "labeler.py", "source.py"} <= names
+    assert {"residual.py", "voxels.py", "cluster.py", "labeler.py", "source.py", "appearance.py"} <= names
 
 
 def test_method_side_never_imports_oracle_or_eval():
@@ -123,7 +123,8 @@ def test_runtime_import_closure_is_clean():
     code = (
         "import sys, lsg.perception, lsg.perception.source, lsg.perception.residual, lsg.perception.voxels,"
         " lsg.perception.cluster, lsg.perception.labeler, lsg.train_meta, lsg.obs, lsg.change.pipeline, lsg.change.baselines, lsg.change.online,"
-        " lsg.change.visibility, lsg.change.association, lsg.change.classify, lsg.change.update, lsg.graph.build;"
+        " lsg.change.visibility, lsg.change.association, lsg.change.classify, lsg.change.update, lsg.graph.build,"
+        " lsg.change.confidence, lsg.perception.appearance;"
         "bad=[m for m in sys.modules if m.startswith(('lsg.oracle','lsg.eval'))];"
         "print(','.join(bad)); sys.exit(1 if bad else 0)"
     )

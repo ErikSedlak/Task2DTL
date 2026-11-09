@@ -16,7 +16,7 @@ from typing import Any, Protocol, runtime_checkable
 
 import numpy as np
 
-from lsg.graph.model import Graph
+from lsg.graph.model import Graph, object_id_of
 from lsg.io.scan3r import Frame, Intrinsics, Scan
 
 
@@ -78,6 +78,7 @@ class ObsInstance:
     points: np.ndarray  # (N, 3) reference frame
     masks: Mapping[int, np.ndarray] = field(default_factory=dict)  # frame_idx -> bool[172, 224]
     crops: list[np.ndarray] = field(default_factory=list)  # upright RGB crops
+    kind: str = "depth"  # perception: "depth" (residual voxels) or "appearance" (thin-object voxels, M6)
 
     @property
     def centroid(self) -> np.ndarray:
@@ -112,6 +113,18 @@ class RefContext:
         inst = self.scan.instances.get(oid)
         return int(inst.nyu40) if inst is not None else None
 
+    def thin_oids(self, max_extent: float) -> set[int]:
+        """objectIds of thin nodes: things whose smallest AABB extent is < `max_extent` (§3, M6)."""
+        out = set()
+        for n in self.graph.nodes:
+            oid = object_id_of(n.id)
+            if oid is None or n.level != "thing" or n.bbox_3d is None:
+                continue
+            ext = np.asarray(n.bbox_3d["max"], float) - np.asarray(n.bbox_3d["min"], float)
+            if float(ext.min()) < float(max_extent):
+                out.add(oid)
+        return out
+
     def faces_of(self, oids) -> tuple[np.ndarray, np.ndarray]:
         """Sub-mesh (vertices, faces) of the reference faces labelled with one of `oids`.
 
@@ -140,6 +153,8 @@ class RefRender:
 
     depth: np.ndarray  # (H, W) metres, 0 = no hit
     labels: np.ndarray  # (H, W) reference objectId of the first hit, 0 = none
+    appearance: Any = None  # `perception.appearance.AppearanceMap` of the frame (M6; None = off / skipped)
+    up: np.ndarray | None = None  # (H, W) |normal z| of the first-hit reference face (M6; with appearance)
 
 
 @runtime_checkable

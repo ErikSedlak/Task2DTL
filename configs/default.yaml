@@ -32,7 +32,8 @@ decorrelation:             # DESIGN §3 viewpoint decorrelation (tune)
 
 states:                    # DESIGN §3 state rules (tune)
   k_free: 2                # counted free votes needed for removed
-  k_seen: 3                # counted seen votes (and no counted free) -> confirmed in place
+  k_seen: 3                # counted seen votes (and no counted free / free-like) -> confirmed in place
+  k_free_like: 3           # appearance alone (no depth free vote) needs this many counted free-like votes (§3, M6)
 
 online:                    # DESIGN §6.7 online loop
   snapshot_every: 20       # write a tentative snapshot every N processed frames (if enabled)
@@ -55,6 +56,11 @@ splits:
     - splits/eval_val.txt
     - splits/eval_relchange_train.txt
   texture_list: splits/download_textures.txt
+  milestone_val:           # val subset for per-milestone checks (M6, Erik); full eval_val only for the final tables (M7)
+    source: splits/eval_val.txt
+    file: splits/eval_val_small.txt   # written by `lsg splits subset`
+    n_refs: 20             # references, one rescan each
+    seed: 0
 
 relations:                 # geometric support rules, DESIGN §6.3 (tune on dev refs only)
   bottom_slice: 0.03       # [m] child's lowest slice used for contact
@@ -139,6 +145,36 @@ classify:                  # DESIGN §6.10 ICP moved test (tune on dev only)
   min_fitness: 0.3         # share of obs points with a correspondence; below -> centroid offset
   fit_tie: 0.02            # two ICP inits (centroid offset, identity): fitness within this -> lower RMSE wins
   max_points: 4000         # random subsample (seeded) of each cloud for speed
+
+confidence:                # DESIGN §6.11 log-odds confidence, FULL only (M6, Erik: rescaled; tune on dev only)
+  class_priors: true       # l0 = logit(p_persist(label)) from train metadata; false -> fallback_p (ablation)
+  fallback_p: 0.9          # prior without class priors / for unknown classes
+  prior_kappa: 20          # Beta smoothing of per-class rates toward the parent (nyu40 -> global) rate
+  L_hit: 2.5               # per counted seen vote (= L_miss; dev sweep 0.5 / 1 / 2.5 at M6: lowest false deletion)
+  L_miss: 2.5              # per counted free vote: 2 votes delete a median-prior thing (M6, Erik)
+  L_free_like: 2.5         # per counted appearance free-like vote
+  clip: 8.0                # per-visit clip of the total log-odds change, [-clip, +clip]
+  p_del: 0.2               # removed needs p < p_del (plus the §3 free-evidence rule)
+
+appearance:                # DESIGN §3 / §6.6 appearance residual, FULL only (M6)
+  enabled: true            # false = depth-only FULL (the brief's ablation)
+  features: dinov2         # dinov2 | color (normalised-colour fallback)
+  model: vit_small_patch14_dinov2.lvd142m   # timm name, frozen
+  device: cuda             # falls back to CPU if CUDA is unavailable
+  render_w: 448            # stored-orientation render width [px]; height from the colour aspect (252)
+  min_comparable_frac: 0.5 # patch compared if this share of its depth pixels is comparable
+  relative: true           # distance minus the frame's median over compared patches (lighting shift, M6)
+  min_frame_patches: 20    # fewer compared patches in a frame -> no comparison in that frame
+  tau_app:                 # pixel mismatch (thin candidates) if relative 1 - cos > tau_app; per feature type
+    dinov2: 0.38           # p98 over compared patches on the dev references' own sequences (lsg m6: 0.384)
+    color: 0.85            # same calibration for the colour fallback (0.850)
+  tau_node:                # thin-node vote: mean relative distance over the node's comparable pixels
+    dinov2: 0.30           # p98 of thing-node means on the dev references' own sequences (lsg m6: 0.297)
+    color: 0.54            # (0.537)
+  thin_max_extent: 0.15    # [m] thin thing: smallest AABB extent below this (= tau_free; M6, Erik)
+  thin_candidates: true    # output (ii): thin-object voxels from mismatches on support surfaces
+  support_min_normal_z: 0.8  # support surface: |normal z| of the reference face hit
+  cache: true              # cache/appearance/<key>.json (per-frame patch similarities)
 
 update:                    # DESIGN §6.12 graph update
   relations: update        # update (method) | stale (R0) | geometric (R1); saved / scored graph

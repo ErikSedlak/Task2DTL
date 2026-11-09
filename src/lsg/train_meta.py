@@ -1,4 +1,4 @@
-"""Train-split metadata for the method: the CLIP vocabulary (M4) and, from M6, class priors.
+"""Train-split metadata for the method: the CLIP vocabulary (M4) and class priors (M6).
 
 DESIGN §2.3: both come from train-split metadata (3RScan.json + 3DSSG `objects.json`),
 **excluding** the scenes of `dev_train.txt` and `eval_relchange_train.txt` (reference and all
@@ -10,8 +10,10 @@ Method side (outside `perception/`, which may not read 3DSSG at all): no `oracle
 
 from __future__ import annotations
 
+import math
 from collections import Counter
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
@@ -94,3 +96,106 @@ def perception_vocab(
         if nd.level in VOCAB_LEVELS and nd.label and nd.nyu40 is not None:
             nyu[nd.label] = int(nd.nyu40)
     return sorted(nyu), nyu
+
+
+# --------------------------------------------------------------------------------------------
+# Class priors (DESIGN §6.11, M6)
+# --------------------------------------------------------------------------------------------
+
+
+@dataclass
+class PriorTable:
+    """Per-class persistence counts over train (reference object, rescan) pairs.
+
+    `present`: the object is in the rescan's 3DSSG objects (unchanged or moved); `removed`:
+    listed in the rescan's `removed`. Absent-unlisted objects are not counted (their fate is
+    unknown, as in the eval universe, DECISIONS M2). Rates are Beta-smoothed toward the parent
+    level: label -> nyu40 -> global (`p_persist`).
+    """
+
+    by_label: dict[str, tuple[int, int]] = field(default_factory=dict)  # label -> (present, removed)
+    by_nyu: dict[int, tuple[int, int]] = field(default_factory=dict)
+    total: tuple[int, int] = (0, 0)
+    kappa: float = 20.0
+
+    @property
+    def p_global(self) -> float:
+        p, r = self.total
+        return p / (p + r) if p + r else 0.9
+
+    def p_nyu(self, nyu40: int | None) -> float:
+        """Smoothed persistence of a nyu40 class (global rate if unknown)."""
+        pg = self.p_global
+        if nyu40 is None or int(nyu40) not in self.by_nyu:
+            return pg
+        p, r = self.by_nyu[int(nyu40)]
+        return (p + self.kappa * pg) / (p + r + self.kappa)
+
+    def p_persist(self, label: str | None, nyu40: int | None) -> float:
+        """Smoothed persistence of a label, backing off to its nyu40 class, then the global rate."""
+        pn = self.p_nyu(nyu40)
+        if not label or label not in self.by_label:
+            return pn
+        p, r = self.by_label[label]
+        return (p + self.kappa * pn) / (p + r + self.kappa)
+
+
+def prior_counts(meta: Meta, scans: Sequence[str], objects_of) -> PriorTable:
+    """Count present / removed thing+anchor objects over the train rescans in `scans`.
+
+    Args:
+        meta: 3RScan metadata (train rescans' `removed` lists: training data of other rooms).
+        scans: Allowed train scans (`train_scans`); references are skipped, rescans counted.
+        objects_of: scan id -> {objectId: 3DSSG object dict} (e.g. `load_objects`).
+    """
+    lab: dict[str, list[int]] = {}
+    nyu: dict[int, list[int]] = {}
+    tot = [0, 0]
+    for s in scans:
+        m = meta[s]
+        if m.is_reference or m.reference_id == s:
+            continue
+        try:
+            oR, oS = objects_of(m.reference_id), objects_of(s)
+        except KeyError:
+            continue
+        if not oR or not oS:
+            continue
+        removed = {int(x) for x in m.removed}
+        for oid, o in oR.items():
+            if "nyu40" not in o or not o.get("label"):
+                continue
+            n = int(o["nyu40"])
+            if node_level(n) not in VOCAB_LEVELS:
+                continue
+            if int(oid) in removed:
+                k = 1
+            elif oid in oS:
+                k = 0
+            else:
+                continue  # absent-unlisted: unknown fate
+            for d, key in ((lab, str(o["label"])), (nyu, n)):
+                d.setdefault(key, [0, 0])[k] += 1
+            tot[k] += 1
+    return PriorTable({k: (v[0], v[1]) for k, v in lab.items()}, {k: (v[0], v[1]) for k, v in nyu.items()},
+                      (tot[0], tot[1]))  # fmt: skip
+
+
+@lru_cache(maxsize=2)
+def _priors_cached(root: str, exclude: tuple[str, ...]) -> PriorTable:
+    """`class_priors` body, cached per process (kappa set by the caller)."""
+    meta = load_meta(root)
+    ids = train_scans(meta, excluded_references(exclude))
+    return prior_counts(meta, ids, lambda s: load_objects(root, s))
+
+
+def class_priors(root: str | Path, cfg: Mapping[str, Any]) -> PriorTable:
+    """Train class priors for the scenes allowed by `train_meta` (same exclusions as the vocabulary)."""
+    t = _priors_cached(str(root), tuple(cfg["train_meta"]["exclude_splits"]))
+    return PriorTable(t.by_label, t.by_nyu, t.total, float(cfg["confidence"].get("prior_kappa", 20)))
+
+
+def logit(p: float) -> float:
+    """log(p / (1 - p)), with p clipped to [1e-6, 1 - 1e-6]."""
+    p = min(max(float(p), 1e-6), 1 - 1e-6)
+    return math.log(p / (1 - p))
