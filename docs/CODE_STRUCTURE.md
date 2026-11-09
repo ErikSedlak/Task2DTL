@@ -1,12 +1,12 @@
 # Code structure — what is where and what it does
 
-State: end of milestone M4 (2026-11-07). Covers everything in `src/lsg/`, `tests/` and `configs/`. For *why* things are done this way, see `DESIGN.md` (the spec) and `DECISIONS.md` (the log); this file only explains *what* the code does.
+State: end of milestone M5 (2026-11-07). Covers everything in `src/lsg/`, `tests/` and `configs/`. For *why* things are done this way, see `DESIGN.md` (the spec) and `DECISIONS.md` (the log); this file only explains *what* the code does.
 
 ## 1. The project in one paragraph
 
 3RScan contains rooms that were scanned several times. The first scan of a room is the **reference**; later visits are **rescans**. Between visits, furniture moves, objects disappear and new ones appear. The goal is to take the reference room's scene graph (objects + "cup is on the table" relations), look at a rescan's camera frames, and update the graph: which objects are unchanged, moved, removed, unknown (not seen) or new.
 
-M0 built the foundation: reading the data, drawing ("rendering") a scanned room from any camera position, lining up the rescan with the reference, and checking on real data that all of this is correct. M1 added the reference scene graph (objects + support relations, from annotations or from geometry) and the ground truth of what changed between two visits. M2 added the observation interface (what the method sees of a rescan), the oracle version of it, the first (naive) change detector B0, and the scoring harness `lsg eval`. M3 added the online frame loop: every rescan frame is compared with the rendered reference, each object gets "seen" / "seen through" votes, votes from nearly the same camera position count once, and B1 deletes an object only if it was seen through from at least two different viewpoints. Otherwise the object becomes `unknown`. M4 added perception mode: the method finds rescan objects itself, from places where the measured depth is nearer than the rendered reference (something new stands there), keeps only spots seen from several viewpoints, groups them into candidate objects and names each one with CLIP from colour crops.
+M0 built the foundation: reading the data, drawing ("rendering") a scanned room from any camera position, lining up the rescan with the reference, and checking on real data that all of this is correct. M1 added the reference scene graph (objects + support relations, from annotations or from geometry) and the ground truth of what changed between two visits. M2 added the observation interface (what the method sees of a rescan), the oracle version of it, the first (naive) change detector B0, and the scoring harness `lsg eval`. M3 added the online frame loop: every rescan frame is compared with the rendered reference, each object gets "seen" / "seen through" votes, votes from nearly the same camera position count once, and B1 deletes an object only if it was seen through from at least two different viewpoints. Otherwise the object becomes `unknown`. M4 added perception mode: the method finds rescan objects itself, from places where the measured depth is nearer than the rendered reference (something new stands there), keeps only spots seen from several viewpoints, groups them into candidate objects and names each one with CLIP from colour crops. M5 added B2: objects confirmed in place keep their place (and claim the observations lying inside them), the rest are paired with observations by an optimal assignment on label, size and position, and a paired object counts as moved only if aligning its reference shape onto the observation (ICP) moves it more than 10 cm. After that, "what stands on what" is recomputed for objects that moved, are new, or lost their support, and the relations are scored against the rescan's annotation.
 
 ## 2. Folder map
 
@@ -39,14 +39,19 @@ Task2/
 │   │   ├── pipeline.py      frame selection, per-pair preparation (G_ref, refined T_align)
 │   │   ├── visibility.py    per-frame votes (seen / free / no info), viewpoint decorrelation
 │   │   ├── online.py        the online frame loop + tentative snapshots
-│   │   └── baselines.py     B0: naive same-label matching; B1: + visibility removal rule
+│   │   ├── association.py   B2 matching: confirmed nodes absorb their observations, then Hungarian
+│   │   ├── classify.py      final states: ICP moved test, removed / unknown rule
+│   │   ├── update.py        update_graph: support relations (update / stale R0 / geometric R1)
+│   │   └── baselines.py     B0: naive same-label matching; B1: + visibility removal rule; B2
 │   ├── eval/                CHECKING / SCORING (may read rescan ground truth)
 │   │   ├── m0_checks.py     the four M0 acceptance checks
 │   │   ├── gt.py            ground truth per pair: moved / removed / new / ...
 │   │   ├── gt_stats.py      M1 checks: GT counts, displacement histogram, rule sanity
 │   │   ├── metrics.py       scoring: matching rules, per-pair counts, averages + bootstrap CIs
 │   │   ├── harness.py      `lsg eval` / `lsg run`: method + observations + GT -> metrics.json
-│   │   └── m4_checks.py     `lsg m4`: perception on dev, candidate recall, overlay PNGs, sweep
+│   │   ├── relations.py     relation scoring (§7.2): parent / type accuracy per subset
+│   │   ├── m4_checks.py     `lsg m4`: perception on dev, candidate recall, overlay PNGs, sweep
+│   │   └── m5_checks.py     `lsg m5`: B0 / B1 / B2 on dev, sweep, B2 on val + relation table
 │   ├── oracle/              ground-truth rescan objects: the upper-bound mode
 │   │   └── source.py        OracleSource
 │   └── perception/          finds rescan objects from depth/colour alone: the headline mode
@@ -223,11 +228,30 @@ The rule: no imports from `oracle/` / `eval/`, and no rescan annotations. Inputs
 - `b0(G_ref, obs, cfg)`: pairs each reference object with the nearest observed object of the **same label** (one-to-one, closest pairs first). Within 0.5 m it is `unchanged`, farther `moved` (and its position is updated); without a partner `removed`; observed objects nobody claimed become `new` nodes. It returns the updated graph.
 - It ignores visibility, so anything simply not seen in the rescan is deleted. Later baselines fix exactly that.
 - `b1(G_ref, obs, cfg, votes=...)`: the same matching, but an unmatched object is `removed` only with ≥ 2 counted free votes; otherwise it is `unknown` and kept. On val this cuts false deletions from 95% to 9.5%.
+- `b2(G_ref, obs, cfg, votes=..., ref_ctx=...)` (M5): objects confirmed in place (≥ 3 counted seen votes, no free vote) are `unchanged` and absorb their observations; the rest go through `association.associate`; `classify.classify` decides moved / unchanged / removed / unknown; leftover observations become `new`. Moved objects get the ICP pose: centroid and box of the moved reference points, `T_move` = the full 4x4 motion.
+- Every method only decides states and geometry; relations are recomputed afterwards by `update.update_graph`.
+
+### `change/association.py` — who is who (M5)
+- `absorb_confirmed(...)`: an observation lying mostly (≥ 50% of its points) inside the box (+10 cm) of an object confirmed in place, with a compatible label, belongs to that object. It is then neither new nor available for matching. In oracle mode this is the object's own instance; in perception mode it is usually a fake candidate from a mesh hole (black TV screen) or a plant.
+- `associate(nodes, obs, mode, cfg)`: optimal one-to-one assignment (Hungarian, `scipy.optimize.linear_sum_assignment`). Cost = label term + size term + weak position term. Label term: oracle needs the same label (or the same class, +0.3, except the catch-all classes "otherprop" / "otherfurniture", where e.g. a keyboard and a blanket share a class); perception uses how likely CLIP thinks the object's label is (−log p, at least p_min = 0.05). Pairs costing ≥ `tau_assoc` stay unmatched.
+
+### `change/classify.py` — moved or not (M5)
+- `icp_move(ref_pts, obs_pts, cfg)`: aligns the (often partial) observed points onto the object's reference points with ICP, trying two starting guesses (the centroid offset and "not moved") and keeping the better fit. Returns the object's motion `T_move`.
+- `classify(...)`: moved if the ICP motion shifts the centroid by > 10 cm, else unchanged; unmatched objects: removed with ≥ 2 counted free votes, else unknown.
+
+### `change/update.py` — relations after the change (M5)
+- `update_graph(G, ref_ctx, obs, cfg, policy)`. `update` re-checks only moved and new things and things whose parent moved or was removed: a re-checked thing keeps its old parent if that parent still carries it at the new position (`graph.relations.still_supports`), otherwise `infer_support` picks a new one. `stale` (baseline R0) keeps the reference relations. `geometric` (baseline R1) recomputes every thing. A removed object is never anyone's parent; the `anchor` field and `next_to` edges are refreshed.
 
 ### `eval/metrics.py` — scoring
 - `match_new(...)`: which predicted new nodes are real new objects. Oracle: by token. Perception: same label (or class) and close (<= 30 cm) or overlapping (box IoU >= 0.25), best overlaps first, one-to-one.
 - `score_pair(G_upd, gt, ...)`: counts for one pair: hits / false alarms / misses for moved, removed and new; unchanged right / kept; false deletions and false moves on objects the rescan annotation doesn't mention; how often the method paired an object with the right observation; moved recall per distance and size bucket; how far off the new position of a correctly detected move is.
 - `aggregate(...)`: sums the counts over all pairs, turns them into percentages, and adds a 95% confidence interval by resampling pairs (bootstrap). Every number comes with its support `n`.
+
+### `eval/relations.py` — scoring relations (M5)
+- `score_relations(...)`: per thing with a support parent in the rescan's 3DSSG annotation, is the predicted parent the same object (parent accuracy), and is `on` / `in` right (type accuracy)? Counted for (a) all such things, (b) moved things, (c) moved things whose annotated parent changed (swapped), (c-broad) swapped or gained; each with and without floor parents, and once over all things ("GT universe") and once only over the things the method associated.
+
+### `eval/m5_checks.py` — the M5 checks (`uv run lsg m5`)
+- Runs B0, B1 and B2 on the dev pairs in both modes and checks: B2's association accuracy ≥ B0's, B2's moved F1 ≥ B1's, all graphs valid. Optional sweep of `tau_assoc` × `w_p` on dev. Then B2 on val in both modes, with the relation table R0 / R1 / update.
 
 ### `eval/m4_checks.py` — the M4 checks (`uv run lsg m4`)
 - Runs B0 and B1 on the dev pairs in both modes and reports how many real changes got a candidate: **candidate recall** against new objects and against the new places of moved objects, with and without requiring the right label.
@@ -235,7 +259,7 @@ The rule: no imports from `oracle/` / `eval/`, and no rescan annotations. Inputs
 - Sweeps the door filter (on / off) and the minimum cluster size (3 / 5 / 10) as a diagnostic.
 
 ### `eval/harness.py` — `lsg eval` and `lsg run`
-- For every pair: load the GT, prepare the pair, run the online loop with the oracle, run the method with the observations and votes, score, and save the updated graph to `outputs/<run>/graphs/<mode>/` (snapshots to `outputs/<run>/snapshots/<mode>/` if asked).
+- For every pair: load the GT, prepare the pair, run the online loop with the oracle, run the method with the observations and votes, recompute relations with all three policies (`update_graph`), score changes and relations, check the graph with `validate`, and save the updated graph to `outputs/<run>/graphs/<mode>/` (snapshots to `outputs/<run>/snapshots/<mode>/` if asked).
 - Besides the scores it reports *evidence diagnostics* that do not depend on the method: how many truly unchanged / removed / absent objects got free (seen-through) evidence.
 - Perception mode: the frames also go to a hidden `OracleSource` (only to know which GT objects were visible, for the association score; the method never sees it). Candidates are matched to GT objects with the §5 rule (same label or class, and close). The candidate lists are saved to `outputs/<run>/candidates/`.
 - Pairs of the same reference run in one worker process (4 in parallel by default). Results are sorted back into a fixed order, so the `metrics` block of metrics.json is identical across reruns; timings go into a separate `run` block.
@@ -247,6 +271,7 @@ The rule: no imports from `oracle/` / `eval/`, and no rescan annotations. Inputs
 - `uv run lsg graph --scan <reference id> --mode gt|geometric [--out file.json]` exports one reference graph and validates it.
 - `uv run lsg eval --split eval_val --obs oracle --method B0|B1 [--workers N] [--frac F --seed S] [--snapshots]` runs and scores a whole split (~65 s for val); `uv run lsg run --pair <ref> <rescan> --obs oracle --method B1 [--no-snapshots]` does one pair and writes snapshots. Both print a results table and write `outputs/<run>/metrics.json`. `--obs perception,oracle` runs both modes.
 - `uv run lsg m4 [--no-sweep]` runs the M4 checks on dev (~4 min, GPU for CLIP if available).
+- `uv run lsg m5 [--no-sweep] [--no-val]` runs the M5 checks (dev ~1 min, sweep ~8 min, val a few minutes with the CLIP cache warm). `--method B2` works in `lsg eval` / `lsg run`.
 - Later milestones add `lsg ablate`.
 
 ## 6. The one rule that shapes the layout
@@ -278,14 +303,18 @@ These may only be read inside `eval/` (scoring, checks) and `oracle/` (the upper
 | `test_online.py` | A synthetic room with real ray casting: a removed box → free votes → `removed`; removed but occluded / out of view → `unknown` (B0 deletes all three); one viewpoint repeated → 1 vote; tentative snapshots switch from `unknown` to `removed` mid-walk; works with `OracleSource`. |
 | `test_perception.py` | Synthetic room with real ray casting: a box added → exactly one candidate, centroid within 5 cm (of its visible surface); unchanged room → none; one viewpoint repeated → none (decorrelation); object flat against a wall filtered, 30 cm off the wall kept; swung door dropped by the swing region (kept with the filter off); crops reach the labeller; CLIP top-k order, ties and cache; nearer-pixel rules; voxel view counting; clustering; door regions; train vocabulary excludes dev/relchange rooms and val. Shared scene helpers live in `synth.py`. |
 | `test_b1.py` | B1's rule on hand-made votes (2 counted free → removed, 1 → unknown, matched nodes as in B0). |
-| `test_real_data.py` | *(slow, needs `data/`)* Renders a real dev frame and compares with its depth; val GT counts reproduce DESIGN §2.2; one dev pair end-to-end with oracle + B0, twice, with identical `metrics`; one dev pair with B1: deterministic, no more false deletions than B0, snapshots valid; one dev pair in perception mode (B1) twice: identical `metrics`, candidate files, valid graphs; real CLIP on two crops. |
+| `test_association.py` | Label terms (oracle gate + class fallback, perception soft term), size term, Hungarian beats greedy, gate, determinism, absorption (own instance; mesh-hole candidates many-to-one; a different-label new object is kept). |
+| `test_classify.py` | ICP recovers a move; a half-seen unchanged box is not moved although its centroid offset is > 10 cm; low-fit fallback; final states. |
+| `test_b2.py` | B2 on a point-box room: confirmed + absorbed, moved via ICP (partial view), removed, unknown, new; no far "moves"; perception mode. |
+| `test_update.py` | Cup moved from table to shelf gets the shelf; things on a moved or removed parent are recomputed; a new bottle gets the table; R0 keeps everything, R1 recomputes everything. |
+| `test_relations_eval.py` | Relation counts on a hand-made pair: subsets a / b / c / c-broad, floor split, GT vs associated universe, new-node parents, several GT parents; aggregation. |
+| `test_real_data.py` | *(slow, needs `data/`)* Renders a real dev frame and compares with its depth; val GT counts reproduce DESIGN §2.2; one dev pair end-to-end with oracle + B0, twice, with identical `metrics`; one dev pair with B1: deterministic, no more false deletions than B0, snapshots valid; one dev pair in perception mode (B1) twice: identical `metrics`, candidate files, valid graphs; B2 on one dev pair in both modes twice (identical `metrics`, valid graphs, relation counts); real CLIP on two crops. |
 
-Run with `uv run pytest -q` (115 tests, ~10 s); the slow ones with `uv run pytest -q -m slow` (6 tests, ~2 min).
+Run with `uv run pytest -q` (142 tests, ~8 s); the slow ones with `uv run pytest -q -m slow` (7 tests, ~2 min).
 
 ## 8. What is not built yet
 
 Planned in DESIGN §6 and §9 (spec v2), in order:
-- M5: object matching, moved test, graph update + relations (`change/`, `graph/`);
 - M6: confidence and priors; texture rendering + appearance comparison for thin objects (`perception/appearance`);
 - M7: all ablations; M8: visualisation (`viz/`) and write-up.
 

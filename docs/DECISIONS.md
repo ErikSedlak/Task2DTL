@@ -202,3 +202,110 @@ Format: **date — decision.** Why. *Alternatives considered.* (status: fixed / 
   - The B1 removal rule works identically in both modes (same votes).
   - CLIP ran on CPU for this run (CUDA unavailable at the time; `run.per_pair[].clip_device`). The CLIP cache key does not include the device, so the first computed labels are reused; a cold GPU run could differ in the 4th decimal of the scores. (fixed)
 - **No new dependency besides torch / torchvision / open_clip_torch** (scipy's KD-tree and csgraph were already available). (fixed)
+
+## 2026-11-07 — M5 (Claude Code, confirmed by Erik where noted)
+- **§7.2(c) = moved things whose GT parent was swapped** (Erik). Swapped = a parent annotated in both reference and rescan 3DSSG, and the two differ.
+  - Secondary row **(c-broad)** = swapped + **gained** (no reference parent annotated). It is labelled "mostly reference annotation gaps".
+  - "Lost" (no rescan parent) cannot be scored.
+  - R0 is 0% on (c) by construction.
+  - Scored n on val: (c) 3, (c-broad) 10. M1 counted 4 / 11 over all `rigid` things; one is nonrigid / removed and drops out of the relation universe.
+  - *Alt: swapped only; swapped + gained as one row.* (fixed)
+- **Relation universe for (a)/(b)** (Erik): the headline is **GT-defined**.
+  - It covers reference things present in the rescan (GT unchanged / moved / `dont_care` small move; not nonrigid, not removed-but-present, not structure-only) with a GT rescan parent, plus GT-new things matched to a predicted new node (mode's §5 rule).
+  - The node's current support edge is scored whatever its predicted state.
+  - A second row, **associated only**, keeps the things the method associated (predicted unchanged / moved, plus matched new).
+  - Parents are compared in rescan objectId space (`n<k>` → its token's GT instance).
+  - *Alt: prediction-defined only. The scored set would then differ between methods and between modes.* (fixed)
+- **Confirmed-in-place absorption, stage 0 of §6.9** (Erik; spec addition).
+  - Problem: confirmed nodes skip the matching, but their own oracle instance is still observed. Without a rule it would become a false `new` and a free target for an unseen same-label node ("move"), and the confirmed node would count as wrong in the association metric.
+  - Rule: an observation is absorbed by a confirmed node if both hold:
+    - label compatible: oracle same label or nyu40; perception node label in `label_topk` with p ≥ p_min;
+    - ≥ 50% of its points inside the node's AABB + 10 cm.
+  - Many-to-one: each observation goes to its best node (point share, then distance, then id). The node's `obs_token` = its best absorbed observation.
+  - In perception it also removes candidates from mesh holes / foliage inside a confirmed TV or plant.
+  - Dev: oracle 29 absorbed for 36 confirmed; perception 10.
+  - *Alt: confirmed nodes join the Hungarian with a fixed state; strict spec (no absorption, false new nodes).* (fixed; `absorb.*` provisional)
+- **Method signature gains `ref_ctx`**: `method(G_ref, obs, cfg, rescan_id, obs_mode, votes, ref_ctx=None)`. B2 needs the reference node points (mesh vertices) for ICP; B0 / B1 ignore it. `classify` gains `ref_points` for the same reason. (fixed)
+- **Methods decide states; `update_graph` decides relations.**
+  - `update_graph(G_states, ref_ctx, obs, cfg, policy)`, with policy `update` (method) / `stale` (R0) / `geometric` (R1).
+  - The harness runs all three on the same method output and scores all three.
+  - `update.relations` (= `update`) picks the saved graph and the graph scored for change metrics (relations do not affect those).
+  - R0 gives new nodes no parent (strict "keep reference relations").
+  - Removed nodes keep their old edge in the file but are never a parent.
+  - *Alt: relations inside each method (no shared R0 / R1 comparison).* (fixed)
+- **Association details** (§6.9; values *(tune)*, kept at the starting values after the dev sweep below):
+  - weights: w_g = w_p = 1, position scale 3 m, extents floored at 2 cm;
+  - label term: oracle nyu40 penalty 0.3; perception p_min = 0.05;
+  - gate τ_assoc per mode: oracle 2.0, perception 3.5 (a perception label cost alone can reach −log 0.05 = 3.0);
+  - Hungarian = `scipy.optimize.linear_sum_assignment` on costs clipped at τ, then pairs ≥ τ dropped. This equals "leave unmatched at cost τ" and adds no dependency.
+  - (provisional)
+- **Dev sweep (B2, `outputs/m5_final/sweep_*`): τ_assoc (×0.6 / 0.8 / 1.0 / 1.2) × w_p (0.5 / 1 / 2).**
+  - Oracle hardly reacts: moved F1 86.7% everywhere except τ 1.2 / w_p 2 (82.8%).
+  - Perception trades moved F1 against localisation and new R:
+    - τ 2.1 → moved F1 12.5%, localisation median 0.085 m, new R 66.7%;
+    - τ 3.5 / w_p 1 → 60.9%, 0.446 m, 33.3%;
+    - τ 4.2 / w_p 0.5 → 68.6%, 0.627 m, 0%.
+  - Dev has 15 moves and 3 new objects, so there is no clear win: **starting values kept**. (fixed for M5)
+- **ICP moved test** (§6.10).
+  - Point-to-point; the **partial observation (source) is registered onto the reference node points (target)**; T_move = inverse of the result.
+  - Schedule 0.20 / 0.10 / 0.05 m (the spec gave no values; 0.20 first because a partial view biases the centroid init by up to half an extent). Max 30 iterations, ≤ 4,000 points per cloud (seeded subsample).
+  - **Two inits** (deviation from §6.10's single centroid-offset init): centroid offset and identity. Higher fitness wins; near ties (≤ 0.02) go to the lower RMSE. Below fitness 0.3 the centroid offset is used.
+  - Why: from the biased partial-view centroid init, ICP on planar faces slid into a local minimum (synthetic half-seen box: 0.16 m fake displacement, fitness 1.0). For an unchanged object the identity init converges to zero motion.
+  - Dev numbers were identical with one and two inits; val was run only with two.
+  - Moved nodes get centroid / AABB of T_move · reference points, and `T_move` = the full 4×4.
+  - *Alt: point-to-plane; centroid-offset init only (spec).* (provisional)
+- **Oracle nyu40 fallback excludes the catch-all classes 39 (otherfurniture) and 40 (otherprop)** (Erik; found on val, so val was run twice).
+  - The first val run (`outputs/m5_final/val_B2`) had oracle new R **24.0%** (B1 59.6%) and false-move 9.8% (B1 2.4%).
+  - Diagnosis (`diag_new.py`, val oracle, nothing tuned): 96 GT-new objects were taken as `moved` by reference nodes, 58 of them with a different label of the same catch-all class. Examples: keyboard → blanket, plant → blanket, monitor → laptop. The taking nodes were mostly absent-unlisted (66) or GT-removed (18), i.e. unseen nodes.
+  - Fix (`association.nyu_fallback_exclude: [39, 40]`): no nyu40 fallback for those classes; specific classes (chair = 5, table = 7, …) keep it. Principled, not tuned.
+  - Dev is unchanged by it.
+  - Second val run (`outputs/m5_final2`): new R **60.2%**, false-move 4.1%. Both runs are reported here.
+  - *Alt: drop the fallback entirely; keep the spec and report.* (fixed)
+- **`update` keeps a re-checked thing's old parent if it still supports it** (Erik; `update.keep_supported_parent`, `graph.relations.still_supports`).
+  - The old parent is tested with the same contact / containment / floor rules at the new pose; only if that fails does `infer_support` pick a new parent.
+  - Why: most moved things (chairs, pillows) keep their parent. Re-inferring it with the ~85%-accurate rules lost accuracy.
+  - Before the change:
+    - dev (b) oracle: R0 13/13, update 11/13;
+    - first val run (b) oracle: R0 94.0 / update 72.0%.
+  - After: dev 13/13; second val run 86.3%.
+  - Checked on dev only. The first val run showed the same pattern, so val influenced the decision to look at it; logged here for that reason.
+  - *Alt: keep the full re-inference and report update < R0.* (fixed)
+- **`validate()` extended**: `T_move` must be 4×4; `label_topk` must be `[[label, score], …]`; `n<k>` ids ⇔ state `new`. The harness counts `graph_invalid` per pair (in `metrics`). No jsonschema dependency. (fixed)
+- **Diagnostic `free_ev_unchanged_removed`**: GT-unchanged objects with ≥ k_free counted free votes that the method deletes (STATUS M5 item).
+  - Dev: 4 / 34 such objects. B2 removes 4 / 4 in perception (no candidate to match them) and 1 / 4 in oracle. B1 perception removes the same 4.
+  - They are the probable unlisted pillow move and three mixed-evidence "item"s (DECISIONS M3). They are not confirmed (free > 0), so the confirmed-in-place rule cannot protect them. Left for M6 confidence / the §7.4 audit. (fixed)
+- **M5 acceptance** (`uv run lsg m5 --run-id m5_final2`, dev + val, sweep from `m5_final`):
+
+  | dev | moved F1 B1 → B2 | assoc strict B0 → B2 |
+  |---|---|---|
+  | oracle | 33.3 → **86.7** | 90.9 → **90.9** |
+  | perception | 45.5 → **60.9** | 6.8 → **6.8** |
+
+  - All graphs validate (0 invalid over 3 methods × 2 modes × dev + val).
+  - The dev `metrics` blocks of `m5_dev2` and `m5_final2` are identical (determinism).
+  - Perception association stays at 6.8% because unchanged objects produce no candidates; confirmed nodes absorb few.
+  - (fixed)
+- **Val B2 (second run, reported; nothing tuned on val).**
+  - Oracle:
+    - moved P 45.7 / R 68.5 / F1 54.9% (B1 30.0); moved R by displacement 55.5 / 75.9 / 89.5% (B1 0 / 27.6 / 89.5);
+    - localisation median 0.090 m, p90 0.448 (n = 161);
+    - removed P 57.7 / R 41.1%; new P 80.5 / R 60.2%;
+    - unchanged strict 76.9 / kept 86.6% (B1 80.9 / 92.9: the 10 cm ICP threshold turns some unchanged objects into small "moves");
+    - false-deletion 9.5%, false-move 4.1%; association 90.5% strict (B0 / B1 91.4).
+  - Perception:
+    - moved P 52.9 / R 23.0 / F1 32.0% (B1 11.9); localisation median 0.194 m (B1 1.64);
+    - unchanged strict **57.9%** (B1 2.2), kept 92.7%;
+    - false-deletion 9.5%, false-move 1.5%; new P 2.4 / R 9.4%; association 2.8%; unknown rate 45.3% (B1 81.2).
+  - **Relations, parent accuracy, GT universe, R0 / R1 / update:**
+
+    | row | oracle | perception |
+    |---|---|---|
+    | (a) all | 92.0 / 79.5 / **92.4** (n = 994) | 94.6 / 80.2 / 90.7 (n = 966) |
+    | (b) moved | 94.0 / 65.5 / 86.3 (n = 168) | 94.0 / 75.6 / 83.9 (n = 168) |
+    | (c) swapped | 0 / 66.7 / 66.7 (n = 3) | 0 / 66.7 / 66.7 (n = 3) |
+    | (c-broad) | 0 / 20 / 20 (n = 10) | 0 / 20 / 20 (n = 10) |
+
+    - Type accuracy given the parent: R0 99.0 / R1 83.4 / update 94.8% (oracle).
+    - R0 is strong because most things keep their parent; (c) is anecdotal (n = 3).
+  - (fixed)
+- **No new dependencies** (`scipy.optimize`, Open3D ICP already available). (fixed)
