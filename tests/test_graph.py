@@ -110,3 +110,21 @@ def test_validate_catches_problems():
 def test_ids():
     assert ref_node_id(12) == "r12" and object_id_of("r12") == 12
     assert object_id_of("room") is None and object_id_of("n3") is None
+
+
+def test_validate_m5_fields():
+    from lsg.graph.model import ROOM_ID, Graph, Node, bbox_dict, validate
+
+    box = bbox_dict([0, 0, 0], [1, 1, 1])
+    ok = Graph(Graph.new_meta("R"), [Node(ROOM_ID, "room", "room"),
+               Node("r1", "thing", "cup", bbox_3d=box, centroid=[0.5, 0.5, 0.5], state="moved",
+                    T_move=[[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]]),
+               Node("n0", "thing", "bag", label_topk=[["bag", 0.7], ["box", 0.2]], bbox_3d=box,
+                    centroid=[0.5, 0.5, 0.5], state="new")])  # fmt: skip
+    assert validate(ok) == []
+    bad = Graph(Graph.new_meta("R"), [Node(ROOM_ID, "room", "room"),
+                Node("r1", "thing", "cup", bbox_3d=box, centroid=[0.5, 0.5, 0.5], T_move=[[1, 0], [0, 1]], state="new"),
+                Node("n0", "thing", "bag", label_topk=[0.7], bbox_3d=box, centroid=[0.5, 0.5, 0.5])])  # fmt: skip
+    probs = validate(bad)
+    assert any("T_move" in p for p in probs) and any("label_topk" in p for p in probs)
+    assert any("state new needs" in p for p in probs) and any("new-node id" in p for p in probs)

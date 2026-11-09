@@ -117,6 +117,33 @@ baselines:
   b0:
     near_dist: 0.5         # [m] same-label obs within this -> unchanged, farther -> moved (§8)
 
+association:               # DESIGN §6.9, B2 (tune on dev only)
+  w_g: 1.0                 # weight of the size term (mean |log| ratio of sorted AABB extents)
+  w_p: 1.0                 # weight of the position term min(d / pos_scale, 1) (weak)
+  pos_scale: 3.0           # [m]
+  min_extent: 0.02         # [m] extents are floored at this before the log ratio
+  nyu_penalty: 0.3         # oracle: label differs but nyu40 equal -> this cost (else +inf)
+  nyu_fallback_exclude: [39, 40]   # catch-all classes (otherfurniture, otherprop): no nyu40 fallback (M5, Erik)
+  p_min: 0.05              # perception: label cost = -log max(p(label_ref), p_min)
+  tau_assoc:               # pairs with cost >= tau stay unmatched (per observation mode)
+    oracle: 2.0
+    perception: 3.5
+  absorb:                  # stage 0 (M5, Erik): confirmed-in-place nodes claim their observations
+    min_frac: 0.5          # share of obs points inside the node AABB + margin
+    margin: 0.10           # [m]
+
+classify:                  # DESIGN §6.10 ICP moved test (tune on dev only)
+  tau_move: 0.10           # [m] ICP-refined centroid displacement above this -> moved (§3)
+  icp_schedule: [0.20, 0.10, 0.05]   # [m] max correspondence distance per stage
+  icp_max_iter: 30
+  min_fitness: 0.3         # share of obs points with a correspondence; below -> centroid offset
+  fit_tie: 0.02            # two ICP inits (centroid offset, identity): fitness within this -> lower RMSE wins
+  max_points: 4000         # random subsample (seeded) of each cloud for speed
+
+update:                    # DESIGN §6.12 graph update
+  relations: update        # update (method) | stale (R0) | geometric (R1); saved / scored graph
+  keep_supported_parent: true   # update: a re-checked thing keeps its old parent if it still supports it (M5, Erik)
+
 m1:
   count_split: splits/eval_val.txt
   expected_counts: {rigid: 390, removed: 96, new_raw: 224}   # DESIGN §2.2

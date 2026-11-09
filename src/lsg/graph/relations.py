@@ -255,6 +255,42 @@ def infer_support(
     return None, None, 0.0
 
 
+def still_supports(
+    child_pts: np.ndarray,
+    parent: SupportCandidate | str,
+    old_type: str,
+    floor_z: float,
+    cfg: Mapping[str, Any],
+) -> str | None:
+    """Does a known parent still carry the child (same rules as `infer_support`)? (M5)
+
+    Used by `update_graph` to keep a re-checked thing's old parent when the geometry still
+    agrees, instead of re-picking among all candidates.
+
+    Args:
+        child_pts: (N, 3) child points at their current pose.
+        parent: The old parent's `SupportCandidate` (current pose), or `FLOOR`.
+        old_type: The old relation type ("on" / "in").
+        floor_z, cfg: As in `infer_support` (`cfg["relations"]`).
+
+    Returns:
+        The relation type that holds ("on" / "in"; the old type is preferred), or None.
+    """
+    child_pts = np.asarray(child_pts, dtype=np.float64)
+    zmin = float(child_pts[:, 2].min())
+    if isinstance(parent, str):
+        return "on" if parent == FLOOR and zmin - floor_z < cfg["floor_max_gap"] else None
+    slice_pts = child_pts[child_pts[:, 2] <= zmin + cfg["bottom_slice"]]
+    ok = []
+    if parent.aabb_max[2] >= zmin - cfg["contact_dz"] and contact_fraction(slice_pts, parent, cfg, floor_z) >= cfg["contact_min_frac"]:
+        ok.append("on")
+    if parent.level == "anchor" and containment_fraction(child_pts, parent) >= cfg["contain_min_frac"]:
+        ok.append("in")
+    if not ok:
+        return None
+    return old_type if old_type in ok else ok[0]
+
+
 def aabb_gap(amin: np.ndarray, amax: np.ndarray, bmin: np.ndarray, bmax: np.ndarray) -> float:
     """Euclidean gap between two AABBs (0 if they overlap)."""
     d = np.maximum(0.0, np.maximum(amin - bmax, bmin - amax))

@@ -177,6 +177,16 @@ def validate(g: Graph) -> list[str]:
                 probs.append(f"{n.id}: bbox_3d must be {{min: [3], max: [3]}}")
             if n.centroid is None or len(n.centroid) != 3:
                 probs.append(f"{n.id}: centroid must have 3 values")
+        if n.T_move is not None and np.asarray(n.T_move, dtype=float).shape != (4, 4):
+            probs.append(f"{n.id}: T_move must be 4x4")
+        if n.label_topk is not None and not all(
+            isinstance(x, (list, tuple)) and len(x) == 2 and isinstance(x[0], str) for x in n.label_topk
+        ):
+            probs.append(f"{n.id}: label_topk must be [[label, score], ...]")
+        if n.id.startswith("n") and n.state != "new":
+            probs.append(f"{n.id}: new-node id with state {n.state}")
+        if n.state == "new" and not n.id.startswith("n"):
+            probs.append(f"{n.id}: state new needs an n<k> id")
     if ROOM_ID not in ids:
         probs.append("no room node")
 

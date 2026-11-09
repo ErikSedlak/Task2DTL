@@ -49,6 +49,19 @@ def _cmd_m4(args: argparse.Namespace) -> int:
     return 0 if res["acceptance"]["overlays_3_dev_frames"]["pass"] else 1
 
 
+def _cmd_m5(args: argparse.Namespace) -> int:
+    """`lsg m5`: B0 / B1 / B2 on dev (both modes), optional sweep, B2 on val with relations.
+
+    Returns:
+        Exit code 0 if every acceptance check passes.
+    """
+    from lsg.eval.m5_checks import format_summary, run_m5
+
+    res = run_m5(load_config(args.config), run_id=args.run_id, sweep=not args.no_sweep, val=not args.no_val)
+    print(format_summary(res))
+    return 0 if all(a["pass"] for a in res["acceptance"].values()) else 1
+
+
 def _cmd_splits_textures(args: argparse.Namespace) -> int:
     """`lsg splits textures`: write the reference scans that need textures (DESIGN §2.3)."""
     from lsg.config import REPO_ROOT
@@ -151,6 +164,13 @@ def main(argv: list[str] | None = None) -> int:
     m4.add_argument("--no-sweep", action="store_true", help="skip the door-filter / min_voxels sweep")
     m4.set_defaults(func=_cmd_m4)
 
+    m5 = sub.add_parser("m5", help="M5: B0/B1/B2 on dev, B2 on val with the relation table")
+    m5.add_argument("--config", default=None)
+    m5.add_argument("--run-id", default=None)
+    m5.add_argument("--no-sweep", action="store_true", help="skip the tau_assoc x w_p dev sweep")
+    m5.add_argument("--no-val", action="store_true", help="skip the val run (dev checks only)")
+    m5.set_defaults(func=_cmd_m5)
+
     sp = sub.add_parser("splits", help="split-file helpers")
     sps = sp.add_subparsers(dest="splits_cmd", required=True)
     tx = sps.add_parser("textures", help="write splits/download_textures.txt")
@@ -178,7 +198,7 @@ def main(argv: list[str] | None = None) -> int:
             sp_.add_argument("--no-snapshots", action="store_true", help="skip tentative snapshots")
             sp_.set_defaults(func=_cmd_run)
         sp_.add_argument("--obs", default="oracle", help="comma list of oracle,perception (e.g. perception,oracle)")
-        sp_.add_argument("--method", default="B0", help="B0 | B1")
+        sp_.add_argument("--method", default="B0", help="B0 | B1 | B2")
         sp_.add_argument("--frac", type=float, default=1.0, help="observed fraction (contiguous chunk)")
         sp_.add_argument("--seed", type=int, default=0)
         sp_.add_argument("--config", default=None)

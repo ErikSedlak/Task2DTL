@@ -22,11 +22,15 @@ from typing import Any
 from lsg.change.baselines import METHODS
 from lsg.change.online import run_online
 from lsg.change.pipeline import prepare_pair, select_frames
+from lsg.change.update import POLICIES, update_graph
 from lsg.config import REPO_ROOT, cache_root, data_root, outputs_root
-from lsg.eval.gt import gt_changes
+from lsg.eval.gt import gt_changes, gt_parent_changes
 from lsg.eval.metrics import aggregate, bucket_names, perception_obs_truth, score_pair
+from lsg.eval.relations import REL_POLICIES, REL_SUBSET_NAMES, score_relations
 from lsg.geom.render import Renderer
 from lsg.graph.build import build_reference_graph
+from lsg.graph.model import validate
+from lsg.graph.relations import gt_support
 from lsg.io.dssg import label_to_nyu40, load_objects, load_relations
 from lsg.io.scan3r import load_meta, load_scan, open_sequence, read_pairs
 from lsg.obs.base import ObsInstance
@@ -103,6 +107,9 @@ def _eval_group(task: dict[str, Any]) -> list[dict[str, Any]]:
     R = load_scan(root, ref, with_intrinsics=False)
     objs_R, rels_R = load_objects(root, ref), load_relations(root, ref)
     G_ref = build_reference_graph(R, objs_R, rels_R, "gt", cfg)
+    gs_R = gt_support(rels_R, objs_R)
+    score_rel = bool(cfg["eval"].get("relations", True))
+    main_policy = str(cfg.get("update", {}).get("relations", "update"))
     ref_renderer = Renderer(R.vertices, R.faces, R.face_labels)  # shared by the group's rescans
     method = METHODS[task["method"]]
     labeler = vocab_nyu = label_nyu = None
@@ -117,6 +124,8 @@ def _eval_group(task: dict[str, Any]) -> list[dict[str, Any]]:
         S = load_scan(root, s, with_intrinsics=False)
         objs_S = load_objects(root, s)
         gt = gt_changes(meta[s], R, S, objs_R, objs_S, cfg)
+        gs_S = gt_support(load_relations(root, s), objs_S) if score_rel else None
+        pkinds = gt_parent_changes(meta[s], objs_R, gs_R, gs_S) if gs_S is not None else {}
         t_load = time.time() - t0
         with open_sequence(root, s) as seq:
             fids = select_frames(seq.frame_ids, int(cfg["frames"]["stride"]), task["frac"], task["seed"], key=s)
@@ -151,8 +160,21 @@ def _eval_group(task: dict[str, Any]) -> list[dict[str, Any]]:
                     truth = {o.token: (tm[o.token], o.label) for o in obs}
                     score_kw = {}
                 t_obs = time.time() - t2
-                G_upd = method(G_ref, obs, cfg, rescan_id=s, obs_mode=mode, votes=online.votes)
+                G_states = method(G_ref, obs, cfg, rescan_id=s, obs_mode=mode, votes=online.votes, ref_ctx=ctx)
+                policies = list(POLICIES) if score_rel else [main_policy]
+                graphs = {p: update_graph(G_states, ctx, obs, cfg, p) for p in policies}
+                G_upd = graphs[main_policy]
                 sc = score_pair(G_upd, gt, mode, cfg, obs_truth=truth, votes=online.votes, **score_kw)
+                if gs_S is not None:
+                    for p, G_p in graphs.items():
+                        sc["counts"].update(score_relations(G_p, gt, gs_S, pkinds, sc["new_match"]["tp"], truth,
+                                                            REL_POLICIES[p]))  # fmt: skip
+                problems = validate(G_upd)
+                sc["counts"]["graph_invalid"] = int(bool(problems))
+                if problems:
+                    extra_run["graph_problems"] = problems[:20]
+                if "assoc" in G_upd.meta:
+                    extra_run["assoc"] = G_upd.meta["assoc"]
                 if cfg["eval"].get("save_graphs", True) and task.get("run_dir"):
                     G_upd.save(Path(task["run_dir"]) / "graphs" / mode / f"{ref}_{s}.json")
                 if mode == "perception" and task.get("run_dir"):
@@ -310,6 +332,15 @@ def format_summary(res: dict[str, Any]) -> str:
                                ("  same, labelled (§5 rule)", ["cand_recall_new_labelled", "cand_recall_moved_labelled"]),
                                ("cand. explained by any GT", ["cand_explained"])):  # fmt: skip
                 L.append(f"    {name:28s} " + " | ".join(f(M[k], pct=k != "cand_per_pair") for k in keys))
+        if any(M[f"rel_{p}_a_gt_all_parent_acc"]["n"] for p in REL_POLICIES.values()):
+            L.append(f"    {'relations: parent acc':28s} R0 stale | R1 geometric | update  (GT universe; "
+                     "'as' = associated only, 'nf' = without floor parents)")  # fmt: skip
+            for sub, name in REL_SUBSET_NAMES.items():
+                for u, fl in (("gt", "all"), ("gt", "nf"), ("as", "all")):
+                    keys = [f"rel_{p}_{sub}_{u}_{fl}_parent_acc" for p in REL_POLICIES.values()]
+                    L.append(f"      {name + ' ' + u + ' ' + fl:26s} " + " | ".join(f(M[k]) for k in keys))
+            keys = [f"rel_{p}_a_gt_all_type_acc" for p in REL_POLICIES.values()]
+            L.append(f"      {'(a) type acc | parent':26s} " + " | ".join(f(M[k]) for k in keys))
         le = sm["loc_error"]
         loc = "n/a" if le["n"] == 0 else f"median {le['median']:.3f}  p90 {le['p90']:.3f}"
         L.append(f"    {'moved loc. error [m]':28s} {loc}  (n={le['n']})")
@@ -318,5 +349,6 @@ def format_summary(res: dict[str, Any]) -> str:
                  f"  new {c['new_tp'] + c['new_fn']}  unchanged {c['unch_n']}  absent_unlisted {c['absent_n']}"
                  f"  (ref nodes {c['ref_n']}, GT objects without node {c['ref_no_node']},"
                  f" pred new ignored {c['new_ignored']})")  # fmt: skip
+        L.append(f"    invalid graphs: {c['graph_invalid']}")
     L.append(f"metrics: {res['metrics_path']}  (wall {res['wall_time_s']:.0f} s)")
     return "\n".join(L)

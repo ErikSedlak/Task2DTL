@@ -25,6 +25,7 @@ from typing import Any
 import numpy as np
 
 from lsg.eval.gt import GTLabels
+from lsg.eval.relations import relation_count_keys, relation_metric_defs
 from lsg.graph.model import Graph, Node, bbox_dict, ref_node_id
 
 SIZES = ("small", "large")
@@ -271,9 +272,10 @@ def count_keys(cfg: Mapping[str, Any]) -> list[str]:
     keys += ["new_ignored", "unch_n", "unch_strict", "unch_kept", "absent_n", "absent_del", "absent_move",
              "ref_n", "ref_unknown", "ref_no_node", "assoc_n", "assoc_strict", "assoc_label",
              "moved_no_disp", "diag_free_unch", "diag_free_removed", "diag_free_absent",
-             "diag_seen_absent", "diag_votes", *CAND_KEYS]  # fmt: skip
+             "diag_seen_absent", "diag_votes", "diag_free_unch_removed", "graph_invalid", *CAND_KEYS]  # fmt: skip
     keys += [f"moved_{x}_d{b}" for b in range(nb) for x in ("n", "tp")]
     keys += [f"{k}_{x}_{s}" for k in ("moved", "new") for s in SIZES for x in ("n", "tp")]
+    keys += relation_count_keys()  # §7.2 (M5); 0 when relations were not scored
     return keys
 
 
@@ -372,6 +374,7 @@ def score_pair(
             c["unch_strict"] += st == "unchanged"
             c["unch_kept"] += st in ("unchanged", "unknown")
             c["diag_free_unch"] += n_free(oid) >= k_free
+            c["diag_free_unch_removed"] += n_free(oid) >= k_free and st == "removed"
         # association: GT-matchable = moved/unchanged objects visible in the processed frames
         if s in ("moved", "unchanged") and oid in vis:
             c["assoc_n"] += 1
@@ -415,6 +418,7 @@ def metric_defs(cfg: Mapping[str, Any]) -> dict[str, tuple[list[str], list[str],
     # online-loop evidence diagnostics (M3; independent of the method's decisions)
     d["free_ev_unchanged"] = (["diag_free_unch"], ["unch_n"], ["unch_n"])
     d["free_ev_removed"] = (["diag_free_removed"], ["removed_tp", "removed_fn"], ["removed_tp", "removed_fn"])
+    d["free_ev_unchanged_removed"] = (["diag_free_unch_removed"], ["diag_free_unch"], ["diag_free_unch"])
     d["free_ev_absent"] = (["diag_free_absent"], ["absent_n"], ["absent_n"])
     d["seen_ev_absent"] = (["diag_seen_absent"], ["absent_n"], ["absent_n"])
     # perception candidate diagnostics (M4)
@@ -429,6 +433,7 @@ def metric_defs(cfg: Mapping[str, Any]) -> dict[str, tuple[list[str], list[str],
     for k in ("moved", "new"):
         for s in SIZES:
             d[f"{k}_R_{s}"] = ([f"{k}_tp_{s}"], [f"{k}_n_{s}"], [f"{k}_n_{s}"])
+    d.update(relation_metric_defs())
     return d
 
 

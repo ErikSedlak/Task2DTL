@@ -150,3 +150,32 @@ def test_clip_labeler_real_model(tmp_path):
     assert len(top) == 3 and len({a for a, _ in top}) == 3
     assert all(top[i][1] >= top[i + 1][1] for i in range(2)) and 0 < sum(s for _, s in top) <= 1.0001
     assert lab.topk([img, img[::-1]], 3) == top and lab.n_cached == 1
+
+
+@pytest.mark.slow
+def test_m5_b2_both_modes_one_dev_pair(real_data_root, tmp_path):
+    """M5 on one dev pair: B2 in both modes, twice -> identical `metrics`; graphs valid; the
+    relation counts of all three policies are filled; confirmed nodes carry an obs_token."""
+    import copy
+    import json
+
+    from lsg.config import load_config
+    from lsg.eval.harness import run_eval
+    from lsg.graph.model import Graph, validate
+
+    cfg = copy.deepcopy(load_config())
+    cfg["outputs_root"] = str(tmp_path)
+    pair = ("531cff08-0021-28f6-8e08-ba2eeb945e09", "19eda6f4-55aa-29a0-8893-8eac3a4d8193")
+    a = run_eval(cfg, [pair], ["perception", "oracle"], "B2", workers=1, run_id="a")
+    run_eval(cfg, [pair], ["perception", "oracle"], "B2", workers=1, run_id="b")
+    ma = json.loads((tmp_path / "a" / "metrics.json").read_text())
+    mb = json.loads((tmp_path / "b" / "metrics.json").read_text())
+    assert ma["metrics"] == mb["metrics"]
+    for mode in ("perception", "oracle"):
+        c = a["summary"][mode]["counts"]
+        assert c["graph_invalid"] == 0
+        assert all(c[f"rel_{p}_a_gt_all_n"] > 0 for p in ("R0", "R1", "upd"))
+        G = Graph.load(tmp_path / "a" / "graphs" / mode / f"{pair[0]}_{pair[1]}.json")
+        assert validate(G) == [] and G.meta["method"] == "B2" and G.meta["relation_policy"] == "update"
+    o = a["summary"]["oracle"]["metrics"]
+    assert o["assoc_acc_strict"]["value"] >= 0.8 and o["moved_F1"]["value"] >= 0.5
