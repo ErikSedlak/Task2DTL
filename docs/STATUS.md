@@ -7,13 +7,75 @@ Handoff file between milestone sessions: each milestone is done in a fresh chat.
 DESIGN.md (the spec) and DECISIONS.md (the dated log, with the reasons) stay the source of truth. This file is the to-do view on top of them.
 
 ## Current state (2026-11-09)
-- **M0 ✅** (commit `dd66381`), **M1 ✅** (commits `5ed8260` code, `b025428` docs), **M2 ✅** (commits `49b9b61` + `4577e4b` code, then the docs commit), **M3 ✅** (commit `6e71d0c` code, then the docs commit), **M4 ✅** (commit `9d67e8b` code, then the docs commit) and **M5 ✅** (commit `7cadc26` code, then the docs commit) are done.
-- **Next: M6** — confidence + class priors (FULL), texture rendering, appearance residual (DINOv2): thin-node free-like votes, thin-object voxels.
-- `origin/main` is at `b237be2` (M3 docs). The M4 and M5 commits are on local `main` only; not pushed as of 2026-11-09.
+- **M0 ✅** (commit `dd66381`), **M1 ✅** (commits `5ed8260` code, `b025428` docs), **M2 ✅** (commits `49b9b61` + `4577e4b` code, then the docs commit), **M3 ✅** (commit `6e71d0c` code, then the docs commit), **M4 ✅** (commit `9d67e8b` code, then the docs commit), **M5 ✅** (commit `7cadc26` code, then the docs commit) and **M6 ✅** (code commit "M6: …", then the docs commit) are done.
+- **Next: M7** — all ablations (§8) on val + relchange, both modes; final results table. **Erik's decision first:** the confidence veto trade-off (M7 items below).
+- **New rule (Erik, 2026-11-09):** milestone val reports run on `splits/eval_val_small.txt` (20 pairs; `lsg m5` / `lsg m6` default). All 110 `eval_val` pairs (`--full-val`) only for the final tables (M7).
+- `origin/main` is at `b237be2` (M3 docs). The M4, M5 and M6 commits are on local `main` only; not pushed as of 2026-11-09.
 
 ---
 
 ## Finished
+
+### M6 (2026-11-09), acceptance passed — `uv run lsg m6 --run-id m6_final` → `outputs/m6_final/metrics.json` (OBJ/PLY check, render check + overlays, dev B2 / FULL variants both modes, L_hit sweep, val FULL both modes on the full `eval_val`)
+
+**Acceptance results:**
+
+| Check | Result |
+|---|---|
+| Texture render check (own sequences) | 3 overlays per dev reference (`outputs/m6_final/m6_render_*.png`), inspected: visibly aligned (black = mesh holes); median DINOv2 patch similarity **0.766** (0ad2d39b) / **0.720** (531cff08); rescans 0.56–0.61 |
+| OBJ ↔ PLY (§2.1) | identical vertex order, positions (max diff 0.0) and faces on **72 / 72** references |
+| Synthetic 2 cm book removed from a table | `test_appearance.py`: FULL depth-only → `unchanged` (missed), FULL + appearance → `removed`; colour features (fast) and DINOv2 (slow) |
+| Graphs / determinism | 0 invalid graphs; dev `dev_FULL` = `sweep_Lhit2.5` metrics; slow test runs FULL on one dev pair twice |
+| B0–B2 regression | `lsg m5 --no-sweep --no-val` dev metrics identical to `m5_final2` on all shared keys |
+
+**Dev** (3 pairs, both modes; perception / oracle):
+
+| | unch. kept | unchanged w/ free ev. deleted | false-del. | new P | app. cand. / pair |
+|---|---|---|---|---|---|
+| B2 | 85.3 / 91.2 | 100 / 25 (n = 4) | 8.3 / 16.7 | 1.8 / 50.0 | – |
+| FULL depth-only | 94.1 / 94.1 | 25 / 0 | 8.3 / 16.7 | 1.8 / 50.0 | – |
+| FULL | 94.1 / 94.1 | 25 / 0 | 8.3 / 25.0 | 1.4 / 50.0 | 5.3 |
+
+- Dev has 1 GT-removed object (pillow r50, a same-class replacement that DINOv2 does not flag). The extra oracle false deletion is the robot vacuum r68, which is really gone but not listed (DECISIONS M6).
+- L_hit sweep 0.5 / 1 / 2.5 → 2.5 (lowest false deletion).
+
+**Val FULL** (110 pairs, reported once, nothing tuned; vs B2 at M5):
+
+| | removed P / R | false-del. | unch. kept | new P / R | moved F1 |
+|---|---|---|---|---|---|
+| B2 oracle | 57.7 / 41.1 | 9.5 | 86.6 | 80.5 / 60.2 | 54.9 |
+| **FULL oracle** | 54.3 / **26.0** | **8.1** | 86.6 | 81.0 / 59.6 | 54.6 |
+| B2 perception | 17.7 / 45.2 | 9.5 | 92.7 | 2.4 / 9.4 | 32.0 |
+| **FULL perception** | **24.0 / 31.5** | **7.7** | **95.4** | 2.0 / 8.8 | 31.2 |
+
+- The confidence veto (33 oracle / 120 perception B2 deletions → `unknown`) trades ~11 removed TPs per mode for ~10–13 fewer absent-unlisted deletions.
+- Appearance: 2 / 5 GT-removed objects on val are thin; 1 / 73 removed and 3 / 1,401 unchanged get free-like evidence; thin-object candidates 0.9 per pair, 16% explained.
+
+**Code:**
+- `io/scan3r.py`: `read_obj`, `TexturedMesh`, `load_textured_mesh`.
+- `geom/render.py`: `TextureRenderer`, `sample_bilinear`, `Renderer.render(return_prim=)`, `face_normal_z`.
+- `perception/appearance.py`: `DinoV2Features` (timm), `ColorFeatures`, `patch_similarity`, `mismatch` → `AppearanceMap` (`comparable_px`, `mismatch_px`, `rel_px`), `SimilarityCache` (`cache/appearance/`), `AppearanceRunner`, `tau_app` / `tau_node`.
+- `change/visibility.py`: `FREE_LIKE`, `thin_votes`, `NodeVotes.free_like`, free evidence / confirmed rules incl. free-like.
+- `change/online.py`: `run_online(appearance=, priors=)`, `obs_views`, `stats`, tentative confidence in snapshots.
+- `change/confidence.py` (new); `train_meta.py`: `PriorTable`, `prior_counts`, `class_priors`, `logit`.
+- `change/baselines.py`: `full`, shared `_b2_core`; every method takes `obs_views=`, `priors=`; `METHODS["FULL"]`.
+- `perception/source.py`: thin-object candidates (separate voxel grid, `kind = "appearance"`, `wants_appearance`); `residual.SurfaceFilter.keep_struct`.
+- `obs/base.py`: `RefRender.appearance` / `.up`, `RefContext.thin_oids`, `ObsInstance.kind`; `graph/model.validate`: confidence in [0, 1].
+- `eval/metrics.py`: free evidence incl. free-like, `free_like_ev_*`, `removed_R_thin`, `free_ev_removed_thin`, `unchanged_kept_thin`, `conf_mean_*`, `cand_appearance_*`.
+- `eval/harness.py`: FULL wiring (texture per reference group, extractor per process, priors). `eval/m6_checks.py` + CLI `lsg m6 [--no-sweep] [--no-val] [--no-objply] [--full-val]`.
+- `io/splits.py`: `subset_pairs`, `write_pairs`; CLI `lsg splits subset`; `config.milestone_val_split`; `lsg m5 --full-val`.
+
+**Config:** new blocks `confidence`, `appearance` (incl. per-feature `tau_app` / `tau_node`), `states.k_free_like`, `splits.milestone_val`.
+
+**Data:** `splits/eval_val_small.txt` (20 pairs, seed 0).
+
+**Dependencies:** `timm` explicit (was already installed via open_clip); DINOv2 ViT-S/14 weights from the HF hub.
+
+**Tests:**
+- 166 fast (≈ 15 s) + 10 slow (≈ 2.4 min) pass.
+- New: `test_texture.py`, `test_appearance.py`, `test_confidence.py`, textured scenes in `synth.py`, slow `test_m6_full_both_modes_one_dev_pair`, `test_dinov2_texture_render_on_own_sequence`, `test_book_removed_with_dinov2`; no-leak test covers `appearance.py` / `change.confidence`.
+
+**Docs:** DECISIONS "2026-11-09 — M6"; DESIGN §2.1 / §2.3 / §3 / §6 / §8 / CLI / §9; CODE_STRUCTURE; AI_USAGE; CLAUDE.md (milestone val subset).
 
 ### M5 (2026-11-07/09), acceptance passed — `uv run lsg m5 --run-id m5_final2` → `outputs/m5_final2/metrics.json` (dev B0 / B1 / B2 both modes + val B2 both modes); dev sweep in `outputs/m5_final/sweep_*`
 
@@ -253,20 +315,24 @@ DESIGN.md (the spec) and DECISIONS.md (the dated log, with the reasons) stay the
 
 ## Open items by milestone
 
-### M6 — confidence, texture rendering, appearance
-- **Thin / soft removed objects get `seen`, not `free`.** Example: dev pillow r50 on e2847ff7 (GT removed): 23 counted seen, 0 free. On val, 39.7% of GT-removed objects have < 2 counted free votes. Some are unseen; some are where depth cannot tell, which is the case the appearance residual targets. Measure with `free_ev_removed` before and after.
-- Log-odds confidence (§6.11) builds on `NodeVotes` counted seen / free. The per-visit clip and class priors are still to do. `Node.confidence` is still None.
-- OBJ ↔ PLY vertex/face correspondence is still **unverified** (DESIGN §2.1). Check it before using textures.
-- Textures are in `data/<ref>/mesh.refined.v2.obj|.mtl|_0.png` for all 72 references.
-- **GPU availability is intermittent.** The GTX 1650 is a hybrid-laptop dGPU. It was powered down at the start of M4 and was unavailable for the val run (CLIP fell back to CPU: 3,912 crops, ~6 min for B1 val incl. everything). DINOv2 patch features per frame need the GPU.
-  - Check `torch.cuda.is_available()` before long runs; the `run` block records `clip_device`.
-  - Consider a Windows power setting / NVIDIA control panel "High-performance GPU" for python.exe.
-- Thin removed objects: perception mode gets the same votes as oracle (B1 removal identical), so the appearance residual helps both modes equally.
-- **GT-unchanged objects with free evidence are deleted** (from M5). Dev: 4 / 34 unchanged objects have ≥ 2 counted free votes; B2 removes 4 / 4 in perception (no candidate matches them) and 1 / 4 in oracle. They are the probable unlisted pillow move and three mixed-evidence "item"s (DECISIONS M3). The confirmed-in-place rule cannot protect them (free > 0). The log-odds confidence should weigh their many seen votes against the few free ones; measure with `free_ev_unchanged_removed`.
-- **Perception association stays near B0** (dev 6.8%, val 2.8%): unchanged objects produce no candidates, and confirmed nodes absorb few (dev 10). This is expected; the change metrics are what matter. Thin-object voxels (appearance output ii) may add candidates.
-- **False candidates** (M4, still open): dev 63% / val 54% unexplained (plants, black TV screens, clutter). Absorption by confirmed nodes now removes some (dev perception: 10 absorbed). Perception new P on val is still 2.4% (n = 667 predicted).
-
 ### M7 — ablations
+- **Decision for Erik first: confidence veto trade-off** (M6 val). FULL lowers false deletions (val 9.5 → 8.1 / 7.7%) but loses removed recall (41.1 → 26.0% oracle, 45.2 → 31.5% perception), because GT-removed objects with some counted seen votes are vetoed (L_hit = L_miss = 2.5). Dev has 1 removed object and could not show this. Options:
+  1. keep and report as is (honest trade-off; ablation rows show it);
+  2. add train pairs with removed objects to dev and re-tune L_hit there (download + DECISIONS entry);
+  3. a principled change that is *not* chosen on val numbers (e.g. count only seen votes from viewpoints that also could have produced a free vote). Re-tuning on val is not allowed.
+- **Ablation rows from M6:**
+  - FULL appearance off / on (`appearance.enabled`; the brief's depth-only vs depth + appearance);
+  - thin candidates off / on (`appearance.thin_candidates`);
+  - class priors on / off (`confidence.class_priors`);
+  - B2 vs FULL (confidence).
+  - Similarities of val are cached in `cache/appearance/`, so these reruns are fast.
+- **Appearance hardly fires on val** (only 2–5 thin GT-removed objects). Report it as the expected finding (DESIGN §8 "may be small overall"). Dev case: same-class replacements (r50) are invisible to DINOv2; the colour fallback flags them but also flags 9–50% of unchanged node views (lighting).
+- **Thin-object candidates** add mostly false new nodes (val 0.9 per pair, 16% explained). Measure new P/R with the switch off / on.
+- **Perception association stays near B0** (from M5; val FULL 2.9% strict): unchanged objects produce no candidates. Expected; the change metrics are what matter. The thin-object candidates did not change this.
+- **False candidates** (from M4, still open): val 8.7 candidates per pair, 42.7% explained by GT (plants, black TV screens, clutter); perception new P 2.0% (FULL, n = 757 predicted).
+- **GPU availability is intermittent** (hybrid laptop dGPU; memory note): check `torch.cuda.is_available()` before long runs; `run.per_pair[].online.appearance_device` and `clip_device` record what ran. All of M6 ran on CUDA.
+- **GPU memory**: FULL val with 4 workers peaks at 3.6 / 4 GB (DINOv2 + CLIP per process). If CUDA OOM appears, use `--workers 3`.
+- **`thin` in the metrics** uses the node's bbox in G_upd (for a predicted-moved node, the moved bbox), so oracle and perception thin counts differ slightly (2 vs 5 removed). Use the reference bbox if the thin rows are reported.
 - Switches already in place: `decorrelation.enabled` (on / off), `visibility.tau_free` (sweep), `visibility.erode_px`. **Immediate vs deferred commitment** is not implemented yet. Idea: a method variant that commits `removed` at the first frame with ≥ k_free counted free votes, and keeps it even if the node is matched later.
 - `--frac/--seed` already work (`select_frames`, a contiguous chunk with its start drawn from `[seed, crc32(rescan)]`). The alignment cache key includes the frame ids, so each chunk gets its own ICP pre-pass, as §7.3 requires.
 - **Tier-2 download done (2026-11-06):** all 63 relchange scans (23 references + 40 rescans) have semseg, PLY and `sequence.zip`. That is 189 files, 4.0 GB, downloaded in 16 min. Every zip passes `testzip`, and every scan loads with `load_scan` + `open_sequence`. Textures for the 23 references were already there.
@@ -284,6 +350,8 @@ DESIGN.md (the spec) and DECISIONS.md (the dated log, with the reasons) stay the
 ### M8 — write-up
 - State in the limitations: **12 door swings in val are articulation changes, out of scope** (not scored; doors are structure, §3).
 - State that **val was run twice at M5** (the nyu40 catch-all fix and the keep-parent rule were triggered by the first val run; DECISIONS M5), and report the first run's numbers too.
+- **Audit cases from M6** (§7.4): r50 pillow (GT removed; a white pillow replaced a blue-grey one, depth and DINOv2 see "a pillow"), r68 robot vacuum (absent-unlisted, really gone: appearance deletes it correctly), r69 shoes (displaced).
+- **Spec deviations to state:** confidence values rescaled (spec values could never delete); thin = 0.15 m; appearance distances relative to the frame median; node-level appearance vote (DECISIONS M6).
 - R0 (stale relations) is a strong baseline on 3RScan: most moved things keep their parent (val (b) R0 94.0% vs update 86.3%); (c) swapped has n = 3 on val.
 - `next_to` (AABB gap ≤ 0.15 m) is provisional and exported only.
 - Mention the GT findings:
@@ -300,5 +368,6 @@ DESIGN.md (the spec) and DECISIONS.md (the dated log, with the reasons) stay the
   3. *optionally*, after M7, add a separate "door open/closed changed" diagnostic on door nodes (n = 12 in val), not mixed into moved F1.
 
   Erik has not decided on point 3 yet.
-- **AI_USAGE.md:** "Erik: (fill in)" is still open for the M0, M1, M2, M3, M4 and M5 rows.
+- **AI_USAGE.md:** "Erik: (fill in)" is still open for the M0, M1, M2, M3, M4, M5 and M6 rows.
+- **Confidence veto trade-off** (M6 val; see M7 items): keep, re-tune L_hit on a larger dev set, or a principled change.
 - **DECISIONS 2026-11-05 "Milestones re-scoped to M1–M8"** is still marked "provisional — Erik to confirm".

@@ -5,6 +5,7 @@ Source of truth: `docs/DESIGN.md` (spec), `docs/DECISIONS.md` (dated log). If co
 ## Workflow
 - Each milestone runs in a fresh chat: **start by reading `docs/STATUS.md`** (what is finished, open items per milestone). **Before finishing**, update it: finished items, new items deferred to later milestones.
 - Work **one milestone at a time** (M0…M8 in DESIGN §9). A milestone is done only when its acceptance check passes; paste the check's output into the PR/commit message.
+- **Val at milestones = the subset** `splits/eval_val_small.txt` (20 rooms, one rescan each; `lsg m5` / `lsg m6` default to it). Run all 110 `eval_val` pairs (`--full-val`) only for the final results tables (M7) or when Erik asks (DECISIONS 2026-11-09).
 - Small commits. No new dependencies without a line in DECISIONS.md.
 - Log AI use and compute cost per milestone in `docs/AI_USAGE.md` (what was generated, what was hand-checked, time on GPU).
 

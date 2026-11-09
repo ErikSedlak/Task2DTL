@@ -1,12 +1,12 @@
 # Code structure — what is where and what it does
 
-State: end of milestone M5 (2026-11-07). Covers everything in `src/lsg/`, `tests/` and `configs/`. For *why* things are done this way, see `DESIGN.md` (the spec) and `DECISIONS.md` (the log); this file only explains *what* the code does.
+State: end of milestone M6 (2026-11-09). Covers everything in `src/lsg/`, `tests/` and `configs/`. For *why* things are done this way, see `DESIGN.md` (the spec) and `DECISIONS.md` (the log); this file only explains *what* the code does.
 
 ## 1. The project in one paragraph
 
 3RScan contains rooms that were scanned several times. The first scan of a room is the **reference**; later visits are **rescans**. Between visits, furniture moves, objects disappear and new ones appear. The goal is to take the reference room's scene graph (objects + "cup is on the table" relations), look at a rescan's camera frames, and update the graph: which objects are unchanged, moved, removed, unknown (not seen) or new.
 
-M0 built the foundation: reading the data, drawing ("rendering") a scanned room from any camera position, lining up the rescan with the reference, and checking on real data that all of this is correct. M1 added the reference scene graph (objects + support relations, from annotations or from geometry) and the ground truth of what changed between two visits. M2 added the observation interface (what the method sees of a rescan), the oracle version of it, the first (naive) change detector B0, and the scoring harness `lsg eval`. M3 added the online frame loop: every rescan frame is compared with the rendered reference, each object gets "seen" / "seen through" votes, votes from nearly the same camera position count once, and B1 deletes an object only if it was seen through from at least two different viewpoints. Otherwise the object becomes `unknown`. M4 added perception mode: the method finds rescan objects itself, from places where the measured depth is nearer than the rendered reference (something new stands there), keeps only spots seen from several viewpoints, groups them into candidate objects and names each one with CLIP from colour crops. M5 added B2: objects confirmed in place keep their place (and claim the observations lying inside them), the rest are paired with observations by an optimal assignment on label, size and position, and a paired object counts as moved only if aligning its reference shape onto the observation (ICP) moves it more than 10 cm. After that, "what stands on what" is recomputed for objects that moved, are new, or lost their support, and the relations are scored against the rescan's annotation.
+M0 built the foundation: reading the data, drawing ("rendering") a scanned room from any camera position, lining up the rescan with the reference, and checking on real data that all of this is correct. M1 added the reference scene graph (objects + support relations, from annotations or from geometry) and the ground truth of what changed between two visits. M2 added the observation interface (what the method sees of a rescan), the oracle version of it, the first (naive) change detector B0, and the scoring harness `lsg eval`. M3 added the online frame loop: every rescan frame is compared with the rendered reference, each object gets "seen" / "seen through" votes, votes from nearly the same camera position count once, and B1 deletes an object only if it was seen through from at least two different viewpoints. Otherwise the object becomes `unknown`. M4 added perception mode: the method finds rescan objects itself, from places where the measured depth is nearer than the rendered reference (something new stands there), keeps only spots seen from several viewpoints, groups them into candidate objects and names each one with CLIP from colour crops. M5 added B2: objects confirmed in place keep their place (and claim the observations lying inside them), the rest are paired with observations by an optimal assignment on label, size and position, and a paired object counts as moved only if aligning its reference shape onto the observation (ICP) moves it more than 10 cm. After that, "what stands on what" is recomputed for objects that moved, are new, or lost their support, and the relations are scored against the rescan's annotation. M6 added FULL: every object gets a confidence (how likely it still exists), starting from how often objects of its class disappear in the training rooms and moved by its "seen" / "seen through" votes; an object is deleted only if the confidence drops below 20%. It also added an appearance check: the reference room's photo texture is drawn from the rescan camera and compared with the real photo (DINOv2 features), which tells whether a flat object (book, towel, pillow) is still there where depth cannot, and finds new flat objects lying on tables or the floor.
 
 ## 2. Folder map
 
@@ -19,7 +19,7 @@ Task2/
 │   ├── cli.py               the `lsg` command
 │   ├── config.py            loads the YAML config, finds data/outputs folders
 │   ├── runinfo.py           run names, git commit, writes metrics.json
-│   ├── train_meta.py        train-split metadata: the CLIP vocabulary (later: class priors)
+│   ├── train_meta.py        train-split metadata: the CLIP vocabulary and the class priors (M6)
 │   ├── classes.py           which object classes are "structure", "anchor", "thing"
 │   ├── io/                  READING DATA
 │   │   ├── scan3r.py        3RScan: metadata, meshes + labels, camera frames
@@ -31,18 +31,19 @@ Task2/
 │   │   └── build.py         builds the reference graph of a scan
 │   ├── geom/                GEOMETRY
 │   │   ├── transforms.py    moving points between coordinate frames, depth -> 3D points
-│   │   ├── render.py        draws a mesh as seen by a camera (depth + object ids)
+│   │   ├── render.py        draws a mesh as seen by a camera (depth + object ids; texture colour, M6)
 │   │   └── align.py         fine-tunes how the rescan lines up with the reference
 │   ├── obs/                 OBSERVATION INTERFACE (what the method sees of a rescan)
 │   │   └── base.py          ObsInstance, ObsSource, RefContext, SeqInfo, PackedMasks
 │   ├── change/              CHANGE LOGIC (method side)
 │   │   ├── pipeline.py      frame selection, per-pair preparation (G_ref, refined T_align)
-│   │   ├── visibility.py    per-frame votes (seen / free / no info), viewpoint decorrelation
+│   │   ├── visibility.py    per-frame votes (seen / free / free-like / no info), viewpoint decorrelation
+│   │   ├── confidence.py    log-odds confidence with class priors (M6)
 │   │   ├── online.py        the online frame loop + tentative snapshots
 │   │   ├── association.py   B2 matching: confirmed nodes absorb their observations, then Hungarian
 │   │   ├── classify.py      final states: ICP moved test, removed / unknown rule
 │   │   ├── update.py        update_graph: support relations (update / stale R0 / geometric R1)
-│   │   └── baselines.py     B0: naive same-label matching; B1: + visibility removal rule; B2
+│   │   └── baselines.py     B0: naive same-label matching; B1: + visibility removal rule; B2; FULL (M6)
 │   ├── eval/                CHECKING / SCORING (may read rescan ground truth)
 │   │   ├── m0_checks.py     the four M0 acceptance checks
 │   │   ├── gt.py            ground truth per pair: moved / removed / new / ...
@@ -51,7 +52,8 @@ Task2/
 │   │   ├── harness.py      `lsg eval` / `lsg run`: method + observations + GT -> metrics.json
 │   │   ├── relations.py     relation scoring (§7.2): parent / type accuracy per subset
 │   │   ├── m4_checks.py     `lsg m4`: perception on dev, candidate recall, overlay PNGs, sweep
-│   │   └── m5_checks.py     `lsg m5`: B0 / B1 / B2 on dev, sweep, B2 on val + relation table
+│   │   ├── m5_checks.py     `lsg m5`: B0 / B1 / B2 on dev, sweep, B2 on val + relation table
+│   │   └── m6_checks.py     `lsg m6`: OBJ/PLY check, texture render check, FULL variants on dev, val
 │   ├── oracle/              ground-truth rescan objects: the upper-bound mode
 │   │   └── source.py        OracleSource
 │   └── perception/          finds rescan objects from depth/colour alone: the headline mode
@@ -59,10 +61,11 @@ Task2/
 │       ├── voxels.py        4 cm voxel grid counting distinct viewpoints per voxel
 │       ├── cluster.py       groups kept voxels into candidates; door swing-region filter
 │       ├── labeler.py       CLIP zero-shot labels from colour crops (cached)
+│       ├── appearance.py    rendered texture vs photo, DINOv2 patch features (cached) (M6)
 │       └── source.py        PerceptionSource: the above as an ObsSource
 ├── tests/                   automated tests (`uv run pytest -q`)
 ├── data/      (git-ignored) the downloaded dataset
-├── cache/     (git-ignored) refined alignments (cache/align/), CLIP labels (cache/clip/)
+├── cache/     (git-ignored) refined alignments (cache/align/), CLIP labels (cache/clip/), appearance similarities (cache/appearance/)
 └── outputs/   (git-ignored) results of runs: outputs/<run_id>/metrics.json, PNGs, graphs/
 ```
 
@@ -117,6 +120,7 @@ Task2/
 | `load_meta(root)` → `Meta` | All of 3RScan.json. `meta[id]` tells you if a scan is a reference or rescan, its `T_align`, and (ground truth) which objects moved, were removed or deformed. |
 | `read_pairs(file)` | The (reference, rescan) pairs from a `splits/` file. |
 | `load_scan(root, id)` → `Scan` | A scan's labelled mesh: vertices, triangles, object id and class per vertex and per triangle, plus an `Instance` summary per object (label, class, centre, bounding box). **Reads annotations**; see section 6. |
+| `load_textured_mesh(root, id)` → `TexturedMesh` | A **reference** scan's photo-textured mesh (`mesh.refined.v2.obj` + texture PNG), M6. Same vertices and triangles as the PLY (checked on all 72 references). |
 | `open_sequence(root, id)` → `SequenceReader` | Access to the camera frames. Reads straight from `sequence.zip`, so nothing has to be unzipped. |
 | `SequenceReader.pose/depth/color(i)` | Pose (4x4), depth in metres (0 = no measurement) and color image of frame `i`. Images stay rotated 90°, as stored. |
 | `iter_frames(seq, stride)` | Loops over every n-th frame, skipping frames with a broken pose. |
@@ -138,6 +142,7 @@ The big JSON files are parsed only once per run and then reused.
 ### `geom/render.py` — drawing a mesh from a camera
 - `Renderer(vertices, faces, labels)` prepares a mesh once, then `render(K, T_w2c, W, H)` returns, for a camera, a **depth image** and an **object-id image** (~5 ms per depth-sized frame, CPU only).
 - `distance(points)` gives each point's distance to the nearest surface of the mesh (used by the checks).
+- `TextureRenderer(textured_mesh).render_color(K, T_w2c, W, H)` (M6): what the camera *would* see of the reference room's photo texture (finds the triangle hit by each pixel ray, interpolates its texture coordinates, reads the texture image). ~55 ms per 448x252 frame.
 
 ### `geom/align.py` — improving the rescan↔reference alignment
 - `refine_from_sequence(seq, ref_mesh, T_align, cfg)` builds a point cloud from the rescan's depth images and runs ICP against the reference mesh, starting from `T_align`.
@@ -191,6 +196,7 @@ The big JSON files are parsed only once per run and then reused.
 ### `train_meta.py` — what the method may learn from the train split
 - `clip_vocab_table(root, cfg)`: thing/anchor labels of the train scans with their class id and count. The rooms of the dev and relchange pair lists are excluded, and validation / test scans are never read.
 - `perception_vocab(G_ref, table, top_n)`: the labels CLIP chooses from = the reference graph's labels plus the 100 most frequent train labels.
+- `class_priors(root, cfg)` → `PriorTable` (M6): per class, how often a reference object was still there vs listed removed in the training rescans (e.g. chair 96.8%, box 93.9%, bed ~100%). `p_persist(label, nyu40)` smooths small classes toward their NYU40 class and the overall rate.
 
 ### `perception/` — finding objects without annotations (headline mode, M4)
 The rule: no imports from `oracle/` / `eval/`, and no rescan annotations. Inputs are the reference (mesh, labels, graph) and the rescan's depth, colour, poses and `T_align`.
@@ -201,7 +207,8 @@ The rule: no imports from `oracle/` / `eval/`, and no rescan annotations. Inputs
 | `voxels.py` | `VoxelEvidence`: puts the points into 4 cm cubes and counts from how many *different* viewpoints each cube was hit, with the same 30 cm / 20° rule as the votes. A person walking by or sensor noise hits a cube from one viewpoint only; real objects are seen from many. |
 | `cluster.py` | Cubes seen from ≥ 3 viewpoints are grouped into candidates (cubes at most 2 cubes apart belong together); groups of fewer than 5 cubes are dropped. Groups lying mostly in the swing area of a reference door are dropped too: a door opened since the reference visit would otherwise look like a new object. |
 | `labeler.py` | `CLIPLabeler`: shows CLIP the colour crops of a candidate and scores them against "a photo of a {label}" for every vocabulary label; keeps the top 5. Results are cached in `cache/clip/`, so reruns give identical labels. `StubLabeler` gives fixed answers for tests. |
-| `source.py` | `PerceptionSource`: runs the above frame by frame (`observe`) and at the end (`finish`) turns each candidate into an `ObsInstance`: points, per-frame masks, 5 upright crops, CLIP label, token `c0`, `c1`, … |
+| `appearance.py` | (M6) Compares the real photo with the reference texture drawn from the same camera, in 14x14-pixel patches, with DINOv2 features (or a plain colour fallback). Only where depth says nothing is in front and nothing was seen through. Distances are taken relative to the frame's typical distance, because rescans are lit differently. `AppearanceRunner` does this per frame and caches the result in `cache/appearance/`. |
+| `source.py` | `PerceptionSource`: runs the above frame by frame (`observe`) and at the end (`finish`) turns each candidate into an `ObsInstance`: points, per-frame masks, 5 upright crops, CLIP label, token `c0`, `c1`, … (M6) With appearance on, pixels on tables / the floor whose photo no longer matches the texture are collected in a second voxel grid: flat new objects that depth cannot see (`kind = "appearance"`). |
 
 ### `oracle/source.py` — the upper-bound observations
 - `OracleSource` renders the rescan's own **annotated** mesh from each rescan camera. Every object that shows up (where the sensor also has valid depth) becomes an `ObsInstance` with its real label and the mesh vertices that were seen. Objects with fewer than 50 seen vertices are dropped.
@@ -218,7 +225,8 @@ The rule: no imports from `oracle/` / `eval/`, and no rescan annotations. Inputs
   - **no info**: something is in front (occlusion), the depth is missing, or the evidence is mixed;
   - **unobserved**: fewer than 15 pixels (out of view or hidden).
 - `Decorrelator`: a vote counts only if the camera moved at least 30 cm or turned at least 20° since the last *counted* vote of the same kind for the same object. Standing still for 30 frames gives one vote, not 30.
-- `NodeVotes`: the tally per object (raw and counted seen / free votes). `has_free_evidence` (≥ 2 counted free votes) and `confirmed_in_place` (≥ 3 counted seen, no free) are the rules built on it.
+- `NodeVotes`: the tally per object (raw and counted seen / free / free-like votes). `has_free_evidence` (≥ 2 counted free votes; appearance alone needs ≥ 3 free-like votes) and `confirmed_in_place` (≥ 3 counted seen, no free / free-like) are the rules built on it.
+- `thin_votes(...)` (M6): for thin objects (thinner than 15 cm), depth agrees whether they are there or not, so their vote comes from the appearance check instead: photo still matches the texture → `seen`, clearly different → `free_like`.
 
 ### `change/online.py` — the online loop
 - `run_online(...)`: walks the processed frames in time order. Per frame it renders the reference, casts and counts votes, and hands the frame plus the reference render to the observation source. At the end it collects the observations. Returns an `OnlineResult` (observations, votes, snapshot files, timings).
@@ -229,7 +237,13 @@ The rule: no imports from `oracle/` / `eval/`, and no rescan annotations. Inputs
 - It ignores visibility, so anything simply not seen in the rescan is deleted. Later baselines fix exactly that.
 - `b1(G_ref, obs, cfg, votes=...)`: the same matching, but an unmatched object is `removed` only with ≥ 2 counted free votes; otherwise it is `unknown` and kept. On val this cuts false deletions from 95% to 9.5%.
 - `b2(G_ref, obs, cfg, votes=..., ref_ctx=...)` (M5): objects confirmed in place (≥ 3 counted seen votes, no free vote) are `unchanged` and absorb their observations; the rest go through `association.associate`; `classify.classify` decides moved / unchanged / removed / unknown; leftover observations become `new`. Moved objects get the ICP pose: centroid and box of the moved reference points, `T_move` = the full 4x4 motion.
+- `full(...)` (M6): B2, plus a confidence for every object (`change.confidence`); an unmatched object with "seen through" evidence is deleted only if its confidence is below 20%, otherwise it stays `unknown`. With appearance on, thin objects' votes come from the appearance check, and perception also gets the flat-object candidates.
 - Every method only decides states and geometry; relations are recomputed afterwards by `update.update_graph`.
+
+### `change/confidence.py` — how sure are we that an object still exists (M6)
+- Start value = the class prior (e.g. 96.8% for a chair), as log-odds. Each counted "seen" vote adds `L_hit`, each counted "seen through" (or appearance free-like) vote subtracts 2.5; the total change per visit is capped at ±8.
+- A matched object gets credit for the viewpoints its observation was seen from; its old-place "seen through" votes are ignored (it moved). New objects start at 50%.
+- With these values, 2 "seen through" votes and nothing else delete a chair (17%), a bed needs 3, and an object seen 12 times and seen through 7 times is kept.
 
 ### `change/association.py` — who is who (M5)
 - `absorb_confirmed(...)`: an observation lying mostly (≥ 50% of its points) inside the box (+10 cm) of an object confirmed in place, with a compatible label, belongs to that object. It is then neither new nor available for matching. In oracle mode this is the object's own instance; in perception mode it is usually a fake candidate from a mesh hole (black TV screen) or a plant.
@@ -253,6 +267,11 @@ The rule: no imports from `oracle/` / `eval/`, and no rescan annotations. Inputs
 ### `eval/m5_checks.py` — the M5 checks (`uv run lsg m5`)
 - Runs B0, B1 and B2 on the dev pairs in both modes and checks: B2's association accuracy ≥ B0's, B2's moved F1 ≥ B1's, all graphs valid. Optional sweep of `tau_assoc` × `w_p` on dev. Then B2 on val in both modes, with the relation table R0 / R1 / update.
 
+### `eval/m6_checks.py` — the M6 checks (`uv run lsg m6`)
+- Checks on all 72 references that the textured OBJ and the labelled PLY are the same mesh.
+- Draws the texture from the reference's own camera path and saves photo | render | blend PNGs; reports how similar they are and sets the appearance thresholds (the 98th percentile of the differences on these unchanged sequences).
+- Runs B2 and FULL (appearance off, on without / with flat-object candidates) on dev in both modes, an optional `L_hit` sweep, and FULL on val.
+
 ### `eval/m4_checks.py` — the M4 checks (`uv run lsg m4`)
 - Runs B0 and B1 on the dev pairs in both modes and reports how many real changes got a candidate: **candidate recall** against new objects and against the new places of moved objects, with and without requiring the right label.
 - Draws one overlay PNG per dev pair: the colour frame with the candidates coloured and labelled, plus yellow markers where GT says a new / moved object is.
@@ -272,6 +291,7 @@ The rule: no imports from `oracle/` / `eval/`, and no rescan annotations. Inputs
 - `uv run lsg eval --split eval_val --obs oracle --method B0|B1 [--workers N] [--frac F --seed S] [--snapshots]` runs and scores a whole split (~65 s for val); `uv run lsg run --pair <ref> <rescan> --obs oracle --method B1 [--no-snapshots]` does one pair and writes snapshots. Both print a results table and write `outputs/<run>/metrics.json`. `--obs perception,oracle` runs both modes.
 - `uv run lsg m4 [--no-sweep]` runs the M4 checks on dev (~4 min, GPU for CLIP if available).
 - `uv run lsg m5 [--no-sweep] [--no-val]` runs the M5 checks (dev ~1 min, sweep ~8 min, val a few minutes with the CLIP cache warm). `--method B2` works in `lsg eval` / `lsg run`.
+- `uv run lsg m6 [--no-sweep] [--no-val] [--no-objply]` runs the M6 checks. `--method FULL` works in `lsg eval` / `lsg run` (DINOv2 on the GPU if available; appearance results are cached).
 - Later milestones add `lsg ablate`.
 
 ## 6. The one rule that shapes the layout
@@ -307,15 +327,17 @@ These may only be read inside `eval/` (scoring, checks) and `oracle/` (the upper
 | `test_classify.py` | ICP recovers a move; a half-seen unchanged box is not moved although its centroid offset is > 10 cm; low-fit fallback; final states. |
 | `test_b2.py` | B2 on a point-box room: confirmed + absorbed, moved via ICP (partial view), removed, unknown, new; no far "moves"; perception mode. |
 | `test_update.py` | Cup moved from table to shelf gets the shelf; things on a moved or removed parent are recomputed; a new bottle gets the table; R0 keeps everything, R1 recomputes everything. |
+| `test_texture.py` | OBJ reading (per-vertex and per-corner texture coordinates); a quad with a four-colour texture renders each colour in the right image corner; empty pixels are black. |
+| `test_appearance.py` | Colour-feature similarity; patch ↔ pixel mapping; which pixels may be compared; the frame-relative distance; the thin-object vote rule; free-like decorrelation and evidence rules; cache. **Acceptance:** a 2 cm striped book removed from a table is missed by depth only (`unchanged`) and caught with appearance (`removed`); a book *added* gives exactly one appearance candidate (centroid < 5 cm), depth alone none. Slow variant with real DINOv2. |
+| `test_confidence.py` | Class-prior counting and smoothing; the worked examples (chair 2 free → deleted, bed 2 free → kept, 3 → deleted, mixed evidence kept); cap; matched / new objects; priors off; FULL vs B2 on a small room (FULL keeps the bed and the mixed-evidence item). |
 | `test_relations_eval.py` | Relation counts on a hand-made pair: subsets a / b / c / c-broad, floor split, GT vs associated universe, new-node parents, several GT parents; aggregation. |
 | `test_real_data.py` | *(slow, needs `data/`)* Renders a real dev frame and compares with its depth; val GT counts reproduce DESIGN §2.2; one dev pair end-to-end with oracle + B0, twice, with identical `metrics`; one dev pair with B1: deterministic, no more false deletions than B0, snapshots valid; one dev pair in perception mode (B1) twice: identical `metrics`, candidate files, valid graphs; B2 on one dev pair in both modes twice (identical `metrics`, valid graphs, relation counts); real CLIP on two crops. |
 
-Run with `uv run pytest -q` (142 tests, ~8 s); the slow ones with `uv run pytest -q -m slow` (7 tests, ~2 min).
+Run with `uv run pytest -q` (166 tests, ~15 s); the slow ones with `uv run pytest -q -m slow` (10 tests, a few minutes; `test_real_data.py` also runs FULL on one dev pair twice and real DINOv2 on a reference frame).
 
 ## 8. What is not built yet
 
 Planned in DESIGN §6 and §9 (spec v2), in order:
-- M6: confidence and priors; texture rendering + appearance comparison for thin objects (`perception/appearance`);
 - M7: all ablations; M8: visualisation (`viz/`) and write-up.
 
 Since spec v2 there are two **observation modes**. `perception` (the headline) finds rescan objects from the rescan's own depth and colour. `oracle` (upper bound) uses the rescan's ground-truth objects. Both feed the same change logic.
