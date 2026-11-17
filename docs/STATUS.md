@@ -8,7 +8,7 @@ DESIGN.md (the spec) and DECISIONS.md (the dated log, with the reasons) stay the
 
 ## Current state (2026-11-09)
 - **M0 ✅** (commit `dd66381`), **M1 ✅** (commits `5ed8260` code, `b025428` docs), **M2 ✅** (commits `49b9b61` + `4577e4b` code, then the docs commit), **M3 ✅** (commit `6e71d0c` code, then the docs commit), **M4 ✅** (commit `9d67e8b` code, then the docs commit), **M5 ✅** (commit `7cadc26` code, then the docs commit) and **M6 ✅** (code commit "M6: …", then the docs commit) are done.
-- **Next: M7** — all ablations (§8) on val + relchange, both modes; final results table. **Erik's decision first:** the confidence veto trade-off (M7 items below).
+- **Next: M7** — all ablations (§8) on val + relchange, both modes; final results table. **First step:** implement "seen votes need contrast" (Erik chose option 3 of the confidence veto trade-off on 2026-11-15; DECISIONS 2026-11-15).
 - **New rule (Erik, 2026-11-09):** milestone val reports run on `splits/eval_val_small.txt` (20 pairs; `lsg m5` / `lsg m6` default). All 110 `eval_val` pairs (`--full-val`) only for the final tables (M7).
 - `origin/main` is at `b237be2` (M3 docs). The M4, M5 and M6 commits are on local `main` only; not pushed as of 2026-11-09.
 
@@ -316,10 +316,12 @@ DESIGN.md (the spec) and DECISIONS.md (the dated log, with the reasons) stay the
 ## Open items by milestone
 
 ### M7 — ablations
-- **Decision for Erik first: confidence veto trade-off** (M6 val). FULL lowers false deletions (val 9.5 → 8.1 / 7.7%) but loses removed recall (41.1 → 26.0% oracle, 45.2 → 31.5% perception), because GT-removed objects with some counted seen votes are vetoed (L_hit = L_miss = 2.5). Dev has 1 removed object and could not show this. Options:
-  1. keep and report as is (honest trade-off; ablation rows show it);
-  2. add train pairs with removed objects to dev and re-tune L_hit there (download + DECISIONS entry);
-  3. a principled change that is *not* chosen on val numbers (e.g. count only seen votes from viewpoints that also could have produced a free vote). Re-tuning on val is not allowed.
+- **First: seen votes need contrast** (decided by Erik on 2026-11-15: option 3 of the M6 confidence veto trade-off; full spec, checks and scope in DECISIONS 2026-11-15).
+  - Background: FULL lowers false deletions (val 9.5 → 8.1 / 7.7%) but loses removed recall (41.1 → 26.0% oracle, 45.2 → 31.5% perception), because GT-removed objects with some counted seen votes are vetoed (L_hit = L_miss = 2.5).
+  - Do: second-surface depth per frame, then a `seen` vote only from present pixels whose background is > τ_free behind; switch `visibility.seen_needs_contrast`, on for FULL only.
+  - Check: unit tests, FULL switch-off = `m6_final/dev_FULL`, B0–B2 dev unchanged, dev table.
+  - Run val once in the final tables, with the switch-off ablation row. No tuning on val; L_hit etc. stay.
+  - Update DESIGN §3 (vote rule) and §6.11 when implemented.
 - **Ablation rows from M6:**
   - FULL appearance off / on (`appearance.enabled`; the brief's depth-only vs depth + appearance);
   - thin candidates off / on (`appearance.thin_candidates`);
@@ -369,5 +371,4 @@ DESIGN.md (the spec) and DECISIONS.md (the dated log, with the reasons) stay the
 
   Erik has not decided on point 3 yet.
 - **AI_USAGE.md:** "Erik: (fill in)" is still open for the M0, M1, M2, M3, M4, M5 and M6 rows.
-- **Confidence veto trade-off** (M6 val; see M7 items): keep, re-tune L_hit on a larger dev set, or a principled change.
 - **DECISIONS 2026-11-05 "Milestones re-scoped to M1–M8"** is still marked "provisional — Erik to confirm".
