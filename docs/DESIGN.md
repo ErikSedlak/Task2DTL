@@ -135,8 +135,10 @@ while read id; do for t in mesh.refined.v2.obj mesh.refined.mtl mesh.refined_0.p
   - `free` if free ≥ 50% of valid pixels;
   - `no-info` otherwise;
   - `unobserved` if |P_i,f| < 15 px (out of frustum or hidden).
+- **Seen votes need contrast** (FULL only, M7; Erik, DECISIONS 2026-11-15). d_behind = depth of the nearest reference surface along the pixel's ray whose label is not node i (no surface → ∞). A pixel is *contrastive* if d_behind > d_exp + τ_free: if node i were gone, depth would show it. FULL's `seen` vote needs ≥ 15 valid contrastive pixels, ≥ 50% of them present; `free` is unchanged (≥ 50% of all valid pixels); everything else is `no-info`. A present pixel whose background lies within τ_free (pillow on a sofa) is no information, like occlusion (hard rule 3 applied to the positive side). Switch `visibility.seen_needs_contrast`; B0–B2 keep the rule above. Thin nodes are unaffected when appearance is on (their seen / no-info vote is replaced, below).
 - **Viewpoint decorrelation.** A vote (or a voxel hit, below) **counts** only if the camera centre moved ≥ d_dec = 0.30 m, or the viewing direction rotated ≥ θ_dec = 20° *(tune)*, since the last *counted* vote of the same kind for the same node (or voxel). Repeating one viewpoint therefore adds one vote. The per-visit log-odds clip (§6.10) stays as a second guard.
 - **Deferred commitment.** During the walk, states are **tentative** (visible in snapshots). `removed` and `moved` become final only at the end of the sequence (or chunk). Reason: a moved object can appear at its new place hundreds of frames after its old place was seen empty.
+  - *Immediate commitment* (ablation, M7, Erik: removal only): `removed` is final at the first frame where the node's tentative state is `removed` (free evidence; FULL: also tentative confidence < p_del). The node then skips absorption, matching and FULL's veto, so its later observation can only be taken by another node or become `new`. `moved` cannot be immediate (association runs at the end). Switch `states.commitment: deferred | immediate`.
 - **Confirmed in place**: a reference node with ≥ k_seen = 3 *(tune)* counted `seen` votes and **no** counted `free` or `free-like` votes. It is `unchanged` without needing a matched instance, and it does not enter the Hungarian matching. It does absorb the observations that lie inside it (§6.9 stage 0, M5), so its own oracle instance or a mesh-hole candidate is not taken for a `new` object.
 - **Candidate** (perception mode). Built in five steps:
   1. **Nearer pixels:** pixels with valid depth and d_obs < d_exp − τ_new (0.10 m *(tune)*).
@@ -225,7 +227,7 @@ Per pair (ref R, rescan S). O_R and O_S are the objectIds in their semseg files.
 
 ## 6. Modules and interfaces (inputs → outputs; no implementation here)
 
-`src/lsg/` — every function is pure where possible and works in the reference frame. ✅ = exists (M0–M6).
+`src/lsg/` — every function is pure where possible and works in the reference frame. ✅ = exists (M0–M7).
 
 1. `io` ✅
    - `scan3r.load_meta(root) -> Meta` (3RScan.json, column-major transforms) ✅;
@@ -237,6 +239,7 @@ Per pair (ref R, rescan S). O_R and O_S are the objectIds in their semseg files.
 2. `geom` ✅
    - `render.Renderer(vertices, faces, face_labels)`, `.render(K, T_w2c, W, H) -> (depth[m], label_map)`, `.distance(points)` ✅. Open3D RaycastingScene on CPU; label map via `primitive_ids`.
    - `render.TextureRenderer(textured_mesh)`, `.render_color(K, T_w2c, W, H) -> (rgb, hit)`: own RaycastingScene on the OBJ geometry; `primitive_ids` + `primitive_uvs` (barycentric, hit = (1−a−b)·c0 + a·c1 + b·c2) → interpolate corner UVs → bilinear lookup in `mesh.refined_0.png`, v flipped ✅ (M6; ~55 ms at 448×252). `Renderer.render(..., return_prim=True)` and `.face_normal_z()` give the per-pixel support-surface test.
+   - `render.Renderer.depth_behind(K, T_w2c, W, H, depth, labels, active, eps) -> d_behind` ✅ (M7): all intersections of the active pixels' rays (`RaycastingScene.list_intersections`); the nearest hit whose label differs from the first hit's, at t ≥ d_exp − ε (ε = 1 mm, so a surface coincident with the node's back face counts); ∞ if none. ~7.6 ms per 224×172 frame on a dev reference (render ~6 ms).
    - `align.refine_from_sequence(seq, ref_V, ref_F, T_align, cfg, frame_ids) -> (T_refined, info)` ✅. A pre-pass over the frames of the processed chunk only (not online; DECISIONS). Corrections beyond `max_delta_t` / `max_delta_rot_deg` are rejected.
 3. `graph` ✅
    - `graph.model`: `Graph` / `Node` / `Edge`, §4 JSON (`save` / `load`), `validate(graph)` ✅.
@@ -279,15 +282,16 @@ Per pair (ref R, rescan S). O_R and O_S are the objectIds in their semseg files.
 7. `change.pipeline` ✅ (M2) and `change.online` ✅ (M3)
    - `pipeline.select_frames` (stride + §7.3 chunk); `pipeline.prepare_pair` (G_ref + cached refined `T_align`; it gets only the raw `T_align` matrix, never the rescan's change lists); (M2's `collect_observations` was replaced by `run_online` at M3).
    - `baselines.b0` ✅ (§8; greedy one-to-one same-label matching); `baselines.b1` ✅ (M3; B0 matching + the §3 removed / unknown rule from counted free votes); `baselines.b2` ✅ (M5; §6.9 + §6.10). Every method is `method(G_ref, obs, cfg, rescan_id, obs_mode, votes=, ref_ctx=)` (M5: `ref_ctx` gives B2 the reference node points). Methods decide the states; `update_graph` (§6.12) recomputes the relations afterwards.
-   - `run_online(ref_ctx, seq_info, seq, obs_source, cfg, snapshot_dir=None, obs_mode=None, renderer=None, appearance=None, priors=None) -> OnlineResult` ✅ (obs instances, per-node `NodeVotes`, snapshot paths, timings; M6: `obs_views` = decorrelated viewpoints per observation, appearance `stats`). Appearance runs on frames where a thin node has a depth seen / noinfo vote, or on every frame if the source `wants_appearance` (thin candidates). G_ref comes from `ref_ctx.graph` and the frame ids from `seq_info` (M3). Per processed frame, in time order:
+   - `run_online(ref_ctx, seq_info, seq, obs_source, cfg, snapshot_dir=None, obs_mode=None, renderer=None, appearance=None, priors=None, contrast=False) -> OnlineResult` ✅ (obs instances, per-node `NodeVotes`, snapshot paths, timings; M6: `obs_views` = decorrelated viewpoints per observation, appearance `stats`). Appearance runs on frames where a thin node has a depth seen / noinfo vote, or on every frame if the source `wants_appearance` (thin candidates). G_ref comes from `ref_ctx.graph` and the frame ids from `seq_info` (M3). Per processed frame, in time order:
      1. render the reference (depth, labels, and colour if appearance is on);
-     2. compute frame votes (`change.visibility`);
+     2. compute frame votes (`change.visibility`; with `contrast` (FULL, M7) from `depth_behind`);
      3. replace thin nodes' votes by the appearance verdict (M6), apply decorrelation (confidence is computed from the counted votes; snapshots carry the tentative value);
      4. call `obs_source.observe` (residual accumulation in perception mode);
      5. write a snapshot every N frames.
    - At the end it calls `obs_source.finish()`, then association, then classification. States become final only then.
+   - Every node records `NodeVotes.commit_removed_frame`, the first frame with a tentative `removed` state (with `priors`: also tentative p < p_del); read only with `states.commitment: immediate` (M7).
 8. `change.visibility` ✅ (M3)
-   - `frame_votes(node_oids, ref_depth, ref_labels, obs_depth, cfg) -> dict[objectId, FrameVote]` (one frame, §3 rules; `unobserved` included). A vote needs ≥ `min_mask_px` first-hit pixels (else `unobserved`) **and** ≥ `min_mask_px` valid ones (else `noinfo`). Optional per-label mask erosion `visibility.erode_px` (default 0).
+   - `frame_votes(node_oids, ref_depth, ref_labels, obs_depth, cfg, d_behind=None) -> dict[objectId, FrameVote]` (one frame, §3 rules; `unobserved` included; `d_behind` given → seen needs contrast, M7, `FrameVote.n_contrast` / `n_present_contrast`). A vote needs ≥ `min_mask_px` first-hit pixels (else `unobserved`) **and** ≥ `min_mask_px` valid ones (else `noinfo`). Optional per-label mask erosion `visibility.erode_px` (default 0).
    - `Decorrelator(d_dec, θ_dec, enabled)`: per key (node, vote kind) or voxel, the pose of the last counted event; `.counts(key, cam_pose) -> bool` (centre moved ≥ d_dec or optical axis turned ≥ θ_dec).
    - `NodeVotes` (raw and counted seen / free / free-like, noinfo, first free / free-like / last seen frame); `has_free_evidence`, `confirmed_in_place` (§3, incl. free-like, M6).
    - `thin_votes(depth_votes, thin_oids, ref_labels, comparable_px, rel_px, cfg, tau_node)` (M6): the §3 thin-node vote.
@@ -309,11 +313,12 @@ Per pair (ref R, rescan S). O_R and O_S are the objectIds in their semseg files.
     - From **counted** (decorrelated) votes: Δl = L_hit · n_seen − L_miss · n_free − L_free_like · n_free_like, clipped per visit to [−8, +8]. **Rescaled at M6 (Erik):** L_miss = L_free_like = 2.5 (2 free votes delete a median-prior thing: chair p 0.968 → 0.17; a bed, p ≈ 0.996, needs 3), L_hit *(tune on dev: 0.5 / 1 / 2.5)*. With the spec's 0.4 / ±3, priors of 0.91–1.0 could never reach p_del.
     - A matched node gets l₀ + L_hit per decorrelated viewpoint of its observation (`OnlineResult.obs_views`, "seen at the new location"); its free votes at the old location are **ignored** (applied at the end, because association is deferred). New nodes: L_hit · views from l = 0.
     - Delete rule: §3 `removed` (free evidence and p < p_del). Every node of FULL's graph carries `confidence`.
+    - FULL's seen votes are contrastive (§3, M7): a seen vote from a pixel whose background is within τ_free can no longer veto a deletion.
 12. `change.update` ✅ (M5)
     - `update_graph(G_states, ref_ctx, obs, cfg, policy) -> G_upd`. M5 split: the method (B2) moves nodes (T_move applied to the reference points → centroid and bbox), adds new nodes (with `label_topk`) and sets `state` / `last_seen`; `update_graph` handles the relations. `confidence` stays None until M6.
     - `policy="update"` (the method): re-checks moved and new things **and** things whose parent moved or was removed; the rest keep their reference edge. A re-checked thing keeps its old parent if that parent still carries it at the new pose (`relations.still_supports`, the same contact / containment / floor rules; M5, Erik); otherwise `infer_support` picks a new parent. Candidates = non-removed anchor/thing nodes with their current points (reference mesh vertices, `T_move` applied when moved; new nodes: observation points). Removed nodes keep their old edge in the file (view filter) but are never a parent. `anchor` is recomputed up the chain; `next_to` edges of moved / new nodes are recomputed.
     - `policy="stale"` = baseline **R0** (reference relations; new nodes get no parent); `policy="geometric"` = baseline **R1** (`infer_support` for every thing). The harness runs all three on the same method output; config `update.relations` picks the saved / scored graph.
-    - Optional rule (ablation, M7): an unobserved thing whose parent anchor moved moves with it.
+    - Optional rule (ablation, M7) ✅: "children follow parent", `update.children_follow_parent` (default off). In FULL (`baselines.follow_parent`, a state decision, so it lives in the method, before `update_graph`): a thing in state `unknown` with no counted votes whose reference support parent is an anchor in state `moved` gets the anchor's `T_move` and state `moved`; `update_graph` then re-checks its parent as for every moved thing.
 13. `eval`
     - `gt.gt_changes(scan_meta, R, S, objs_R, objs_S, cfg) -> GTLabels` (§5) ✅; `gt.gt_parent_changes` ✅; `gt_stats.run_m1` (`lsg m1`) ✅;
     - `metrics.match_new(pred_new, gt, mode, cfg)` (§5 matching rules) ✅;
@@ -329,7 +334,8 @@ Per pair (ref R, rescan S). O_R and O_S are the objectIds in their semseg files.
 CLI:
 - `uv run lsg run --pair R S --obs perception,oracle --method full --frac 1.0 --seed 0 [--no-snapshots]` ✅ (both modes, B0 / B1; writes snapshots; perception also writes `candidates/<ref>_<rescan>.json`);
 - `uv run lsg eval --split eval_val --obs perception,oracle --method … [--workers N] [--snapshots]` ✅ (both modes, B0 / B1);
-- `uv run lsg ablate …`;
+- `uv run lsg ablate --names <rows|all|group:…> --split eval_val [--obs …] [--run-id …] [--list]` ✅ (M7; one metrics.json per row, `eval.ablations`);
+- `uv run lsg m7 [--run-id m7_final] [--dev-only] [--no-sweep] [--no-frac] [--no-relchange] [--no-determinism] [--no-resume] [--workers N]` ✅ (M7; all rows, tables, plots; a rerun with the same id resumes rows made from the same config + clean git commit);
 - `uv run lsg splits textures` ✅;
 - `uv run lsg graph --scan R --mode gt|geometric [--out f.json]` ✅;
 - `uv run lsg m0` ✅, `uv run lsg m1` ✅, `uv run lsg m4 [--no-sweep]` ✅, `uv run lsg m5 [--no-sweep] [--no-val]` ✅, `uv run lsg m6 [--no-sweep] [--no-val] [--no-objply]` ✅;
@@ -393,18 +399,22 @@ Every table reports **two rows per method**, `oracle` (upper bound) and `percept
 | B0 naive | nearest same-label (top-1) observation within 0.5 m → unchanged; same label farther → moved | unmatched → removed | none |
 | B1 + visibility | B0 matching | online votes, decorrelated, deferred: unmatched → removed only with ≥ k_free free votes, else unknown | none |
 | B2 + Hungarian | §6.9: confirmed-in-place skip, Hungarian on geometry + label term (hard in oracle, soft in perception) | as B1 | none |
-| FULL ✅ (M6) | B2 (+ thin-object candidates in perception) | §6.11 log-odds + class priors (removed needs p < p_del); depth **+ appearance residual** (thin-node votes) | yes |
+| FULL ✅ (M6, M7) | B2 (+ thin-object candidates in perception) | §6.11 log-odds + class priors (removed needs p < p_del); depth **+ appearance residual** (thin-node votes); seen votes need contrast (M7) | yes |
 
-Ablations:
-- **depth-only vs depth + appearance residual** (the brief's ablation; FULL with appearance off vs on);
-- decorrelation on / off;
-- deferred vs immediate commitment;
+Ablations (M7: all ✅ as rows of `eval.ablations.registry`, run by `lsg m7`; each one switch off / on relative to FULL, both modes, full `eval_val`):
+- **depth-only vs depth + appearance residual** (the brief's ablation; `FULL-appearance`);
+- seen votes need contrast off (`FULL-contrast` = M6 FULL);
+- thin-object candidates off (`FULL-thincand`);
+- decorrelation on / off (`FULL-decorr`, and `B1-decorr`, where it acts directly on the removal rule);
+- deferred vs immediate commitment (`FULL+immediate`, §3);
 - oracle vs perception (every table);
-- observed fraction (§7.3);
-- class priors on / off;
-- "children follow parent" on / off;
-- τ_free sweep (0.05–0.30 m);
-- *optional:* + DINOv2 embedding term in association (old B3).
+- observed fraction (§7.3; 50 / 25 / 10% × chunk seeds 0–2, `FULL_frac*`);
+- class priors on / off (`FULL-priors`, fallback p = 0.9);
+- "children follow parent" on / off (`FULL+follow`, §6.12);
+- keep-supported-parent off (`FULL-keepparent`, §6.12);
+- τ_free sweep (0.05 / 0.10 / 0.20 / 0.30 m; 0.15 = FULL; `appearance.thin_max_extent` stays 0.15 m);
+- relations on the relchange set: B2, FULL, `FULL+follow`, `FULL-keepparent`;
+- *optional, not done:* + DINOv2 embedding term in association (old B3; cut-list item 1).
 
 Expected story:
 - B0→B1 is the big win (false deletions on partial rescans).
@@ -423,7 +433,7 @@ Expected story:
 | M4 ✅ | done 7 Nov | perception end-to-end: residual points, `VoxelEvidence`, clustering, CLIP labelling, `PerceptionSource`; B0 + B1 in perception mode | **Passed** (`lsg m4` → `outputs/m4_final`, git 9d67e8b): **synthetic** box added → exactly one candidate, centroid error 2.1 cm vs the observable-surface centroid (5.1 cm vs the solid centre, all in z; DECISIONS M4); **overlay PNGs** on 3 dev frames, inspected; **candidate recall on dev** (B1, perception): new 66.7% (2 / 3), moved-to 66.7% (10 / 15; labelled 26.7%), 27.3 candidates per pair; **no-leak test** on the real `perception/` code. Val (reported once): perception B1 false-deletion 9.4%, unchanged kept 90.4%, candidate recall new 27.5% / moved-to 46.4%; B0 matching limits perception (unchanged strict 2.2%, new P 3.3%) until B2 |
 | M5 ✅ | done 7–9 Nov | association changes (confirmed-in-place skip + absorption, soft label term), ICP moved test (B2, both modes); `update_graph` + relation eval | **Passed** (`lsg m5` → `outputs/m5_final2`): association strict on dev B0 → B2 oracle 90.9 → 90.9%, perception 6.8 → 6.8% (≥ holds; ties); moved F1 on dev B1 → B2 oracle 33.3 → 86.7%, perception 45.5 → 60.9%; 0 invalid graphs (`validate`, 3 methods × 2 modes, dev + val); relation table on val (parent acc., R0 / R1 / update): (a) oracle 92.0 / 79.5 / 92.4%, perception 94.6 / 80.2 / 90.7%; (b) oracle 94.0 / 65.5 / 86.3%; (c) swapped n = 3: 0 / 2 / 2. Val was run twice (nyu40 catch-all fix, DECISIONS M5): B2 oracle moved F1 54.9%, new R 60.2%; perception unchanged strict 57.9% (B1 2.2%) |
 | M6 ✅ | done 9 Nov | confidence + priors (FULL); texture rendering + appearance residual (DINOv2 patch features; thin-node free-like votes; thin-object voxels) | **Passed** (`lsg m6` → `outputs/m6_final`): **texture render check** on both dev references' own sequences, 3 overlays each visibly aligned, median DINOv2 patch similarity 0.766 / 0.720, OBJ = PLY on 72 / 72 references; **synthetic** 2 cm striped book removed from a table: depth-only `unchanged`, depth + appearance `removed` (colour features and DINOv2). Val FULL (reported once): false deletion oracle 8.1% / perception 7.7% (B2 9.5 / 9.5), unchanged kept 86.6 / 95.4%, removed R 26.0 / 31.5% (B2 41.1 / 45.2: confidence veto, DECISIONS M6) |
-| M7 | 25 Nov | all ablations (§8) on val + relchange, both modes | Full results table (oracle + perception rows) with CIs; ablation plots; determinism re-checked on one pair |
+| M7 | 25 Nov | seen votes need contrast (FULL); immediate commitment + children-follow-parent ablations; all ablations (§8) on val + relchange, both modes (`lsg m7`) | Full results table (oracle + perception rows) with CIs; ablation plots; determinism re-checked on one pair. **Code done (2026-11-17):** dev regressions pass (FULL with contrast off = M6 dev FULL, B0 / B2 = M5 / M6 dev; 0 differences); the val run `lsg m7 --run-id m7_final` is pending |
 | M8 | 26–27 Nov | Rerun timeline of snapshots + top-down before/after, audit (§7.4), README, write-up, slides | `README` "how to run" reproduces one pair end-to-end (both modes) on a clean `uv sync`; AI_USAGE.md complete |
 
 **Buffer and cut order.** There is no slack inside 9–27 Nov. The 3–4 days gained by finishing M0 early are the buffer. If a milestone slips, cut in this order:

@@ -6,11 +6,13 @@ Handoff file between milestone sessions: each milestone is done in a fresh chat.
 
 DESIGN.md (the spec) and DECISIONS.md (the dated log, with the reasons) stay the source of truth. This file is the to-do view on top of them.
 
-## Current state (2026-11-09)
+## Current state (2026-11-17)
 - **M0 ✅** (commit `dd66381`), **M1 ✅** (commits `5ed8260` code, `b025428` docs), **M2 ✅** (commits `49b9b61` + `4577e4b` code, then the docs commit), **M3 ✅** (commit `6e71d0c` code, then the docs commit), **M4 ✅** (commit `9d67e8b` code, then the docs commit), **M5 ✅** (commit `7cadc26` code, then the docs commit) and **M6 ✅** (code commit "M6: …", then the docs commit) are done.
-- **Next: M7** — all ablations (§8) on val + relchange, both modes; final results table. **First step:** implement "seen votes need contrast" (Erik chose option 3 of the confidence veto trade-off on 2026-11-15; DECISIONS 2026-11-15).
-- **New rule (Erik, 2026-11-09):** milestone val reports run on `splits/eval_val_small.txt` (20 pairs; `lsg m5` / `lsg m6` default). All 110 `eval_val` pairs (`--full-val`) only for the final tables (M7).
-- `origin/main` is at `b237be2` (M3 docs). The M4, M5 and M6 commits are on local `main` only; not pushed as of 2026-11-09.
+- **M7: code done, val run pending.**
+  - Commits: `583abe2` (seen votes need contrast), `6035ace` (immediate commitment, children-follow-parent, thin-metric fix), `754feb1` (`lsg ablate` / `lsg m7`), then the docs commit.
+  - **Next step (Erik, ≈ 5–6 h unattended):** check `uv run python -c "import torch; print(torch.cuda.is_available())"` (it printed False on 2026-11-17), then `uv run lsg m7 --run-id m7_final` from a clean tree. If it stops, rerun the same command: finished rows are reused. Afterwards finish the "Open (to finish M7)" items below.
+- **New rule (Erik, 2026-11-09):** milestone val reports run on `splits/eval_val_small.txt` (20 pairs; `lsg m5` / `lsg m6` default). All 110 `eval_val` pairs only for the final tables (M7: `lsg m7` uses `m7.val_split` = `eval_val`).
+- `origin/main` is at `b237be2` (M3 docs). The M4–M7 commits are on local `main` only; not pushed as of 2026-11-17.
 
 ---
 
@@ -315,39 +317,39 @@ DESIGN.md (the spec) and DECISIONS.md (the dated log, with the reasons) stay the
 
 ## Open items by milestone
 
-### M7 — ablations
-- **First: seen votes need contrast** (decided by Erik on 2026-11-15: option 3 of the M6 confidence veto trade-off; full spec, checks and scope in DECISIONS 2026-11-15).
-  - Background: FULL lowers false deletions (val 9.5 → 8.1 / 7.7%) but loses removed recall (41.1 → 26.0% oracle, 45.2 → 31.5% perception), because GT-removed objects with some counted seen votes are vetoed (L_hit = L_miss = 2.5).
-  - Do: second-surface depth per frame, then a `seen` vote only from present pixels whose background is > τ_free behind; switch `visibility.seen_needs_contrast`, on for FULL only.
-  - Check: unit tests, FULL switch-off = `m6_final/dev_FULL`, B0–B2 dev unchanged, dev table.
-  - Run val once in the final tables, with the switch-off ablation row. No tuning on val; L_hit etc. stay.
-  - Update DESIGN §3 (vote rule) and §6.11 when implemented.
-- **Ablation rows from M6:**
-  - FULL appearance off / on (`appearance.enabled`; the brief's depth-only vs depth + appearance);
-  - thin candidates off / on (`appearance.thin_candidates`);
-  - class priors on / off (`confidence.class_priors`);
-  - B2 vs FULL (confidence).
-  - Similarities of val are cached in `cache/appearance/`, so these reruns are fast.
-- **Appearance hardly fires on val** (only 2–5 thin GT-removed objects). Report it as the expected finding (DESIGN §8 "may be small overall"). Dev case: same-class replacements (r50) are invisible to DINOv2; the colour fallback flags them but also flags 9–50% of unchanged node views (lighting).
-- **Thin-object candidates** add mostly false new nodes (val 0.9 per pair, 16% explained). Measure new P/R with the switch off / on.
-- **Perception association stays near B0** (from M5; val FULL 2.9% strict): unchanged objects produce no candidates. Expected; the change metrics are what matter. The thin-object candidates did not change this.
-- **False candidates** (from M4, still open): val 8.7 candidates per pair, 42.7% explained by GT (plants, black TV screens, clutter); perception new P 2.0% (FULL, n = 757 predicted).
-- **GPU availability is intermittent** (hybrid laptop dGPU; memory note): check `torch.cuda.is_available()` before long runs; `run.per_pair[].online.appearance_device` and `clip_device` record what ran. All of M6 ran on CUDA.
-- **GPU memory**: FULL val with 4 workers peaks at 3.6 / 4 GB (DINOv2 + CLIP per process). If CUDA OOM appears, use `--workers 3`.
-- **`thin` in the metrics** uses the node's bbox in G_upd (for a predicted-moved node, the moved bbox), so oracle and perception thin counts differ slightly (2 vs 5 removed). Use the reference bbox if the thin rows are reported.
-- Switches already in place: `decorrelation.enabled` (on / off), `visibility.tau_free` (sweep), `visibility.erode_px`. **Immediate vs deferred commitment** is not implemented yet. Idea: a method variant that commits `removed` at the first frame with ≥ k_free counted free votes, and keeps it even if the node is matched later.
-- `--frac/--seed` already work (`select_frames`, a contiguous chunk with its start drawn from `[seed, crc32(rescan)]`). The alignment cache key includes the frame ids, so each chunk gets its own ICP pre-pass, as §7.3 requires.
-- **Tier-2 download done (2026-11-06):** all 63 relchange scans (23 references + 40 rescans) have semseg, PLY and `sequence.zip`. That is 189 files, 4.0 GB, downloaded in 16 min. Every zip passes `testzip`, and every scan loads with `load_scan` + `open_sequence`. Textures for the 23 references were already there.
-  - `configs/default.yaml` `m1.meta_only_splits` still lists the relchange split as metadata-only. Now that meshes exist, it could get the full GT pass (`lsg m1`). Optional; the relation eval at M5/M7 does not depend on it.
-- **Relation eval on the relchange set** (§7.2(c), n = 18 swapped / 65 c-broad): `lsg eval --split eval_relchange_train --obs perception,oracle --method B2` writes the relation table. Never tuned on.
-- **"Children follow parent"** ablation (§6.12 optional rule) is not implemented yet. Idea: an unobserved thing (no counted votes) whose parent anchor moved gets the parent's `T_move`.
-- **`update.keep_supported_parent`** on / off (M5) is a cheap extra ablation row.
-- **Relation type accuracy** (M1, still open): R1 type accuracy given the parent is 83.4% on val (oracle), mostly `on` vs `in` on shelves / cabinets. Dev has only 7 non-floor parent cases; adding train pairs to dev needs a download + DECISIONS entry.
-- **Anchors carry no support edge** (M1, provisional): anchors on anchors are not represented. `update_graph` did not need it at M5.
-- **τ_move / τ_assoc sweeps:** oracle unchanged kept is 86.6% (B1 92.9%) because τ_move = 0.10 m turns ICP noise on some unchanged objects into small moves; perception trades moved F1 against localisation via τ_assoc (dev sweep, DECISIONS M5). Both are §8-style sweeps (dev for tuning, val for reporting).
-- **Perception same-label swaps** (M5 dev diagnosis): moved pillows take the candidates of *new* pillows, and a "bag" candidate with "pillow" in its top-3 is matched to a moved pillow. Localisation errors of 1.1–1.7 m on these.
-- **Perception small moves become `removed`** (dev: tv stand, chairs, table moved 0.16–0.37 m): the old place gets free votes, but the new-place candidate is cut by `surf_dist` or merged. Visible in the moved recall [0.1, 0.3) bucket (perception val 14.5%).
-- **Door filter cost** and **`min_voxels`** (M4 items): revisit on dev if moved recall near doors matters (moved rack on 0ad2d3a1).
+### M7 — ablations (code done 2026-11-17; the val run is open)
+**Done in code** (DECISIONS "2026-11-17 — M7 code"):
+- Seen votes need contrast (FULL only): `Renderer.depth_behind` (`list_intersections`), `frame_votes(d_behind=)`, `run_online(contrast=)`, `visibility.seen_needs_contrast`. Tests `test_contrast.py`. Dev: FULL with the switch off = `m6_final/dev_FULL` (0 differences); B2 = `m6_final/dev_B2` (0); contrast on changes dev only marginally (1 removed object on dev).
+- Immediate commitment (removal only, `states.commitment`), children follow parent (`update.children_follow_parent`), thin metric by reference AABB. Tests `test_m7_variants.py`.
+- `lsg ablate`, `lsg m7`: all §8 rows (methods, component ablations, variants, τ_free, fraction × 3 seeds, relchange), `results.md` with CIs, 3 plots, determinism on one dev pair, resume. Tests `test_ablations.py`.
+- 184 fast tests pass. The slow tests were **not** run in this session (> 1 min, Erik's instruction). Run `uv run pytest -q -m slow` before the final M7 commit; they cover FULL on a dev pair, now with contrast on.
+
+**Open (to finish M7):**
+- Run `uv run lsg m7 --run-id m7_final` (above). Acceptance = every check in the `acceptance` block:
+  - dev regressions;
+  - 0 invalid graphs;
+  - determinism on one pair;
+  - `results.md` written;
+  - val on all 110 pairs;
+  - 3 plots.
+- Inspect the 3 plots and `results.md`, then paste the acceptance output into the commit. Update DESIGN §9 (M7 row), DECISIONS (val results, reported once), CODE_STRUCTURE state line, AI_USAGE (GPU time).
+- Expected readouts to check, and to report rather than tune:
+  - FULL vs FULL-contrast removed R / false deletion (the 2026-11-15 question);
+  - unchanged strict accuracy may drop with contrast (fewer confirmed-in-place nodes);
+  - appearance on / off small (2–5 thin removed objects on val);
+  - thin candidates mostly false new nodes (val 0.9 per pair, 16% explained at M6);
+  - B1-decorr vs B1 (decorrelation story).
+- **GPU**: DINOv2 / CLIP features are cached for val at full frames, and fraction chunks and τ_free reuse the same frames' similarities. A CPU run should therefore mostly hit the cache, but cold misses on CPU are ~4× slower. FULL val with 4 workers peaked at 3.6 / 4 GB at M6 (`--workers 3` if CUDA runs out of memory).
+
+**Carried over (not part of the M7 rows; report as limitations or later work):**
+- **Perception association stays near B0** (val FULL 2.9% strict at M6): unchanged objects produce no candidates. Expected; the change metrics are what matter.
+- **False candidates** (from M4): val 8.7 candidates per pair, 42.7% explained by GT (plants, black TV screens, clutter); perception new P 2.0% (FULL).
+- **τ_move / τ_assoc sweeps** (not in §8): oracle unchanged kept 86.6% (B1 92.9%) because τ_move = 0.10 m turns ICP noise into small moves; dev-only sweeps exist from M5.
+- **Perception same-label swaps** and **small moves become `removed`** (M5 dev diagnosis); visible in the moved recall [0.1, 0.3) bucket.
+- **Relation type accuracy** (R1 83.4% given the parent, `on` vs `in` on shelves / cabinets); **anchors carry no support edge**.
+- **Door filter cost** and **`min_voxels`** (M4 items).
+- `configs/default.yaml` `m1.meta_only_splits` still lists relchange as metadata-only (optional `lsg m1` GT pass; the relation eval does not depend on it).
+- Optional DINOv2 association term (old B3): not done (cut-list item 1).
 
 ### M8 — write-up
 - State in the limitations: **12 door swings in val are articulation changes, out of scope** (not scored; doors are structure, §3).

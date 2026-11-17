@@ -380,3 +380,26 @@ Format: **date — decision.** Why. *Alternatives considered.* (status: fixed / 
     - dev: FULL with the switch off identical to `m6_final/dev_FULL`, B0–B2 dev unchanged, FULL on / off dev table;
     - val: once, in the M7 final tables (full `eval_val`, both modes), next to the switch-off row.
   - *Alt: 1 keep FULL as is and report the trade-off; 2 add train pairs with removed objects to dev and re-tune L_hit (download; would likely move along the same trade-off); appearance on all nodes (reverses M6 decision 2; DINOv2's semantic invariance limits it); a lower L_hit set a priori; scope FULL + B2.* (fixed)
+
+## 2026-11-17 — M7 code (Claude Code; Erik decided scope, ablation set and "immediate")
+- **Seen-needs-contrast scope fixed: FULL only** (Erik, 2026-11-15). B0 ignores votes and B1 uses only free votes, so only B2 could have changed; B2 has no confidence veto. (fixed)
+- **Second-surface depth via `list_intersections`**, not repeated `cast_rays`. The first implementation restarted the ray 1 mm behind every hit with the node's label. A unit test (pillow box against a backrest, its back face coplanar with the backrest's front) showed that this skips a coincident surface of another label and finds the backrest's *far* side, so the removed pillow still voted `seen`. Now all intersections of the active rays are listed and the nearest other-label hit at t ≥ d_exp − 1 mm wins (no iteration cap needed). Cost ~7.6 ms per depth frame on 531cff08 (render ~6 ms); 95% (median) of node pixels are contrastive on that reference's own sequence. *Alt: iterative cast with an ε restart (fails on coincident faces); per-node depth peeling.* (fixed)
+- **Dev check of the contrast rule** (reported, nothing tuned):
+  - FULL with `seen_needs_contrast: false` vs `outputs/m6_final/dev_FULL`: 0 differences in `metrics`; B2 (default config) vs `m6_final/dev_B2`: 0; B0 vs `m5_final2/dev_B0`: 0.
+  - FULL with contrast on dev: headline metrics identical to M6; one perception removed false positive moves from e2847ff7 to 19eda6f4. Dev has 1 GT-removed object, so the effect can only show on val. Contrast costs 1.0–1.4 s per pair. (fixed)
+- **Immediate commitment = removal only** (Erik). `NodeVotes.commit_removed_frame` = first frame whose tentative state is `removed` (≥ k_free counted free / free-like evidence; with priors, i.e. FULL, also tentative p < p_del, the snapshot formula). With `states.commitment: immediate` such nodes are `removed` before absorption and matching, and FULL never vetoes them. Synthetic case: the committed chair's observation is then taken by an unseen same-label chair 3 m away (false move) or becomes a spurious `new` node, which is what deferral prevents. Implemented in `_b2_core` (works for B2 too); the M7 row is FULL only. *Alt: also freeze `unchanged` once confirmed mid-walk.* (fixed)
+- **Children follow parent** (§6.12 optional rule): in FULL (a state decision, so in the method, not in `update_graph`). A thing in state `unknown` with no counted seen / free / free-like vote whose **reference** support parent is an **anchor** in state `moved` gets the anchor's `T_move` and state `moved`. Default off; M7 rows on val and relchange. *Alt: any moved parent (thing parents too); propagate up chains.* (fixed)
+- **Thin objects in the metrics use the reference AABB** (`GTObject.min_extent_ref`, same `Instance` AABB as the reference graph) instead of the node's bbox in G_upd (STATUS M6 item: moved nodes changed their thin status, so oracle and perception counted different objects). Only thin keys change (dev B2 oracle `diag_thin_unch_n`). (fixed)
+- **Ablation runner** (`eval/ablations.py`, `lsg ablate`, `lsg m7`): every row is one `run_eval` with dotted config overrides (unknown keys raise), its own `metrics.json` (hard rule 5). Rows:
+  - methods B0, B1, B2, FULL, all rerun at one commit;
+  - FULL minus contrast / appearance / thin candidates / class priors / decorrelation;
+  - `B1-decorr` (Claude Code's addition: decorrelation acts directly on B1's removal rule; cheap);
+  - FULL + immediate / + follow / − keep-supported-parent;
+  - τ_free 0.05 / 0.10 / 0.20 / 0.30 (0.15 = FULL). `appearance.thin_max_extent` stays 0.15 m, so the sweep varies the vote threshold (and the appearance-comparable band), not which nodes are thin;
+  - observed fraction 50 / 25 / 10% × chunk seeds 0 / 1 / 2 (the seed also shifts the oracle token permutation, as in `run_eval`); 100% = the FULL row;
+  - relchange: B2, FULL, FULL+follow, FULL−keepparent (relation tables);
+  - determinism: FULL on dev pair 0, twice.
+  - (fixed)
+- **Resume**: a row is reused only if its stored config hash and git commit equal the current ones and it was made from a clean tree. A crash during the multi-hour val run then costs only the unfinished row. (fixed)
+- **Plots**: matplotlib (already a dependency), two-hue categorical palette (oracle blue `#2a78d6`, perception orange `#eb6834`) checked with the dataviz validator (CVD ΔE 24.7, normal-vision ΔE 33.6, contrast ≥ 3:1). (fixed)
+- **No new dependencies.** (fixed)
