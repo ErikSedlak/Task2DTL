@@ -345,10 +345,16 @@ def score_pair(
 
     thin_max = float(cfg.get("appearance", {}).get("thin_max_extent", 0.15))
 
-    def is_thin(n: Node) -> bool:
-        if n.level != "thing" or n.bbox_3d is None:
+    def is_thin(n: Node, o: Any) -> bool:
+        """Thin thing by its *reference* AABB (M7: the same objects in both modes, also when moved)."""
+        if n.level != "thing":
             return False
-        return float((np.asarray(n.bbox_3d["max"], float) - np.asarray(n.bbox_3d["min"], float)).min()) < thin_max
+        ext = getattr(o, "min_extent_ref", None)
+        if ext is None:
+            if n.bbox_3d is None:
+                return False
+            ext = float((np.asarray(n.bbox_3d["max"], float) - np.asarray(n.bbox_3d["min"], float)).min())
+        return float(ext) < thin_max
 
     def conf(group: str, n: Node) -> None:
         if n.confidence is not None:
@@ -398,7 +404,7 @@ def score_pair(
             c["diag_free_removed"] += free_ev(oid)
             c["diag_freelike_removed"] += free_like_ev(oid)
             conf("removed", n)
-            if is_thin(n):
+            if is_thin(n, o):
                 c["diag_thin_removed_n"] += 1
                 c["diag_thin_removed_tp"] += st == "removed"
                 c["diag_thin_removed_free"] += free_ev(oid)
@@ -412,7 +418,7 @@ def score_pair(
             c["diag_free_unch_removed"] += free_ev(oid) and st == "removed"
             c["diag_freelike_unch"] += free_like_ev(oid)
             conf("unch", n)
-            if is_thin(n):
+            if is_thin(n, o):
                 c["diag_thin_unch_n"] += 1
                 c["diag_thin_unch_kept"] += st in ("unchanged", "unknown")
         # association: GT-matchable = moved/unchanged objects visible in the processed frames

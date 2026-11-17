@@ -47,6 +47,7 @@ class GTObject:
     centroid_new: np.ndarray | None = None  # rescan instance centroid, mapped with raw T_align
     aabb_new_min: np.ndarray | None = None  # AABB of the rescan instance points (raw T_align)
     aabb_new_max: np.ndarray | None = None
+    min_extent_ref: float | None = None  # smallest reference AABB extent [m] (thin objects, M7)
 
 
 @dataclass
@@ -161,6 +162,7 @@ def gt_changes(
         size = size_class(lv, inst.aabb_min, inst.aabb_max, small) if inst else "large"
         o = GTObject(oid, label, nyu, lv, size, "unchanged", in_rigid=oid in rigid)
         o.centroid_ref = inst.centroid if inst else None
+        o.min_extent_ref = float(np.min(inst.aabb_max - inst.aabb_min)) if inst else None
         s_inst = S.instances.get(oid)
         if s_inst is not None:
             o.centroid_new = apply(T, s_inst.centroid[None])[0]

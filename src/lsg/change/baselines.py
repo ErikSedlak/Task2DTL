@@ -19,6 +19,13 @@ node gets `confidence`. With appearance on, the votes it reads already contain t
 appearance verdicts (`change.online`), and perception observations include thin-object
 candidates.
 
+Ablations (M7): `states.commitment: immediate` (B2 / FULL) makes `removed` final at the first
+frame where a node's tentative state was removed (`NodeVotes.commit_removed_frame`): such nodes
+skip absorption, matching and FULL's veto, so a node seen later (or matched at a new place)
+stays removed and its observation may become a `new` node. `update.children_follow_parent`
+(FULL, §6.12): an `unknown` thing without counted votes whose reference support parent is a
+moved anchor moves with it (`follow_parent`).
+
 Every method has the signature `method(G_ref, obs, cfg, rescan_id=None, obs_mode=None,
 votes=None, ref_ctx=None, obs_views=None, priors=None) -> G_upd`; `votes` =
 `OnlineResult.votes` (node id -> `NodeVotes`), `ref_ctx` = the reference context (B2 / FULL read
@@ -36,7 +43,7 @@ from typing import Any
 import numpy as np
 
 from lsg.change.association import absorb_confirmed, associate
-from lsg.change.classify import classify
+from lsg.change.classify import Decision, classify
 from lsg.change.confidence import below_p_del, new_logodds, node_logodds, prior_logodds, probability
 from lsg.change.visibility import NodeVotes, confirmed_in_place, has_free_evidence
 from lsg.classes import node_level
@@ -254,21 +261,45 @@ def b2(
     return _b2_core(G_ref, obs, cfg, rescan_id, obs_mode, votes, ref_ctx, "B2")[0]
 
 
+def committed_removed(nodes: Sequence[Node], votes: Mapping[str, NodeVotes], cfg: Mapping[str, Any]) -> set[str]:
+    """Ids committed `removed` during the walk (`states.commitment: immediate`, M7); empty when deferred."""
+    if str(cfg["states"].get("commitment", "deferred")) != "immediate":
+        return set()
+    return {n.id for n in nodes if (v := votes.get(n.id)) is not None and v.commit_removed_frame is not None}
+
+
+def _apply_move(n: Node, T_move: np.ndarray, pts: np.ndarray | None) -> None:
+    """Move a node's centroid / bbox with T_move (reference points if available); store T_move."""
+    if pts is not None and len(pts):
+        Q = apply(T_move, pts)
+        n.centroid = [float(x) for x in Q.mean(axis=0)]
+        n.bbox_3d = bbox_dict(Q.min(axis=0), Q.max(axis=0))
+    else:
+        assert n.bbox_3d is not None
+        n.centroid = [float(x) for x in apply(T_move, np.asarray(n.centroid, float)[None])[0]]
+        t = T_move[:3, 3]
+        n.bbox_3d = bbox_dict(np.asarray(n.bbox_3d["min"]) + t, np.asarray(n.bbox_3d["max"]) + t)
+    n.T_move = np.asarray(T_move, float).tolist()
+
+
 def _b2_core(G_ref, obs, cfg, rescan_id, obs_mode, votes, ref_ctx, method):
-    """B2's states; returns (G, ids of matched nodes, ids of confirmed nodes)."""
+    """B2's states; returns (G, ids of matched nodes, ids of confirmed nodes, ids committed removed)."""
     mode = obs_mode or "oracle"
     G = copy.deepcopy(G_ref)
     G.meta.update(scan_obs=rescan_id, obs_mode=obs_mode, method=method, tentative=False, frame_idx=None)
     vs = votes or {}
     nodes = [n for n in G.nodes if n.level in SCORED_LEVELS]
+    committed = committed_removed(nodes, vs, cfg)
     usable = [o for o in obs if obs_level(o) != "structure" and len(o.points)]
-    conf = [n for n in nodes if confirmed_in_place(vs.get(n.id), cfg)]
+    conf = [n for n in nodes if n.id not in committed and confirmed_in_place(vs.get(n.id), cfg)]
     ab = absorb_confirmed(conf, usable, mode, cfg)
     rest_obs = [o for o in usable if o.token not in ab.absorbed]
     conf_ids = {n.id for n in conf}
-    pairs, unmatched, unmatched_obs = associate([n for n in nodes if n.id not in conf_ids], rest_obs, mode, cfg)
+    skip = conf_ids | committed
+    pairs, unmatched, unmatched_obs = associate([n for n in nodes if n.id not in skip], rest_obs, mode, cfg)
     P = ref_node_points(G, ref_ctx)
     dec = classify(pairs, unmatched, vs, conf, P, cfg)
+    dec.update({nid: Decision("removed") for nid in committed})
     tok = {n.id: o.token for n, o, _ in pairs} | ab.token_of
     for n in nodes:
         d = dec[n.id]
@@ -280,21 +311,40 @@ def _b2_core(G_ref, obs, cfg, rescan_id, obs_mode, votes, ref_ctx, method):
         if d.state != "moved":
             continue
         assert d.T_move is not None
-        pts = P.get(n.id)
-        if pts is not None and len(pts):
-            Q = apply(d.T_move, pts)
-            n.centroid = [float(x) for x in Q.mean(axis=0)]
-            n.bbox_3d = bbox_dict(Q.min(axis=0), Q.max(axis=0))
-        else:
-            assert n.bbox_3d is not None
-            n.centroid = [float(x) for x in apply(d.T_move, np.asarray(n.centroid, float)[None])[0]]
-            t = d.T_move[:3, 3]
-            n.bbox_3d = bbox_dict(np.asarray(n.bbox_3d["min"]) + t, np.asarray(n.bbox_3d["max"]) + t)
-        n.T_move = np.asarray(d.T_move, float).tolist()
+        _apply_move(n, d.T_move, P.get(n.id))
     add_new_nodes(G, unmatched_obs, rescan_id)
     G.meta["assoc"] = {"confirmed": len(conf), "absorbed": len(ab.absorbed), "matched": len(pairs),
                        "icp_fallback": sum(bool(dec[n.id].info.get("fallback")) for n, _, _ in pairs)}  # fmt: skip
-    return G, {n.id for n, _, _ in pairs}, conf_ids
+    if committed:
+        G.meta["assoc"]["committed_removed"] = len(committed)
+    return G, {n.id for n, _, _ in pairs}, conf_ids, committed
+
+
+def follow_parent(G: Graph, votes: Mapping[str, NodeVotes], ref_ctx: RefContext | None) -> int:
+    """Children follow parent (§6.12 optional rule, M7 ablation); modifies G in place.
+
+    A thing in state `unknown` without counted votes (seen / free / free-like all 0) whose
+    reference support parent is an anchor in state `moved` gets the anchor's `T_move` (points,
+    centroid, bbox) and state `moved`. `update_graph` then re-checks its parent as for every
+    moved thing. Returns the number of nodes moved this way.
+    """
+    by_id = {n.id: n for n in G.nodes}
+    parent = G.support_parent()
+    P = ref_node_points(G, ref_ctx)
+    k = 0
+    for n in G.nodes:
+        if n.level != "thing" or n.state != "unknown" or n.id not in parent:
+            continue
+        v = votes.get(n.id)
+        if v is not None and (v.seen or v.free or v.free_like):
+            continue
+        a = by_id.get(parent[n.id][0])
+        if a is None or a.level != "anchor" or a.state != "moved" or a.T_move is None:
+            continue
+        _apply_move(n, np.asarray(a.T_move, float), P.get(n.id))
+        n.state = "moved"
+        k += 1
+    return k
 
 
 def full(
@@ -317,7 +367,7 @@ def full(
     the old place ignored), new nodes from their views alone. `priors` = `train_meta.PriorTable`
     (None or `confidence.class_priors: false` -> `fallback_p`).
     """
-    G, matched, conf_ids = _b2_core(G_ref, obs, cfg, rescan_id, obs_mode, votes, ref_ctx, "FULL")
+    G, matched, conf_ids, committed = _b2_core(G_ref, obs, cfg, rescan_id, obs_mode, votes, ref_ctx, "FULL")
     vs = votes or {}
     views = obs_views or {}
     n_veto = 0
@@ -331,11 +381,13 @@ def full(
         is_m = n.id in matched
         tv = views.get(n.obs_token) if (is_m and n.obs_token is not None and n.obs_token in views) else None
         l = node_logodds(l0, vs.get(n.id), cfg, matched=is_m, views=tv)
-        if n.state == "removed" and not below_p_del(l, cfg):
+        if n.state == "removed" and n.id not in committed and not below_p_del(l, cfg):
             n.state = "unknown"
             n_veto += 1
         n.confidence = probability(l)
     G.meta["assoc"]["conf_veto"] = n_veto
+    if bool(cfg.get("update", {}).get("children_follow_parent", False)):
+        G.meta["assoc"]["followed_parent"] = follow_parent(G, vs, ref_ctx)
     return G
 
 
