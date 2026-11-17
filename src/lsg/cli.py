@@ -77,6 +77,47 @@ def _cmd_m6(args: argparse.Namespace) -> int:
     return 0 if all(a["pass"] for a in res["acceptance"].values()) else 1
 
 
+def _cmd_m7(args: argparse.Namespace) -> int:
+    """`lsg m7`: dev checks, all ablations on val + relchange, tables, plots, determinism.
+
+    Returns:
+        Exit code 0 if every acceptance check passes.
+    """
+    from lsg.eval.m7_checks import format_summary, run_m7
+
+    res = run_m7(load_config(args.config), run_id=args.run_id, dev_only=args.dev_only, sweep=not args.no_sweep,
+                 frac=not args.no_frac, relchange=not args.no_relchange, determinism=not args.no_determinism,
+                 resume=not args.no_resume, workers=args.workers)  # fmt: skip
+    print(format_summary(res))
+    return 0 if all(a["pass"] for a in res["acceptance"].values()) else 1
+
+
+def _cmd_ablate(args: argparse.Namespace) -> int:
+    """`lsg ablate --names a,b --split S`: run ablation rows (DESIGN §8), one metrics.json each."""
+    from lsg.eval.ablations import run_ablation, select
+    from lsg.eval.harness import format_summary, split_path
+    from lsg.io.scan3r import read_pairs
+    from lsg.runinfo import new_run_id
+
+    cfg = load_config(args.config)
+    if args.list:
+        from lsg.eval.ablations import registry
+
+        for a in registry(cfg).values():
+            print(f"{a.name:22s} {a.group:10s} {a.method:5s} {dict(a.overrides) or ''} frac {a.frac:g} seed {a.seed}"
+                  f"  {a.desc}")  # fmt: skip
+        return 0
+    sp = split_path(args.split)
+    pairs = read_pairs(sp)
+    rid = args.run_id or new_run_id("ablate")
+    for ab in select(cfg, args.names):
+        r = run_ablation(cfg, ab, pairs, f"{rid}/{ab.name}", sp.stem, _modes(args.obs), args.workers,
+                         resume=not args.no_resume)  # fmt: skip
+        print(f"### {ab.name}: {ab.desc} ({'reused' if r['reused'] else 'run'})")
+        print(format_summary(r))
+    return 0
+
+
 def _cmd_splits_textures(args: argparse.Namespace) -> int:
     """`lsg splits textures`: write the reference scans that need textures (DESIGN §2.3)."""
     from lsg.config import REPO_ROOT
@@ -212,6 +253,29 @@ def main(argv: list[str] | None = None) -> int:
     m6.add_argument("--full-val", action="store_true", help="all of eval_val instead of the milestone subset")
     m6.add_argument("--no-objply", action="store_true", help="skip the OBJ/PLY check over the 72 references")
     m6.set_defaults(func=_cmd_m6)
+
+    m7 = sub.add_parser("m7", help="M7: all ablations on val + relchange (both modes), results tables, plots")
+    m7.add_argument("--config", default=None)
+    m7.add_argument("--run-id", default=None, help="fixed id (e.g. m7_final) lets a rerun resume finished rows")
+    m7.add_argument("--dev-only", action="store_true", help="dev rows + regressions only (no val)")
+    m7.add_argument("--no-sweep", action="store_true", help="skip the tau_free sweep")
+    m7.add_argument("--no-frac", action="store_true", help="skip the observed-fraction runs")
+    m7.add_argument("--no-relchange", action="store_true", help="skip the relchange relation runs")
+    m7.add_argument("--no-determinism", action="store_true", help="skip the two-run determinism check")
+    m7.add_argument("--no-resume", action="store_true", help="rerun rows even if a matching metrics.json exists")
+    m7.add_argument("--workers", type=int, default=None, help="processes per val run (default: config)")
+    m7.set_defaults(func=_cmd_m7)
+
+    ab = sub.add_parser("ablate", help="run ablation rows (DESIGN §8) on a split")
+    ab.add_argument("--names", default="FULL", help="comma list, 'all', or 'group:<method|component|variant|tau_free|frac>'")
+    ab.add_argument("--split", default="eval_val", help="split name or file")
+    ab.add_argument("--obs", default="perception,oracle")
+    ab.add_argument("--workers", type=int, default=None)
+    ab.add_argument("--run-id", default=None)
+    ab.add_argument("--no-resume", action="store_true")
+    ab.add_argument("--list", action="store_true", help="list the registry and exit")
+    ab.add_argument("--config", default=None)
+    ab.set_defaults(func=_cmd_ablate)
 
     sp = sub.add_parser("splits", help="split-file helpers")
     sps = sp.add_subparsers(dest="splits_cmd", required=True)

@@ -187,6 +187,21 @@ update:                    # DESIGN §6.12 graph update
   children_follow_parent: false # FULL (ablation, M7, §6.12): an unknown thing without counted votes whose
                                 # support parent is a moved anchor gets the anchor's T_move
 
+m7:                        # `lsg m7` / `lsg ablate` (DESIGN §8, §9): every val row reported once, nothing tuned
+  val_split: splits/eval_val.txt              # final tables: all 110 pairs (CLAUDE.md)
+  relchange_split: splits/eval_relchange_train.txt
+  dev_rows: [B0, B1, B2, FULL, FULL-contrast]
+  regression_refs:                            # dev runs whose metrics must be unchanged (thin keys excluded)
+    B0: outputs/m5_final2/dev_B0
+    B1: outputs/m5_final2/dev_B1
+    B2: outputs/m6_final/dev_B2
+    FULL-contrast: outputs/m6_final/dev_FULL  # M6 FULL = FULL without seen-needs-contrast
+  tau_free_sweep: [0.05, 0.10, 0.20, 0.30]    # [m] the default 0.15 is the FULL row
+  fracs: [0.5, 0.25, 0.1]                     # §7.3 observed fraction (100% = the FULL row)
+  frac_seeds: [0, 1, 2]
+  relchange_rows: [B2, FULL, FULL+follow, FULL-keepparent]
+  determinism_pair: 0                         # index into splits/dev_train.txt
+
 m1:
   count_split: splits/eval_val.txt
   expected_counts: {rigid: 390, removed: 96, new_raw: 224}   # DESIGN §2.2
