@@ -9,6 +9,12 @@ depth d_exp on P_i gives one frame vote:
 - `noinfo`: anything else (occluded / nearer pixels, mixed evidence, too few valid pixels);
 - `unobserved`: |P_i| < `min_mask_px` (out of frustum or hidden behind other reference geometry).
 
+Seen votes need contrast (FULL, DECISIONS 2026-11-15): with `d_behind` (depth of the next
+reference surface behind the pixel's first hit with another label), only *contrastive* pixels,
+d_behind > d_exp + tau_free, can support `seen`: there, depth would show the difference if the
+node were gone. `seen` then needs >= `min_mask_px` valid contrastive pixels, >= `vote_frac` of
+them present; `free` is unchanged; anything else is `noinfo`.
+
 Thin nodes (M6, appearance on): depth cannot tell whether a thing thinner than tau_free is
 still there, so their depth `seen` / `noinfo` vote is replaced by the appearance verdict on the
 comparable pixels (`thin_votes`): mean frame-relative appearance distance > `tau_node` ->
@@ -44,6 +50,8 @@ class FrameVote:
     n_free: int
     n_comparable: int = 0  # thin nodes: appearance-comparable pixels (M6)
     n_mismatch: int = 0  # thin nodes: of those, mismatching
+    n_contrast: int = 0  # seen needs contrast (M7): valid contrastive pixels
+    n_present_contrast: int = 0  # of those, present
 
 
 def erode_labels(labels: np.ndarray, r: int) -> np.ndarray:
@@ -68,6 +76,7 @@ def frame_votes(
     ref_labels: np.ndarray,
     obs_depth: np.ndarray,
     cfg: Mapping[str, Any],
+    d_behind: np.ndarray | None = None,
 ) -> dict[int, FrameVote]:
     """§3 frame votes of the given reference objects in one frame.
 
@@ -77,6 +86,9 @@ def frame_votes(
         ref_labels: (H, W) reference objectId of the first hit, 0 = none.
         obs_depth: (H, W) observed sensor depth [m], 0 = invalid.
         cfg: Full config; uses `cfg["visibility"]`.
+        d_behind: (H, W) depth of the next reference surface behind the first hit with another
+            label (`Renderer.depth_behind`, inf = none), or None for the M3 rule. Given: `seen`
+            only from contrastive pixels (module docstring; DECISIONS 2026-11-15).
 
     Returns:
         `{objectId: FrameVote}` for every id in `node_oids` (`unobserved` included).
@@ -99,21 +111,28 @@ def frame_votes(
     c_val = np.bincount(lab, weights=valid, minlength=n)
     c_pre = np.bincount(lab, weights=present, minlength=n)
     c_fre = np.bincount(lab, weights=free, minlength=n)
+    contrast = d_behind is not None
+    if contrast:
+        db = np.asarray(d_behind, np.float64).ravel()
+        con = valid & (db > d_exp + tau_free)
+        c_con = np.bincount(lab, weights=con, minlength=n)
+        c_pcon = np.bincount(lab, weights=con & present, minlength=n)
 
     out: dict[int, FrameVote] = {}
     for o in oids:
         npx, nv, npre, nfr = int(c_px[o]), int(c_val[o]), int(c_pre[o]), int(c_fre[o])
+        nc, npc = (int(c_con[o]), int(c_pcon[o])) if contrast else (0, 0)
         if o <= 0 or npx < min_px:
             kind = UNOBSERVED
         elif nv < min_px:
             kind = NOINFO
-        elif npre >= frac * nv:
+        elif (nc >= min_px and npc >= frac * nc) if contrast else (npre >= frac * nv):
             kind = SEEN
         elif nfr >= frac * nv:
             kind = FREE
         else:
             kind = NOINFO
-        out[o] = FrameVote(kind, npx, nv, npre, nfr)
+        out[o] = FrameVote(kind, npx, nv, npre, nfr, n_contrast=nc, n_present_contrast=npc)
     return out
 
 
@@ -230,6 +249,7 @@ class NodeVotes:
     first_free_frame: int | None = None  # first counted free vote
     first_free_like_frame: int | None = None  # first counted free-like vote
     last_seen_frame: int | None = None  # last raw seen vote
+    commit_removed_frame: int | None = None  # first frame with a tentative `removed` (immediate commitment, M7)
 
     def add(self, kind: str, counted: bool, frame_idx: int) -> None:
         """Record one frame vote (`counted` = passed the decorrelator; seen / free / free-like)."""

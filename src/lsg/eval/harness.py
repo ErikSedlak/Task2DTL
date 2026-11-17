@@ -110,6 +110,11 @@ def appearance_on(cfg: dict[str, Any], method: str) -> bool:
     return method == "FULL" and bool(cfg.get("appearance", {}).get("enabled", False))
 
 
+def contrast_on(cfg: dict[str, Any], method: str) -> bool:
+    """Seen votes need contrast: FULL with `visibility.seen_needs_contrast` (M7, DECISIONS 2026-11-15)."""
+    return method == "FULL" and bool(cfg["visibility"].get("seen_needs_contrast", False))
+
+
 def make_appearance(cfg: dict[str, Any], ref: str, tex: TextureRenderer) -> AppearanceRunner:
     """Per-rescan runner: shared texture renderer + per-process feature extractor + disk cache."""
     ac = cfg["appearance"]
@@ -170,7 +175,8 @@ def _eval_group(task: dict[str, Any]) -> list[dict[str, Any]]:
                         if task.get("snapshots") and task.get("run_dir") else None)  # fmt: skip
                 app = make_appearance(cfg, ref, tex) if tex is not None else None
                 online = run_online(ctx, info, seq, src, cfg, snapshot_dir=snap, obs_mode=mode,
-                                    renderer=ref_renderer, appearance=app, priors=priors)  # fmt: skip
+                                    renderer=ref_renderer, appearance=app, priors=priors,
+                                    contrast=contrast_on(cfg, task["method"]))  # fmt: skip
                 obs = online.obs
                 tm = oracle.token_map()
                 extra_run: dict[str, Any] = {}

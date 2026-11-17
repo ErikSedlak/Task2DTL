@@ -13,6 +13,14 @@ map: thin nodes' depth seen / noinfo votes are replaced by the appearance verdic
 (`visibility.thin_votes`), and the map rides along in `RefRender` to the source. After
 `finish()`, `obs_views` counts the decorrelated viewpoints of every observation (§6.11).
 
+With `contrast` (FULL, M7, DECISIONS 2026-11-15) the reference ray of every pixel on a voting
+node is continued to the next surface with another label (`Renderer.depth_behind`), and only
+contrastive pixels can support a `seen` vote (`visibility.frame_votes`).
+
+Immediate commitment (ablation, M7): every node records the first frame at which its tentative
+state became `removed` (`NodeVotes.commit_removed_frame`; with priors also tentative p < p_del).
+Methods use it only with `states.commitment: immediate`.
+
 Method side: imports only `geom`, `graph`, `io`, `obs`, `change`, `perception`, `train_meta` (no-leak test).
 """
 
@@ -27,7 +35,7 @@ from typing import Any
 
 import numpy as np
 
-from lsg.change.confidence import node_logodds, prior_logodds, probability
+from lsg.change.confidence import below_p_del, node_logodds, prior_logodds, probability
 from lsg.change.visibility import (
     COUNTED_KINDS,
     NOINFO,
@@ -130,6 +138,7 @@ def run_online(
     renderer: Renderer | None = None,
     appearance: Any = None,
     priors: Any = None,
+    contrast: bool = False,
 ) -> OnlineResult:
     """Process the rescan's frames in time order (DESIGN §6.7).
 
@@ -146,7 +155,9 @@ def run_online(
         appearance: `perception.appearance.AppearanceRunner` (FULL with appearance on, M6) or None.
             Frames that show a thin node with a depth seen / noinfo vote (all frames if the source
             has `wants_appearance`) get an `AppearanceMap`; thin votes are replaced by its verdict.
-        priors: Class prior table (`train_meta.PriorTable`); snapshots then carry confidence.
+        priors: Class prior table (`train_meta.PriorTable`); snapshots then carry confidence, and
+            the immediate-commitment frame also needs tentative p < p_del.
+        contrast: Seen votes need contrast (FULL with `visibility.seen_needs_contrast`, M7).
 
     Returns:
         `OnlineResult` with the observations, per-node vote tallies and snapshot paths.
@@ -160,6 +171,12 @@ def run_online(
         if n.level in VOTING_LEVELS and oid is not None:
             node_of[oid] = n.id
     votes = {nid: NodeVotes() for nid in node_of.values()}
+    l0_of: dict[str, float] = {}
+    if priors is not None:
+        l0_of = {n.id: prior_logodds(n.label, n.nyu40, priors, cfg) for n in G_ref.nodes if n.id in votes}
+    vc = cfg["visibility"]
+    node_lab = np.fromiter(node_of, np.int64) if node_of else np.zeros(0, np.int64)
+    t_contrast = 0.0
     dec = Decorrelator.from_config(cfg)
     K = seq_info.intrinsics.K_depth
     W, H = seq_info.intrinsics.depth_wh
@@ -184,12 +201,19 @@ def run_online(
         pose = T_align @ frame.pose_c2w
         poses[int(frame.idx)] = pose
         amap = up = None
+        T_w2c = invert(pose)
         if appearance is None:
-            d_exp, lab = r.render(K, invert(pose), W, H)
-            fv = frame_votes(node_of, d_exp, lab, frame.depth, cfg)
+            d_exp, lab = r.render(K, T_w2c, W, H)
         else:
-            d_exp, lab, prim = r.render(K, invert(pose), W, H, return_prim=True)
-            fv = frame_votes(node_of, d_exp, lab, frame.depth, cfg)
+            d_exp, lab, prim = r.render(K, T_w2c, W, H, return_prim=True)
+        d_behind = None
+        if contrast:
+            tc = time.time()
+            d_behind = r.depth_behind(K, T_w2c, W, H, d_exp, lab, np.isin(lab, node_lab),
+                                      float(vc.get("contrast_eps", 1e-3)))  # fmt: skip
+            t_contrast += time.time() - tc
+        fv = frame_votes(node_of, d_exp, lab, frame.depth, cfg, d_behind=d_behind)
+        if appearance is not None:
             if want_all or any(fv[o].kind in (SEEN, NOINFO) for o in thin):
                 amap = appearance.frame(frame, pose, d_exp)
                 n_app += 1
@@ -198,7 +222,11 @@ def run_online(
         for oid, v in fv.items():
             nid = node_of[oid]
             counted = v.kind in COUNTED_KINDS and dec.counts((nid, v.kind), pose)
-            votes[nid].add(v.kind, counted, frame.idx)
+            nv = votes[nid]
+            nv.add(v.kind, counted, frame.idx)
+            if counted and v.kind != SEEN and nv.commit_removed_frame is None and has_free_evidence(nv, cfg):
+                if priors is None or below_p_del(node_logodds(l0_of[nid], nv, cfg), cfg):
+                    nv.commit_removed_frame = int(frame.idx)
         t2 = time.time()
         obs_source.observe(frame, RefRender(d_exp, lab, amap, up))
         t_obs += time.time() - t2
@@ -213,6 +241,8 @@ def run_online(
     if snap_dir is not None and last_idx is not None and (every <= 0 or k % every != 0):
         snaps.append(_snapshot(G_ref, votes, last_idx, cfg, seq_info, obs_mode, snap_dir, priors))
     times = {"render_votes": t_render, "observe": t_obs, "finish": t_finish, "total": time.time() - t0}
+    if contrast:
+        times["contrast"] = t_contrast
     stats: dict[str, Any] = {"thin_nodes": len(thin), "appearance_frames": n_app}
     if appearance is not None:
         times["appearance"] = appearance.time_s

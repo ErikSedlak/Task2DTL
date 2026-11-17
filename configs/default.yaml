@@ -24,6 +24,9 @@ visibility:                # DESIGN §3 frame votes (tune on dev only)
                            # >= this many valid ones (else noinfo) to vote (DECISIONS M3)
   vote_frac: 0.5           # share of valid pixels for a seen / free vote
   erode_px: 0              # erode each node's first-hit mask by this many px (silhouette guard; M3 knob)
+  seen_needs_contrast: true  # FULL only (M7, Erik, DECISIONS 2026-11-15): seen only from pixels whose next
+                           # reference surface behind (other label) is > tau_free farther; false = M6 FULL (ablation)
+  contrast_eps: 0.001      # [m] other-label hits this far in front of the first hit still count (coincident faces)
 
 decorrelation:             # DESIGN §3 viewpoint decorrelation (tune)
   enabled: true            # false = every vote counts (ablation, §8)
@@ -34,6 +37,8 @@ states:                    # DESIGN §3 state rules (tune)
   k_free: 2                # counted free votes needed for removed
   k_seen: 3                # counted seen votes (and no counted free / free-like) -> confirmed in place
   k_free_like: 3           # appearance alone (no depth free vote) needs this many counted free-like votes (§3, M6)
+  commitment: deferred     # deferred (§3) | immediate (ablation, M7): `removed` final at the first frame with a
+                           # tentative removed state (B2 / FULL), even if the node is matched or seen later
 
 online:                    # DESIGN §6.7 online loop
   snapshot_every: 20       # write a tentative snapshot every N processed frames (if enabled)
@@ -179,6 +184,8 @@ appearance:                # DESIGN §3 / §6.6 appearance residual, FULL only (
 update:                    # DESIGN §6.12 graph update
   relations: update        # update (method) | stale (R0) | geometric (R1); saved / scored graph
   keep_supported_parent: true   # update: a re-checked thing keeps its old parent if it still supports it (M5, Erik)
+  children_follow_parent: false # FULL (ablation, M7, §6.12): an unknown thing without counted votes whose
+                                # support parent is a moved anchor gets the anchor's T_move
 
 m1:
   count_split: splits/eval_val.txt

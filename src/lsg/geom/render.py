@@ -101,6 +101,54 @@ class Renderer:
             return t, labels, prim
         return t, labels
 
+    def depth_behind(
+        self,
+        K: np.ndarray,
+        T_w2c: np.ndarray,
+        W: int,
+        H: int,
+        depth: np.ndarray,
+        labels: np.ndarray,
+        active: np.ndarray,
+        eps: float = 1e-3,
+    ) -> np.ndarray:
+        """Depth of the nearest surface along each pixel's ray whose label differs from the first hit's.
+
+        For "seen votes need contrast" (DECISIONS 2026-11-15). All intersections of the active
+        pixels' rays are listed (`RaycastingScene.list_intersections`); hits with the first
+        hit's label are skipped (the node's own front / back / side faces), the nearest other
+        hit at t >= first-hit depth - `eps` wins. A surface coincident with the node's back face
+        (pillow against a backrest) is therefore found, which a restart-behind-the-hit cast
+        would skip. Values are camera-z depth, like `render`.
+
+        Args:
+            K, T_w2c, W, H: The camera of the `render` call that produced `depth` / `labels`.
+            depth: (H, W) first-hit depth from `render` (0 = no hit).
+            labels: (H, W) first-hit labels from `render`.
+            active: (H, W) bool, pixels to resolve (e.g. first hit on a voting node).
+            eps: Tolerance [m] for other-label hits level with the first hit.
+
+        Returns:
+            (H, W) float64: the depth behind; `inf` where nothing else is hit, and for inactive
+            or no-hit pixels.
+        """
+        out = np.full(H * W, np.inf)
+        idx = np.flatnonzero(np.asarray(active, bool).ravel() & (np.asarray(depth).ravel() > 0))
+        if idx.size == 0:
+            return out.reshape(H, W)
+        rays = self.camera_rays(K, T_w2c, W, H).reshape(-1, 6)[idx]
+        ans = self.scene.list_intersections(o3d.core.Tensor(np.ascontiguousarray(rays, dtype=np.float32)))
+        ray_ids = ans["ray_ids"].numpy().astype(np.int64)
+        t = ans["t_hit"].numpy().astype(np.float64)
+        lab = self.face_labels[ans["primitive_ids"].numpy().astype(np.int64)]
+        lab0 = np.asarray(labels).ravel()[idx]
+        t0 = np.asarray(depth, np.float64).ravel()[idx]
+        ok = (lab != lab0[ray_ids]) & (t >= t0[ray_ids] - eps)
+        best = np.full(idx.size, np.inf)
+        np.minimum.at(best, ray_ids[ok], t[ok])
+        out[idx] = best
+        return out.reshape(H, W)
+
     def face_normal_z(self) -> np.ndarray:
         """(M,) |z| component of each face's unit normal (1 = horizontal surface, e.g. a table top)."""
         if getattr(self, "_nz", None) is None:
