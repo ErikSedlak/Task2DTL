@@ -403,3 +403,36 @@ Format: **date — decision.** Why. *Alternatives considered.* (status: fixed / 
 - **Resume**: a row is reused only if its stored config hash and git commit equal the current ones and it was made from a clean tree. A crash during the multi-hour val run then costs only the unfinished row. (fixed)
 - **Plots**: matplotlib (already a dependency), two-hue categorical palette (oracle blue `#2a78d6`, perception orange `#eb6834`) checked with the dataviz validator (CVD ΔE 24.7, normal-vision ΔE 33.6, contrast ≥ 3:1). (fixed)
 - **No new dependencies.** (fixed)
+
+## 2026-11-18 — M7 results (val reported once, nothing tuned; Claude Code)
+- **Run:** `uv run lsg m7 --run-id m7_final` (Erik started it; commit `565fc44`, clean tree; 111 min; DINOv2 / CLIP features cached for val, relchange computed on CUDA). Acceptance: dev regressions B0 / B1 / B2 / FULL-contrast 0 differences, 0 invalid graphs, determinism 0 differences, val on 110 pairs, `results.md` + 3 plots. All tables: `outputs/m7_final/results.md`.
+- **Reproducibility:** the val rows B0 / B1 / B2 equal the M2–M5 val numbers, and FULL-contrast equals M6 FULL, on every reported value.
+- **Seen votes need contrast did not resolve the M6 trade-off.** Removed recall: oracle 26.0 → 27.4% [17.8, 37.5], perception 31.5 → 32.9% [23.6, 42.9] (n = 73, about one object per mode). False deletion is unchanged (8.1 / 7.7%), and unchanged strict accuracy is −0.1 / −0.2 points. B2 has 41.1 / 45.2% removed recall. So the vetoed real removals mostly get seen votes from pixels *with* contrast behind them: the object (or something in its place) is really seen there. They are likely replacements, partial removals or GT issues, which is a question for the §7.4 audit (M8). Kept as fixed on 2026-11-15; not re-tuned. (fixed)
+- **Ablations on val** (removed P / R, false deletion; oracle | perception):
+  - FULL 55.6 / 27.4 / 8.1 | 24.2 / 32.9 / 7.7;
+  - appearance off: 55.6 / 27.4 / 8.1 | 23.5 / 31.5 / 7.9. Expected: only 4 scored GT-removed objects are thin (now counted by the reference AABB in both modes);
+  - thin candidates off: change metrics within one object; perception new P 2.0 → 2.3%;
+  - class priors off: 56.4 / 30.1 / 8.4 | 23.7 / 37.0 / 8.0;
+  - decorrelation off: 56.1 / 31.5 / 9.1 | 24.1 / 37.0 / 8.7. For B1 the false deletion goes 9.5 → 10.7 / 9.4 → 10.6%. Decorrelation trades a little recall for fewer false deletions, as §8 expected;
+  - **immediate commitment**: 19.6 / 42.5 / 9.5 in both modes. Oracle moved F1 54.6 → 34.5% and new P 81.6 → 50.9%: committing early deletes moved objects and turns their observations into false new nodes. This is the clearest ablation result and supports deferred commitment. The two modes are identical because the commitment depends only on depth votes;
+  - children follow parent: oracle unchanged kept 86.4 → 85.9%, moved F1 54.6 → 53.9%; relations unchanged. Rarely applies, slightly harmful; stays off;
+  - keep-supported-parent off: change metrics identical (relations only).
+- **τ_free sweep** (0.05 / 0.10 / 0.15 / 0.20 / 0.30 m):
+  - removed R: oracle 35.6 / 37.0 / 27.4 / 24.7 / 11.0%, perception 38.4 / 38.4 / 32.9 / 28.8 / 12.3%;
+  - false deletion: oracle 9.4 / 9.5 / 8.1 / 7.3 / 6.6%, perception 9.1 / 8.8 / 7.7 / 6.9 / 6.1%;
+  - a monotone trade-off. The dev-chosen 0.15 m is not changed on val.
+- **Observed fraction** (FULL, mean ± sd over 3 chunk seeds; 100 / 50 / 25 / 10%):
+  - oracle: removed R 27.4 / 21.9 ± 2.7 / 10.0 ± 4.2 / 4.6 ± 0.8; false deletion 8.1 / 4.6 / 2.3 / 1.2; unknown 29.5 / 43.9 / 60.8 / 76.9;
+  - perception: moved F1 31.7 / 20.5 / 10.7 / 2.7; new R 8.8 / 5.5 / 0.6 / 0.2.
+  - Less observation leads to more `unknown`, not to more false deletions. Perception's moved / new collapse fastest, because candidates need ≥ 3 decorrelated views.
+- **Relations** (parent accuracy, GT universe, R0 / R1 / update):
+  - val FULL: (a) oracle 92.0 / 79.4 / 92.2 (n = 993), perception 94.7 / 80.4 / 92.4; (b) 94.0 / 64.9 / 85.7 and 94.0 / 75.0 / 87.5 (n = 168); (c) n = 3 as at M5;
+  - relchange FULL (40 pairs, never tuned on): (a) oracle 84.4 / 70.3 / 83.4 (n = 441); (b) 48.4 / 39.8 / 48.4 (n = 93); (c) swapped 0 / 50.0 / 42.9 (n = 14); (c-broad) 0 / 32.8 / 24.6 (n = 61);
+  - on the parent-change set, update beats R0 on (c), as constructed, and is level with R0 on (b). R1 alone is better on (c) but worse elsewhere.
+  - (fixed)
+- **No Hugging Face Hub requests once the weights are cached** (Erik asked why the runs contact the Hub):
+  - timm (DINOv2) and open_clip (CLIP, whose openai weights now live in `timm/vit_base_patch32_clip_224.openai`) load through `huggingface_hub`, which sends a metadata request per model load even with a full cache: once per worker process per run.
+  - `config.setup_hub_offline`, called by `lsg` before any model import: `models.hub_offline: auto` sets `HF_HUB_OFFLINE=1` when both repos have a cached snapshot. A fresh machine still downloads them once; `true` / `false` force it; an environment variable wins.
+  - The library reads the flag at import time, so a per-call toggle is not possible.
+  - *Alt: tell users to export the variable (forgotten easily); always offline (breaks a clean `uv sync` for the M8 README).* (fixed)
+

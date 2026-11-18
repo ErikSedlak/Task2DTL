@@ -1,6 +1,6 @@
 # Code structure — what is where and what it does
 
-State: M7 code (2026-11-17; the M7 val run is still to be done). Covers everything in `src/lsg/`, `tests/` and `configs/`. For *why* things are done this way, see `DESIGN.md` (the spec) and `DECISIONS.md` (the log); this file only explains *what* the code does.
+State: end of milestone M7 (2026-11-18). Covers everything in `src/lsg/`, `tests/` and `configs/`. For *why* things are done this way, see `DESIGN.md` (the spec) and `DECISIONS.md` (the log); this file only explains *what* the code does.
 
 ## 1. The project in one paragraph
 
@@ -107,6 +107,7 @@ Task2/
 - `load_config()` reads `configs/default.yaml` into a dict. All thresholds live there, never hard-coded.
 - `config_hash()` gives a short fingerprint of the settings. It is saved with every result.
 - `data_root()` finds the dataset: environment variable `LSG_DATA`, else `./data`. `outputs_root()` finds `./outputs`.
+- `setup_hub_offline(cfg)` (M7): once the DINOv2 and CLIP weights are in the local Hugging Face cache, `lsg` tells the Hugging Face library not to contact the internet at all (`HF_HUB_OFFLINE=1`); on a fresh machine they are downloaded once. Config `models.hub_offline`.
 
 ### `runinfo.py` — bookkeeping for results
 - `write_metrics()` saves `outputs/<run_id>/metrics.json` with the results, the full config, its hash and the git commit. Any number can be traced back to the exact code and settings.
@@ -349,11 +350,11 @@ These may only be read inside `eval/` (scoring, checks) and `oracle/` (the upper
 | `test_relations_eval.py` | Relation counts on a hand-made pair: subsets a / b / c / c-broad, floor split, GT vs associated universe, new-node parents, several GT parents; aggregation. |
 | `test_real_data.py` | *(slow, needs `data/`)* Renders a real dev frame and compares with its depth; val GT counts reproduce DESIGN §2.2; one dev pair end-to-end with oracle + B0, twice, with identical `metrics`; one dev pair with B1: deterministic, no more false deletions than B0, snapshots valid; one dev pair in perception mode (B1) twice: identical `metrics`, candidate files, valid graphs; B2 on one dev pair in both modes twice (identical `metrics`, valid graphs, relation counts); real CLIP on two crops. |
 
-Run with `uv run pytest -q` (184 tests, ~20 s); the slow ones with `uv run pytest -q -m slow` (10 tests, a few minutes; `test_real_data.py` also runs FULL on one dev pair twice and real DINOv2 on a reference frame).
+Run with `uv run pytest -q` (185 tests, ~20 s); the slow ones with `uv run pytest -q -m slow` (10 tests, a few minutes; `test_real_data.py` also runs FULL on one dev pair twice and real DINOv2 on a reference frame).
 
 ## 8. What is not built yet
 
 Planned in DESIGN §6 and §9 (spec v2), in order:
-- M7: the val run of `lsg m7` (code is done); M8: visualisation (`viz/`) and write-up.
+- M8: visualisation (`viz/`), audit, README and write-up.
 
 Since spec v2 there are two **observation modes**. `perception` (the headline) finds rescan objects from the rescan's own depth and colour. `oracle` (upper bound) uses the rescan's ground-truth objects. Both feed the same change logic.

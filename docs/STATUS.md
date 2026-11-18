@@ -6,17 +6,59 @@ Handoff file between milestone sessions: each milestone is done in a fresh chat.
 
 DESIGN.md (the spec) and DECISIONS.md (the dated log, with the reasons) stay the source of truth. This file is the to-do view on top of them.
 
-## Current state (2026-11-17)
-- **M0 ✅** (commit `dd66381`), **M1 ✅** (commits `5ed8260` code, `b025428` docs), **M2 ✅** (commits `49b9b61` + `4577e4b` code, then the docs commit), **M3 ✅** (commit `6e71d0c` code, then the docs commit), **M4 ✅** (commit `9d67e8b` code, then the docs commit), **M5 ✅** (commit `7cadc26` code, then the docs commit) and **M6 ✅** (code commit "M6: …", then the docs commit) are done.
-- **M7: code done, val run pending.**
-  - Commits: `583abe2` (seen votes need contrast), `6035ace` (immediate commitment, children-follow-parent, thin-metric fix), `754feb1` (`lsg ablate` / `lsg m7`), then the docs commit.
-  - **Next step (Erik, ≈ 5–6 h unattended):** check `uv run python -c "import torch; print(torch.cuda.is_available())"` (it printed False on 2026-11-17), then `uv run lsg m7 --run-id m7_final` from a clean tree. If it stops, rerun the same command: finished rows are reused. Afterwards finish the "Open (to finish M7)" items below.
-- **New rule (Erik, 2026-11-09):** milestone val reports run on `splits/eval_val_small.txt` (20 pairs; `lsg m5` / `lsg m6` default). All 110 `eval_val` pairs only for the final tables (M7: `lsg m7` uses `m7.val_split` = `eval_val`).
-- `origin/main` is at `b237be2` (M3 docs). The M4–M7 commits are on local `main` only; not pushed as of 2026-11-17.
+## Current state (2026-11-18)
+- **M0–M6 ✅** (see Finished), **M7 ✅**.
+  - M7 commits: `583abe2`, `6035ace`, `754feb1` (code), `565fc44` (docs; the val run's commit), `d91ffe1` (no Hub requests once cached), then the M7 docs commit.
+- **Next: M8** — Rerun timeline + top-down figures (`viz/`), audit (§7.4), README, write-up, slides (items below).
+- **Rule (Erik, 2026-11-09):** milestone val reports run on `splits/eval_val_small.txt`; full `eval_val` only for the final tables (done at M7).
+- `origin/main` is at `b237be2` (M3 docs). The M4–M7 commits are on local `main` only; not pushed as of 2026-11-18.
 
 ---
 
 ## Finished
+
+### M7 (2026-11-15/18), acceptance passed — `uv run lsg m7 --run-id m7_final` → `outputs/m7_final/` (`results.md`, `m7_fraction.png`, `m7_tau_free.png`, `m7_ablations.png`, `metrics.json`; git `565fc44`, clean, 111 min)
+
+**Acceptance results:**
+
+| Check | Result |
+|---|---|
+| Results table with CIs, both modes | `outputs/m7_final/results.md` (val 110 pairs: 13 method / ablation rows, τ_free, fraction; relations val + relchange) |
+| Ablation plots | 3 PNGs, inspected |
+| Determinism on one pair | FULL on 0ad2d39b → 0ad2d3a1 twice: 0 differences |
+| Dev regressions | B0 / B1 / B2 vs M5 / M6 dev, FULL-contrast vs M6 dev FULL: 0 differences each (thin keys excluded) |
+| Graphs / tests | 0 invalid graphs; 185 fast tests pass; 10 slow tests pass (run on 2026-11-18 at `565fc44`, before the Hub-offline commit) |
+
+**Val** (removed P / R, false deletion, unchanged kept, moved F1, new P / R; oracle | perception):
+
+| | oracle | perception |
+|---|---|---|
+| B0 | 21.2 / 69.9, 95.0, 80.9, 30.0, 85.0 / 59.6 | 4.2 / 91.8, 95.9, 2.2, 11.9, 3.3 / 12.9 |
+| B1 | 66.0 / 45.2, 9.5, 92.9, 30.0, 85.0 / 59.6 | 17.7 / 57.5, 9.4, 90.4, 11.9, 3.3 / 12.9 |
+| B2 | 57.7 / 41.1, 9.5, 86.6, 54.9, 80.5 / 60.2 | 17.7 / 45.2, 9.5, 92.7, 32.0, 2.4 / 9.4 |
+| **FULL** | 55.6 / 27.4, 8.1, 86.4, 54.6, 81.6 / 59.6 | 24.2 / 32.9, 7.7, 95.3, 31.7, 2.0 / 8.8 |
+| FULL − contrast (= M6) | 54.3 / 26.0, 8.1, 86.6, 54.6, 81.0 / 59.6 | 24.0 / 31.5, 7.7, 95.4, 31.2, 2.0 / 8.8 |
+| FULL − appearance | 55.6 / 27.4, 8.1, 86.7, 54.8, 81.1 / 60.2 | 23.5 / 31.5, 7.9, 95.9, 32.5, 2.4 / 9.4 |
+| FULL − priors | 56.4 / 30.1, 8.4, 86.3, 54.6, 81.6 / 59.6 | 23.7 / 37.0, 8.0, 94.8, 31.7, 2.0 / 8.8 |
+| FULL − decorrelation | 56.1 / 31.5, 9.1, 87.4, 55.4, 82.3 / 59.6 | 24.1 / 37.0, 8.7, 94.9, 31.0, 2.0 / 11.7 |
+| FULL + immediate | 19.6 / 42.5, 9.5, 85.4, 34.5, 50.9 / 64.3 | 19.6 / 42.5, 9.5, 94.1, 18.4, 2.1 / 9.9 |
+
+- τ_free and observed fraction: DECISIONS 2026-11-18. Thin candidates, follow parent and keep-parent rows: `results.md`.
+- Relations (FULL, parent accuracy R0 / R1 / update): val (a) 92.0 / 79.4 / 92.2 (oracle); relchange (c) swapped 0 / 50.0 / 42.9 (n = 14).
+
+**Code:**
+- `geom/render.py` `Renderer.depth_behind`; `change/visibility.py` contrast rule, `NodeVotes.commit_removed_frame`; `change/online.py` `contrast=`;
+- `change/baselines.py` immediate commitment (`committed_removed`), `follow_parent`, `_apply_move`;
+- `eval/gt.py` `min_extent_ref`, `eval/metrics.py` thin by reference AABB;
+- `eval/ablations.py`, `eval/m7_checks.py`, CLI `lsg ablate`, `lsg m7`;
+- `config.setup_hub_offline` (no Hub requests once cached).
+
+**Config:** `visibility.seen_needs_contrast`, `visibility.contrast_eps`, `states.commitment`, `update.children_follow_parent`, `perception.clip.hf_repo`, `models.hub_offline`, block `m7`.
+
+**Tests:** 185 fast + 10 slow pass. New: `test_contrast.py`, `test_m7_variants.py`, `test_ablations.py`, a hub-offline test in `test_config.py`.
+
+**Docs:** DECISIONS "2026-11-15", "2026-11-17 — M7 code", "2026-11-18 — M7 results"; DESIGN §3 / §6 / §8 / CLI / §9; CODE_STRUCTURE; AI_USAGE.
+
 
 ### M6 (2026-11-09), acceptance passed — `uv run lsg m6 --run-id m6_final` → `outputs/m6_final/metrics.json` (OBJ/PLY check, render check + overlays, dev B2 / FULL variants both modes, L_hit sweep, val FULL both modes on the full `eval_val`)
 
@@ -317,39 +359,14 @@ DESIGN.md (the spec) and DECISIONS.md (the dated log, with the reasons) stay the
 
 ## Open items by milestone
 
-### M7 — ablations (code done 2026-11-17; the val run is open)
-**Done in code** (DECISIONS "2026-11-17 — M7 code"):
-- Seen votes need contrast (FULL only): `Renderer.depth_behind` (`list_intersections`), `frame_votes(d_behind=)`, `run_online(contrast=)`, `visibility.seen_needs_contrast`. Tests `test_contrast.py`. Dev: FULL with the switch off = `m6_final/dev_FULL` (0 differences); B2 = `m6_final/dev_B2` (0); contrast on changes dev only marginally (1 removed object on dev).
-- Immediate commitment (removal only, `states.commitment`), children follow parent (`update.children_follow_parent`), thin metric by reference AABB. Tests `test_m7_variants.py`.
-- `lsg ablate`, `lsg m7`: all §8 rows (methods, component ablations, variants, τ_free, fraction × 3 seeds, relchange), `results.md` with CIs, 3 plots, determinism on one dev pair, resume. Tests `test_ablations.py`.
-- 184 fast tests pass. The slow tests were **not** run in this session (> 1 min, Erik's instruction). Run `uv run pytest -q -m slow` before the final M7 commit; they cover FULL on a dev pair, now with contrast on.
-
-**Open (to finish M7):**
-- Run `uv run lsg m7 --run-id m7_final` (above). Acceptance = every check in the `acceptance` block:
-  - dev regressions;
-  - 0 invalid graphs;
-  - determinism on one pair;
-  - `results.md` written;
-  - val on all 110 pairs;
-  - 3 plots.
-- Inspect the 3 plots and `results.md`, then paste the acceptance output into the commit. Update DESIGN §9 (M7 row), DECISIONS (val results, reported once), CODE_STRUCTURE state line, AI_USAGE (GPU time).
-- Expected readouts to check, and to report rather than tune:
-  - FULL vs FULL-contrast removed R / false deletion (the 2026-11-15 question);
-  - unchanged strict accuracy may drop with contrast (fewer confirmed-in-place nodes);
-  - appearance on / off small (2–5 thin removed objects on val);
-  - thin candidates mostly false new nodes (val 0.9 per pair, 16% explained at M6);
-  - B1-decorr vs B1 (decorrelation story).
-- **GPU**: DINOv2 / CLIP features are cached for val at full frames, and fraction chunks and τ_free reuse the same frames' similarities. A CPU run should therefore mostly hit the cache, but cold misses on CPU are ~4× slower. FULL val with 4 workers peaked at 3.6 / 4 GB at M6 (`--workers 3` if CUDA runs out of memory).
-
-**Carried over (not part of the M7 rows; report as limitations or later work):**
-- **Perception association stays near B0** (val FULL 2.9% strict at M6): unchanged objects produce no candidates. Expected; the change metrics are what matter.
-- **False candidates** (from M4): val 8.7 candidates per pair, 42.7% explained by GT (plants, black TV screens, clutter); perception new P 2.0% (FULL).
-- **τ_move / τ_assoc sweeps** (not in §8): oracle unchanged kept 86.6% (B1 92.9%) because τ_move = 0.10 m turns ICP noise into small moves; dev-only sweeps exist from M5.
-- **Perception same-label swaps** and **small moves become `removed`** (M5 dev diagnosis); visible in the moved recall [0.1, 0.3) bucket.
-- **Relation type accuracy** (R1 83.4% given the parent, `on` vs `in` on shelves / cabinets); **anchors carry no support edge**.
-- **Door filter cost** and **`min_voxels`** (M4 items).
-- `configs/default.yaml` `m1.meta_only_splits` still lists relchange as metadata-only (optional `lsg m1` GT pass; the relation eval does not depend on it).
-- Optional DINOv2 association term (old B3): not done (cut-list item 1).
+### Carried over from M7 (report as limitations or later work)
+- **Contrast did not fix the confidence veto** (removed R +1 object per mode). Use the §7.4 audit to check what the vetoed GT-removed objects really are: replacements, partial removals, or GT errors.
+- **Perception association stays near B0** (val FULL ~3% strict): unchanged objects produce no candidates.
+- **False candidates:** 8.7 per pair, 43% explained by GT (plants, black TV screens, clutter); perception new P 2.0%.
+- **τ_move / τ_assoc sweeps** (not in §8): oracle unchanged kept 86.4% (B1 92.9%) because τ_move = 0.10 m turns ICP noise into small moves.
+- **Perception same-label swaps** and **small moves become `removed`** (M5 dev diagnosis).
+- **Relation type accuracy** (R1 83% given the parent, `on` vs `in`); **anchors carry no support edge**.
+- **Door filter cost** and **`min_voxels`** (M4); optional DINOv2 association term (old B3) not done.
 
 ### M8 — write-up
 - State in the limitations: **12 door swings in val are articulation changes, out of scope** (not scored; doors are structure, §3).
@@ -372,5 +389,5 @@ DESIGN.md (the spec) and DECISIONS.md (the dated log, with the reasons) stay the
   3. *optionally*, after M7, add a separate "door open/closed changed" diagnostic on door nodes (n = 12 in val), not mixed into moved F1.
 
   Erik has not decided on point 3 yet.
-- **AI_USAGE.md:** "Erik: (fill in)" is still open for the M0, M1, M2, M3, M4, M5 and M6 rows.
+- **AI_USAGE.md:** "Erik: (fill in)" is still open for the M0–M7 rows.
 - **DECISIONS 2026-11-05 "Milestones re-scoped to M1–M8"** is still marked "provisional — Erik to confirm".
