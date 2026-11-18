@@ -175,6 +175,55 @@ def _cmd_graph(args: argparse.Namespace) -> int:
     return 0 if not problems else 1
 
 
+def _run_dir(run: str):
+    """`--run`: a directory, or a run id under the outputs root."""
+    from pathlib import Path
+
+    from lsg.config import outputs_root
+
+    p = Path(run)
+    return p if p.is_dir() else outputs_root(load_config(None)) / run
+
+
+def _cmd_viz_topdown(args: argparse.Namespace) -> int:
+    """`lsg viz topdown --run DIR --pair R S --mode M [--gt]`: before/after PNG of one pair (M8)."""
+    from lsg.eval.figures import topdown_for_pair
+
+    cfg = load_config(args.config)
+    run = _run_dir(args.run)
+    ref, s = args.pair
+    for mode in _modes(args.mode):
+        g = run / "graphs" / mode / f"{ref}_{s}.json"
+        if not g.is_file():
+            print(f"no graph {g}")
+            return 1
+        out = args.out or run / "viz" / f"{ref}_{s}_{mode}_topdown.png"
+        p = topdown_for_pair(cfg, g, ref, s, out, with_gt=args.gt, edges=args.edges)
+        print(f"wrote {p}")
+    return 0
+
+
+def _cmd_viz_rerun(args: argparse.Namespace) -> int:
+    """`lsg viz rerun --run DIR --pair R S --mode M`: Rerun recording of the online walk (M8)."""
+    from lsg.config import data_root
+    from lsg.viz.rerun_timeline import rerun_timeline
+
+    cfg = load_config(args.config)
+    run = _run_dir(args.run)
+    ref, s = args.pair
+    for mode in _modes(args.mode):
+        snap = run / "snapshots" / mode / f"{ref}_{s}"
+        if not (snap / "seq_info.json").is_file():
+            print(f"no snapshots with seq_info.json in {snap} (rerun `lsg run` with snapshots)")
+            return 1
+        g = run / "graphs" / mode / f"{ref}_{s}.json"
+        out = args.out or run / "viz" / f"{ref}_{s}_{mode}.rrd"
+        p = rerun_timeline(data_root(cfg), snap, out, graph_final=g if g.is_file() else None, images=args.images,
+                           spawn=args.spawn)  # fmt: skip
+        print(f"wrote {p}" + ("" if args.spawn else f"  (view: uv run rerun {p})"))
+    return 0
+
+
 def _modes(s: str) -> list[str]:
     """`"perception,oracle"` -> `["perception", "oracle"]`."""
     return [m.strip() for m in s.split(",") if m.strip()]
@@ -199,8 +248,11 @@ def _cmd_run(args: argparse.Namespace) -> int:
     """`lsg run --pair R S --obs oracle --method B0`: one pair, same outputs as `lsg eval`."""
     from lsg.eval.harness import format_summary, run_eval
 
+    cfg = load_config(args.config)
+    if args.snapshot_every is not None:  # snapshot interval only; votes and states do not depend on it
+        cfg["online"]["snapshot_every"] = int(args.snapshot_every)
     try:
-        res = run_eval(load_config(args.config), [tuple(args.pair)], obs_modes=_modes(args.obs),
+        res = run_eval(cfg, [tuple(args.pair)], obs_modes=_modes(args.obs),
                        method=args.method, frac=args.frac, seed=args.seed, workers=1,
                        run_id=args.run_id, split_name=f"pair {args.pair[0]} {args.pair[1]}",
                        snapshots=not args.no_snapshots)  # fmt: skip
@@ -298,6 +350,24 @@ def main(argv: list[str] | None = None) -> int:
     gr.add_argument("--config", default=None)
     gr.set_defaults(func=_cmd_graph)
 
+    vz = sub.add_parser("viz", help="figures: top-down before/after, Rerun timeline (M8)")
+    vzs = vz.add_subparsers(dest="viz_cmd", required=True)
+    for vname, vhelp in (("topdown", "before/after PNG of one pair"), ("rerun", "Rerun .rrd of the online walk")):
+        v = vzs.add_parser(vname, help=vhelp)
+        v.add_argument("--run", required=True, help="run directory or run id (e.g. outputs/m7_final/val/FULL)")
+        v.add_argument("--pair", nargs=2, required=True, metavar=("REF", "RESCAN"))
+        v.add_argument("--mode", default="perception,oracle", help="comma list of oracle,perception")
+        v.add_argument("--out", default=None, help="output file (one mode only)")
+        v.add_argument("--config", default=None)
+        if vname == "topdown":
+            v.add_argument("--gt", action="store_true", help="add the GT panel (reads rescan annotations, eval side)")
+            v.add_argument("--edges", action="store_true", help="draw support edges")
+            v.set_defaults(func=_cmd_viz_topdown)
+        else:
+            v.add_argument("--images", action="store_true", help="log the colour images too")
+            v.add_argument("--spawn", action="store_true", help="open the Rerun viewer")
+            v.set_defaults(func=_cmd_viz_rerun)
+
     for name, helptext in (("eval", "run a method on a split and score it (DESIGN §7)"),
                            ("run", "run a method on one (reference, rescan) pair and score it")):
         sp_ = sub.add_parser(name, help=helptext)
@@ -309,6 +379,8 @@ def main(argv: list[str] | None = None) -> int:
         else:
             sp_.add_argument("--pair", nargs=2, required=True, metavar=("REF", "RESCAN"))
             sp_.add_argument("--no-snapshots", action="store_true", help="skip tentative snapshots")
+            sp_.add_argument("--snapshot-every", type=int, default=None,
+                             help="snapshot every N processed frames (default: config online.snapshot_every)")
             sp_.set_defaults(func=_cmd_run)
         sp_.add_argument("--obs", default="oracle", help="comma list of oracle,perception (e.g. perception,oracle)")
         sp_.add_argument("--method", default="B0", help="B0 | B1 | B2 | FULL")

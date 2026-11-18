@@ -193,6 +193,8 @@ def run_online(
     snaps: list[Path] = []
     t_render = t_obs = 0.0
 
+    if snap_dir is not None:
+        _write_seq_info(snap_dir, ref_ctx.scan_id, seq_info)
     obs_source.begin(ref_ctx, seq_info)
     k = 0
     last_idx = None
@@ -255,3 +257,15 @@ def _snapshot(G_ref, votes, frame_idx, cfg, seq_info, obs_mode, snap_dir: Path, 
     """Write one tentative snapshot and return its path."""
     G = tentative_graph(G_ref, votes, frame_idx, cfg, seq_info.rescan_id, obs_mode, priors)
     return G.save(snap_dir / f"frame_{int(frame_idx):06d}.json")
+
+
+def _write_seq_info(snap_dir: Path, ref_id: str, seq_info: SeqInfo) -> Path:
+    """`seq_info.json` next to the snapshots: refined `T_align` + processed frames (for `lsg viz rerun`)."""
+    import json
+
+    snap_dir.mkdir(parents=True, exist_ok=True)
+    p = snap_dir / "seq_info.json"
+    p.write_text(json.dumps({"ref": ref_id, "rescan": seq_info.rescan_id,
+                             "T_align": np.asarray(seq_info.T_align, float).tolist(),
+                             "frame_ids": [int(i) for i in seq_info.frame_ids]}), encoding="utf-8")  # fmt: skip
+    return p

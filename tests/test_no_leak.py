@@ -14,7 +14,7 @@ import pytest
 
 SRC = Path(__file__).resolve().parents[1] / "src" / "lsg"
 FORBIDDEN_PKGS = ("lsg.oracle", "lsg.eval")
-METHOD_SIDE = ["perception", "obs", "change", "graph", "geom", "io", "classes.py", "config.py", "runinfo.py",
+METHOD_SIDE = ["perception", "obs", "change", "graph", "geom", "io", "viz", "classes.py", "config.py", "runinfo.py",
                "train_meta.py"]
 # rescan-annotation access that perception must never contain
 FORBIDDEN_CALLS = {"load_scan", "load_relations", "load_objects", "gt_changes"}
