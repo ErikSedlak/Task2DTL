@@ -301,6 +301,7 @@ def score_pair(
     label_nyu: Mapping[str, int] | None = None,
     votes: Mapping[str, Any] | None = None,
     candidates: Sequence[Any] | None = None,
+    details: bool = False,
 ) -> dict[str, Any]:
     """Counts of one pair (module docstring for the definitions).
 
@@ -320,9 +321,12 @@ def score_pair(
             objects with >= `states.k_free` counted free votes, and absent-unlisted objects
             with any counted seen vote (`diag_votes` = 1 if votes were given).
         candidates: Perception `ObsInstance`s; adds the `candidate_counts` diagnostics.
+        details: Also return per-object rows (`"objects"`: GT status, predicted state, confidence,
+            counted votes, associated token's GT instance; `"new"`: per predicted new node its
+            outcome). For the §7.4 audit (M8); the counts do not depend on it.
 
     Returns:
-        `{"counts": {name: int}, "loc_errors": [m], "new_match": match_new(...)}`.
+        `{"counts": {name: int}, "loc_errors": [m], "new_match": match_new(...)}` (+ `objects`, `new`).
     """
     ecfg = cfg["eval"]
     edges = [float(b) for b in ecfg["disp_buckets"]]
@@ -438,7 +442,40 @@ def score_pair(
         c[f"new_tp_{g.size}"] += gid in matched
     if candidates is not None:
         c.update(candidate_counts(candidates, gt, cfg, label_nyu))
-    return {"counts": {k: int(v) for k, v in c.items()}, "loc_errors": loc, "new_match": m}
+    out: dict[str, Any] = {"counts": {k: int(v) for k, v in c.items()}, "loc_errors": loc, "new_match": m}
+    if details:
+        out["objects"] = object_rows(G_upd, gt, truth, vts)
+        outcome = {**{i: "tp" for i in m["tp"]}, **{i: "fp" for i in m["fp"]}, **{i: "ignored" for i in m["ignored"]}}
+        out["new"] = [{"id": n.id, "label": n.label, "outcome": outcome.get(n.id), "gt_id": m["tp"].get(n.id),
+                       "confidence": n.confidence, "obs_token": n.obs_token,
+                       "gt_token": list(truth[n.obs_token]) if n.obs_token in truth else None,
+                       "bbox_3d": n.bbox_3d, "centroid": n.centroid} for n in pred_new]  # fmt: skip
+    return out
+
+
+def object_rows(G_upd: Graph, gt: GTLabels, truth: Mapping[str, tuple[int, str]],
+                votes: Mapping[str, Any]) -> list[dict[str, Any]]:  # fmt: skip
+    """Per reference object: GT status vs prediction, with the evidence behind it (audit, M8)."""
+    nodes = G_upd.node_map()
+    rows = []
+    for oid, o in sorted(gt.objects.items()):
+        n = nodes.get(ref_node_id(oid))
+        if n is None:
+            continue
+        v = votes.get(n.id)
+        t = truth.get(n.obs_token) if n.obs_token else None
+        rows.append({
+            "oid": int(oid), "node": n.id, "label": o.label, "level": o.level, "size": o.size,
+            "gt_status": o.status, "gt_reason": o.reason, "displacement": o.displacement,
+            "pred_state": n.state, "confidence": n.confidence, "obs_token": n.obs_token,
+            "obs_gt": list(t) if t is not None else None,
+            "votes": None if v is None else {"seen": v.seen, "free": v.free, "free_like": v.free_like,
+                                             "raw_seen": v.raw_seen, "raw_free": v.raw_free, "noinfo": v.noinfo},
+            "bbox_3d": n.bbox_3d, "centroid": n.centroid,
+            "gt_aabb_new": None if o.aabb_new_min is None else [list(map(float, o.aabb_new_min)),
+                                                               list(map(float, o.aabb_new_max))],
+        })  # fmt: skip
+    return rows
 
 
 # --------------------------------------------------------------------------------------------

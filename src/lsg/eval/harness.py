@@ -195,7 +195,11 @@ def _eval_group(task: dict[str, Any]) -> list[dict[str, Any]]:
                 policies = list(POLICIES) if score_rel else [main_policy]
                 graphs = {p: update_graph(G_states, ctx, obs, cfg, p) for p in policies}
                 G_upd = graphs[main_policy]
-                sc = score_pair(G_upd, gt, mode, cfg, obs_truth=truth, votes=online.votes, **score_kw)
+                sc = score_pair(G_upd, gt, mode, cfg, obs_truth=truth, votes=online.votes,
+                                details=bool(task.get("details")), **score_kw)  # fmt: skip
+                if task.get("details") and task.get("run_dir"):
+                    _write_details(Path(task["run_dir"]) / "details" / mode / f"{ref}_{s}.json", ref, s, mode, info,
+                                   sc)  # fmt: skip
                 if gs_S is not None:
                     for p, G_p in graphs.items():
                         sc["counts"].update(score_relations(G_p, gt, gs_S, pkinds, sc["new_match"]["tp"], truth,
@@ -231,6 +235,15 @@ def _eval_group(task: dict[str, Any]) -> list[dict[str, Any]]:
     return out
 
 
+def _write_details(path: Path, ref: str, rescan: str, mode: str, info: Any, sc: dict[str, Any]) -> None:
+    """Per-object outcomes of one pair and mode (§7.4 audit, M8): `details/<mode>/<pair>.json`."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    blob = {"ref": ref, "rescan": rescan, "mode": mode, "T_align": [[float(v) for v in r] for r in info.T_align],
+            "frame_ids": [int(i) for i in info.frame_ids], "objects": sc["objects"], "new": sc["new"],
+            "gt_new_fn": [int(i) for i in sc["new_match"]["fn"]]}  # fmt: skip
+    path.write_text(json.dumps(blob, indent=1, default=float), encoding="utf-8")
+
+
 def run_eval(
     cfg: dict[str, Any],
     pairs: Sequence[tuple[str, str]],
@@ -242,6 +255,7 @@ def run_eval(
     run_id: str | None = None,
     split_name: str = "pairs",
     snapshots: bool = False,
+    details: bool = False,
 ) -> dict[str, Any]:
     """Run `method` on `pairs` in each mode, score, write `outputs/<run_id>/metrics.json`.
 
@@ -256,6 +270,8 @@ def run_eval(
         run_id: Output folder name (default timestamped).
         split_name: Recorded in the metrics.
         snapshots: Write tentative snapshots to `outputs/<run_id>/snapshots/<mode>/<ref>_<rescan>/`.
+        details: Write per-object outcomes to `outputs/<run_id>/details/<mode>/<ref>_<rescan>.json`
+            (§7.4 audit, M8). A run argument, not config: the config hash and `metrics` do not change.
 
     Returns:
         The `metrics` block plus `"metrics_path"` and `"wall_time_s"`.
@@ -273,7 +289,7 @@ def run_eval(
     clip_threads = max(1, (os.cpu_count() or 1) // n_proc) if n_proc > 1 else None
     tasks = [{"cfg": cfg, "ref": r, "rescans": ss, "modes": list(obs_modes), "method": method,
               "frac": float(frac), "seed": int(seed), "run_dir": str(run_dir),
-              "snapshots": bool(snapshots), "clip_threads": clip_threads}
+              "snapshots": bool(snapshots), "details": bool(details), "clip_threads": clip_threads}
              for r, ss in sorted(groups.items(), key=lambda kv: -len(kv[1]))]  # fmt: skip
     results: list[dict[str, Any]] = []
     if n_workers <= 1 or len(tasks) == 1:

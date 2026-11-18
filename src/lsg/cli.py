@@ -224,6 +224,32 @@ def _cmd_viz_rerun(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_audit_sample(args: argparse.Namespace) -> int:
+    """`lsg audit sample`: FULL on val with per-object details, FP pools, seeded sample, panels, CSVs (§7.4)."""
+    from lsg.eval.audit import run_audit_sample
+
+    res = run_audit_sample(load_config(args.config), args.run_id, split=args.split, from_run=args.from_run,
+                           compare=None if args.no_compare else args.compare, b2_run=args.b2_run,
+                           n_per_cat=args.n, seed=args.seed, workers=args.workers, max_pairs=args.max_pairs)  # fmt: skip
+    for k, v in res["pool_sizes"].items():
+        print(f"  pool {k:22s} {v}")
+    c = res["consistency"]
+    if c:
+        print(f"  metrics identical to {c['compared_to']}: {c['identical']}")
+    print(f"wrote {res['n_rows']} sampled rows + {res['n_veto']} veto rows -> {res['out_dir']}/audit.csv, "
+          f"audit_veto.csv, panels/  (fill in 'verdict': gt_missing | method_error | unclear)")
+    return 0 if not c or c["identical"] else 1
+
+
+def _cmd_audit_summarize(args: argparse.Namespace) -> int:
+    """`lsg audit summarize`: share of GT gaps among the labelled false positives."""
+    from lsg.eval.audit import run_audit_summarize
+
+    res = run_audit_summarize(load_config(args.config), args.run_id)
+    print(res["markdown"])
+    return 0
+
+
 def _modes(s: str) -> list[str]:
     """`"perception,oracle"` -> `["perception", "oracle"]`."""
     return [m.strip() for m in s.split(",") if m.strip()]
@@ -349,6 +375,26 @@ def main(argv: list[str] | None = None) -> int:
     gr.add_argument("--out", default=None)
     gr.add_argument("--config", default=None)
     gr.set_defaults(func=_cmd_graph)
+
+    au = sub.add_parser("audit", help="§7.4 GT audit: sample false positives, summarise verdicts (M8)")
+    aus = au.add_subparsers(dest="audit_cmd", required=True)
+    a1 = aus.add_parser("sample", help="FULL on val with details, FP pools, sample, panels, CSVs")
+    a1.add_argument("--run-id", default="m8_audit")
+    a1.add_argument("--split", default="eval_val")
+    a1.add_argument("--from-run", default=None, help="reuse a run with details/ instead of running FULL")
+    a1.add_argument("--compare", default="m7_final/val/FULL", help="run whose metrics FULL must reproduce")
+    a1.add_argument("--no-compare", action="store_true")
+    a1.add_argument("--b2-run", default="m7_final/val/B2", help="run with B2 graphs (veto set)")
+    a1.add_argument("--n", type=int, default=10, help="sample size per mode and category")
+    a1.add_argument("--seed", type=int, default=0)
+    a1.add_argument("--workers", type=int, default=None)
+    a1.add_argument("--max-pairs", type=int, default=None, help="first N pairs only (dry run, no compare)")
+    a1.add_argument("--config", default=None)
+    a1.set_defaults(func=_cmd_audit_sample)
+    a2 = aus.add_parser("summarize", help="verdict shares from the labelled audit.csv / audit_veto.csv")
+    a2.add_argument("--run-id", default="m8_audit")
+    a2.add_argument("--config", default=None)
+    a2.set_defaults(func=_cmd_audit_summarize)
 
     vz = sub.add_parser("viz", help="figures: top-down before/after, Rerun timeline (M8)")
     vzs = vz.add_subparsers(dest="viz_cmd", required=True)
