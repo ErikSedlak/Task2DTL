@@ -7,11 +7,16 @@ Handoff file between milestone sessions: each milestone is done in a fresh chat.
 DESIGN.md (the spec) and DECISIONS.md (the dated log, with the reasons) stay the source of truth. This file is the to-do view on top of them.
 
 ## Current state (2026-11-18)
-- **M0–M6 ✅** (see Finished), **M7 ✅**.
-  - M7 commits: `583abe2`, `6035ace`, `754feb1` (code), `565fc44` (docs; the val run's commit), `d91ffe1` (no Hub requests once cached), then the M7 docs commit.
-- **Next: M8** — Rerun timeline + top-down figures (`viz/`), audit (§7.4), README, write-up, slides (items below).
+- **M0–M7 ✅** (see Finished). **M8: code, README, report and slides done; acceptance pending** (Erik's runs, below).
+  - M8 commits: `96b85b4` (viz), `6dc69db` (audit), `f1e296a` / `fff1775` (README, report), `d00c0ec` (slides), then the M8 docs commit.
+- **To finish M8** (in this order):
+  1. Erik: `uv run lsg audit sample --run-id m8_audit` (≈ 3.5 min FULL val + ≈ 85 panels; must print "metrics identical … True"), then fill `verdict` (`gt_missing | method_error | unclear`) and `note` in `outputs/m8_audit/audit.csv` and `audit_veto.csv`, looking at `outputs/m8_audit/panels/`.
+  2. Claude: `uv run lsg audit summarize --run-id m8_audit` → numbers into REPORT §6 (placeholder) and slide 11 (`docs/slides/build_deck.js`, rebuild), STATUS / DECISIONS.
+  3. Erik: **acceptance check**: fresh `git clone` into an empty folder → `uv sync` → `LSG_DATA` = the data folder → the README §3 command (cold `cache/`). Compare with README "expected result" (Claude can diff the graphs against `outputs/m7_final/dev/FULL/graphs`); paste the output into the final M8 commit.
+  4. Erik: one "checked by hand" line per milestone for AI_USAGE.md (M0–M8); then DESIGN §9 M8 ✅.
+  5. Optional: a Rerun screenshot (`lsg viz rerun … --spawn`) for the report / slides.
 - **Rule (Erik, 2026-11-09):** milestone val reports run on `splits/eval_val_small.txt`; full `eval_val` only for the final tables (done at M7).
-- `origin/main` is at `b237be2` (M3 docs). The M4–M7 commits are on local `main` only; not pushed as of 2026-11-18.
+- `origin/main` is at `b237be2` (M3 docs). The M4–M8 commits are on local `main` only; not pushed as of 2026-11-18.
 
 ---
 
@@ -368,26 +373,16 @@ DESIGN.md (the spec) and DECISIONS.md (the dated log, with the reasons) stay the
 - **Relation type accuracy** (R1 83% given the parent, `on` vs `in`); **anchors carry no support edge**.
 - **Door filter cost** and **`min_voxels`** (M4); optional DINOv2 association term (old B3) not done.
 
-### M8 — write-up
-- State in the limitations: **12 door swings in val are articulation changes, out of scope** (not scored; doors are structure, §3).
-- State that **val was run twice at M5** (the nyu40 catch-all fix and the keep-parent rule were triggered by the first val run; DECISIONS M5), and report the first run's numbers too.
-- **Audit cases from M6** (§7.4): r50 pillow (GT removed; a white pillow replaced a blue-grey one, depth and DINOv2 see "a pillow"), r68 robot vacuum (absent-unlisted, really gone: appearance deletes it correctly), r69 shoes (displaced).
-- **Spec deviations to state:** confidence values rescaled (spec values could never delete); thin = 0.15 m; appearance distances relative to the frame median; node-level appearance vote (DECISIONS M6).
-- R0 (stale relations) is a strong baseline on 3RScan: most moved things keep their parent (val (b) R0 94.0% vs update 86.3%); (c) swapped has n = 3 on val.
-- `next_to` (AABB gap ≤ 0.15 m) is provisional and exported only.
-- Mention the GT findings:
-  - 36% of val moves are < 10 cm;
-  - "new" = 224 raw / 171 scored;
-  - most "parent changes" are annotation gaps.
+### M8 — done in the write-up (docs/REPORT.md §2, §4, §6, §8)
+All items that were listed here are in the report: door swings out of scope; val run twice at M5 with the first run's numbers; the M6 audit cases (r50, r68, r69); spec deviations; R0 strong; `next_to` provisional; GT findings; the M7 carry-overs as limitations.
+
+### M8 — still open
+- Audit results (§7.4) into REPORT §6 and slide 11 (after Erik's labels).
+- Acceptance check (clean clone) and AI_USAGE lines (Erik).
 
 ---
 
 ## Decisions needed from Erik
-- **Doors / articulation.** Current: unscored (structure, §3/§5), recorded as out of scope. Claude's recommendation:
-  1. keep doors out of the change metrics;
-  2. add the M4 door filter;
-  3. *optionally*, after M7, add a separate "door open/closed changed" diagnostic on door nodes (n = 12 in val), not mixed into moved F1.
-
-  Erik has not decided on point 3 yet.
-- **AI_USAGE.md:** "Erik: (fill in)" is still open for the M0–M7 rows.
+- **Doors / articulation:** decided 2026-11-18, the door diagnostic is skipped and stated as a limitation (DECISIONS M8). Closed.
+- **AI_USAGE.md:** "Erik: (fill in)" is still open for the M0–M8 rows (Erik sends the lines at the end of M8).
 - **DECISIONS 2026-11-05 "Milestones re-scoped to M1–M8"** is still marked "provisional — Erik to confirm".

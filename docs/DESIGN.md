@@ -326,16 +326,18 @@ Per pair (ref R, rescan S). O_R and O_S are the objectIds in their semseg files.
     - `metrics.score_pair(G_upd, gt, mode, cfg, obs_truth)` → per-pair counts, and `metrics.aggregate` (micro-average + bootstrap CI), including localisation error and size buckets ✅ (the spec's `score_changes`);
     - `harness.run_eval` / `run_split` (`lsg eval`, `lsg run`) ✅;
     - `relations.score_relations(G, gt, gs_S, parent_kinds, new_tp, obs_truth, prefix)` ✅ (M5; §7.2 counts per policy, subset, universe and floor split);
-    - `audit_sample(...)` writes image crops for manual FP review.
-14. `viz`
-    - `rerun_timeline(snapshots, meshes)`: snapshots on a frame timeline, nodes coloured by (tentative) state;
-    - `topdown_png(G_ref, G_upd)`: static before/after figure for slides/report.
+    - `audit` ✅ (M8; `lsg audit sample | summarize`): a FULL val rerun with per-object details (`run_eval(details=True)`, `score_pair(details=True)`; must reproduce the M7 FULL `metrics`), false-positive pools per mode (moved / removed incl. absent-unlisted, unmatched new) + the confidence-veto set, a seeded sample of 10 per mode × category, one photo panel per case (reference view, rescan at the old place, rescan at the predicted place, top-down), `audit.csv` for manual verdicts (`gt_missing | method_error | unclear`), Wilson CIs; `figures.gt_panel` / `topdown_for_pair` (GT panel for the top-down figure).
+14. `viz` ✅ (M8; reads method inputs / outputs only, no `oracle` / `eval` imports)
+    - `rerun_timeline.rerun_timeline(root, snap_dir, out, graph_final, images)`: `.rrd` with the reference mesh, the rescan camera (pinhole + trajectory) on a `frame` timeline, node boxes by tentative state per snapshot, and the final graph with old→new arrows. `run_online` writes `seq_info.json` (refined `T_align`, frame ids) next to the snapshots;
+    - `topdown.topdown_png(G_ref, G_upd, out, outline, gt)`: before / after (/ GT) footprints, coloured by state (dataviz palette, DECISIONS M8).
 
 CLI:
 - `uv run lsg run --pair R S --obs perception,oracle --method full --frac 1.0 --seed 0 [--no-snapshots]` ✅ (both modes, B0 / B1; writes snapshots; perception also writes `candidates/<ref>_<rescan>.json`);
 - `uv run lsg eval --split eval_val --obs perception,oracle --method … [--workers N] [--snapshots]` ✅ (both modes, B0 / B1);
 - `uv run lsg ablate --names <rows|all|group:…> --split eval_val [--obs …] [--run-id …] [--list]` ✅ (M7; one metrics.json per row, `eval.ablations`);
 - `uv run lsg m7 [--run-id m7_final] [--dev-only] [--no-sweep] [--no-frac] [--no-relchange] [--no-determinism] [--no-resume] [--workers N]` ✅ (M7; all rows, tables, plots; a rerun with the same id resumes rows made from the same config + clean git commit);
+- `uv run lsg viz topdown --run <dir> --pair R S [--mode …] [--gt]` ✅, `uv run lsg viz rerun --run <dir> --pair R S [--images] [--spawn]` ✅ (M8); `lsg run --snapshot-every N` ✅;
+- `uv run lsg audit sample [--run-id m8_audit] [--from-run …] [--n 10]` ✅, `uv run lsg audit summarize` ✅ (M8, §7.4);
 - `uv run lsg splits textures` ✅;
 - `uv run lsg graph --scan R --mode gt|geometric [--out f.json]` ✅;
 - `uv run lsg m0` ✅, `uv run lsg m1` ✅, `uv run lsg m4 [--no-sweep]` ✅, `uv run lsg m5 [--no-sweep] [--no-val]` ✅, `uv run lsg m6 [--no-sweep] [--no-val] [--no-objply]` ✅;

@@ -1,12 +1,12 @@
 # Code structure — what is where and what it does
 
-State: end of milestone M7 (2026-11-18). Covers everything in `src/lsg/`, `tests/` and `configs/`. For *why* things are done this way, see `DESIGN.md` (the spec) and `DECISIONS.md` (the log); this file only explains *what* the code does.
+State: milestone M8 (2026-11-18). Covers everything in `src/lsg/`, `tests/` and `configs/`. For *why* things are done this way, see `DESIGN.md` (the spec) and `DECISIONS.md` (the log); this file only explains *what* the code does.
 
 ## 1. The project in one paragraph
 
 3RScan contains rooms that were scanned several times. The first scan of a room is the **reference**; later visits are **rescans**. Between visits, furniture moves, objects disappear and new ones appear. The goal is to take the reference room's scene graph (objects + "cup is on the table" relations), look at a rescan's camera frames, and update the graph: which objects are unchanged, moved, removed, unknown (not seen) or new.
 
-M0 built the foundation: reading the data, drawing ("rendering") a scanned room from any camera position, lining up the rescan with the reference, and checking on real data that all of this is correct. M1 added the reference scene graph (objects + support relations, from annotations or from geometry) and the ground truth of what changed between two visits. M2 added the observation interface (what the method sees of a rescan), the oracle version of it, the first (naive) change detector B0, and the scoring harness `lsg eval`. M3 added the online frame loop: every rescan frame is compared with the rendered reference, each object gets "seen" / "seen through" votes, votes from nearly the same camera position count once, and B1 deletes an object only if it was seen through from at least two different viewpoints. Otherwise the object becomes `unknown`. M4 added perception mode: the method finds rescan objects itself, from places where the measured depth is nearer than the rendered reference (something new stands there), keeps only spots seen from several viewpoints, groups them into candidate objects and names each one with CLIP from colour crops. M5 added B2: objects confirmed in place keep their place (and claim the observations lying inside them), the rest are paired with observations by an optimal assignment on label, size and position, and a paired object counts as moved only if aligning its reference shape onto the observation (ICP) moves it more than 10 cm. After that, "what stands on what" is recomputed for objects that moved, are new, or lost their support, and the relations are scored against the rescan's annotation. M6 added FULL: every object gets a confidence (how likely it still exists), starting from how often objects of its class disappear in the training rooms and moved by its "seen" / "seen through" votes; an object is deleted only if the confidence drops below 20%. It also added an appearance check: the reference room's photo texture is drawn from the rescan camera and compared with the real photo (DINOv2 features), which tells whether a flat object (book, towel, pillow) is still there where depth cannot, and finds new flat objects lying on tables or the floor. M7 made FULL's "seen" votes stricter: a pixel only counts as "still there" if the room behind the object is far enough away that its absence would show in the depth (a pillow lying on a sofa looks the same whether it is there or not). M7 also added two experimental switches (deciding "removed" immediately instead of at the end; unseen things moving along with the furniture they stand on) and the machinery that runs every experiment (ablation) and writes the final results tables and plots.
+M0 built the foundation: reading the data, drawing ("rendering") a scanned room from any camera position, lining up the rescan with the reference, and checking on real data that all of this is correct. M1 added the reference scene graph (objects + support relations, from annotations or from geometry) and the ground truth of what changed between two visits. M2 added the observation interface (what the method sees of a rescan), the oracle version of it, the first (naive) change detector B0, and the scoring harness `lsg eval`. M3 added the online frame loop: every rescan frame is compared with the rendered reference, each object gets "seen" / "seen through" votes, votes from nearly the same camera position count once, and B1 deletes an object only if it was seen through from at least two different viewpoints. Otherwise the object becomes `unknown`. M4 added perception mode: the method finds rescan objects itself, from places where the measured depth is nearer than the rendered reference (something new stands there), keeps only spots seen from several viewpoints, groups them into candidate objects and names each one with CLIP from colour crops. M5 added B2: objects confirmed in place keep their place (and claim the observations lying inside them), the rest are paired with observations by an optimal assignment on label, size and position, and a paired object counts as moved only if aligning its reference shape onto the observation (ICP) moves it more than 10 cm. After that, "what stands on what" is recomputed for objects that moved, are new, or lost their support, and the relations are scored against the rescan's annotation. M6 added FULL: every object gets a confidence (how likely it still exists), starting from how often objects of its class disappear in the training rooms and moved by its "seen" / "seen through" votes; an object is deleted only if the confidence drops below 20%. It also added an appearance check: the reference room's photo texture is drawn from the rescan camera and compared with the real photo (DINOv2 features), which tells whether a flat object (book, towel, pillow) is still there where depth cannot, and finds new flat objects lying on tables or the floor. M7 made FULL's "seen" votes stricter: a pixel only counts as "still there" if the room behind the object is far enough away that its absence would show in the depth (a pillow lying on a sofa looks the same whether it is there or not). M7 also added two experimental switches (deciding "removed" immediately instead of at the end; unseen things moving along with the furniture they stand on) and the machinery that runs every experiment (ablation) and writes the final results tables and plots. M8 added the pictures (a top-down before / after figure and a Rerun replay of the walk), the hand check of the ground truth (audit), the README, the report and the slides.
 
 ## 2. Folder map
 
@@ -55,7 +55,12 @@ Task2/
 │   │   ├── m5_checks.py     `lsg m5`: B0 / B1 / B2 on dev, sweep, B2 on val + relation table
 │   │   ├── m6_checks.py     `lsg m6`: OBJ/PLY check, texture render check, FULL variants on dev, val
 │   │   ├── ablations.py     the list of M7 experiments (rows) and `lsg ablate`
-│   │   └── m7_checks.py     `lsg m7`: every row on dev / val / relchange, results.md, plots, determinism
+│   │   ├── m7_checks.py     `lsg m7`: every row on dev / val / relchange, results.md, plots, determinism
+│   │   ├── audit.py         `lsg audit`: sample false positives, photo panels, CSV for manual verdicts (M8)
+│   │   └── figures.py       the GT panel of the top-down figure (M8)
+│   ├── viz/                 PICTURES (M8; reads only method inputs / outputs)
+│   │   ├── topdown.py       before / after top-down PNG, nodes coloured by state
+│   │   └── rerun_timeline.py  Rerun recording: mesh, camera path, node boxes per snapshot, final graph
 │   ├── oracle/              ground-truth rescan objects: the upper-bound mode
 │   │   └── source.py        OracleSource
 │   └── perception/          finds rescan objects from depth/colour alone: the headline mode
@@ -65,6 +70,8 @@ Task2/
 │       ├── labeler.py       CLIP zero-shot labels from colour crops (cached)
 │       ├── appearance.py    rendered texture vs photo, DINOv2 patch features (cached) (M6)
 │       └── source.py        PerceptionSource: the above as an ObsSource
+├── docs/REPORT.md, docs/slides.pptx, docs/figures/   the write-up, the slides (built by docs/slides/build_deck.js) and their figures
+├── README.md                setup, data for one pair, run it end-to-end, evaluation commands
 ├── tests/                   automated tests (`uv run pytest -q`)
 ├── data/      (git-ignored) the downloaded dataset
 ├── cache/     (git-ignored) refined alignments (cache/align/), CLIP labels (cache/clip/), appearance similarities (cache/appearance/)
@@ -281,6 +288,16 @@ The rule: no imports from `oracle/` / `eval/`, and no rescan annotations. Inputs
 - Dev rows first, compared with the stored M5 / M6 dev results (must be identical where nothing changed); then all val rows, the τ_free sweep, the observed-fraction runs (3 seeds each), the relation runs on the relchange set, and FULL twice on one pair (must be identical).
 - Writes `outputs/<run>/results.md` (all tables with 95% confidence intervals and support counts), three plots (`m7_fraction.png`, `m7_tau_free.png`, `m7_ablations.png`) and `metrics.json` with the acceptance checks.
 
+### `eval/audit.py` — checking the ground truth by hand (`uv run lsg audit`, M8)
+- `lsg audit sample` reruns FULL on val with a `details` switch: for every object it writes what GT says, what the method predicted, its votes and confidence (`details/<mode>/<pair>.json`). The rerun must give exactly the M7 numbers (checked).
+- From these it collects the false positives per mode (moved / removed, including objects the annotation simply lacks, and new nodes that match nothing), draws 10 of each at random (seed 0), and adds every truly removed object that B2 deletes but FULL keeps.
+- For each it draws one panel: the reference photo of the object, the rescan photo of the same place, the rescan photo of the predicted new place, and a top-down sketch. `audit.csv` lists them with an empty `verdict` column.
+- After a person fills in `gt_missing` / `method_error` / `unclear`, `lsg audit summarize` gives the share of real GT gaps with 95% confidence intervals.
+
+### `eval/figures.py` and `viz/` — pictures (`uv run lsg viz`, M8)
+- `viz/topdown.py`: the room seen from above, every object as its box footprint: the reference graph, the updated graph (moved = blue with an arrow from the old place, removed = orange hatched, new = aqua with its label, unchanged = grey, unknown = dotted) and optionally the ground truth (computed in `eval/figures.py`, because only `eval/` may read it).
+- `viz/rerun_timeline.py`: a recording for the Rerun viewer. Scrubbing the `frame` timeline shows the camera walking through the reference room and the boxes changing their tentative state, ending with the final graph. It reads the snapshots of a `lsg run` (plus `seq_info.json`, written next to them) and the rescan's poses.
+
 ### `eval/m6_checks.py` — the M6 checks (`uv run lsg m6`)
 - Checks on all 72 references that the textured OBJ and the labelled PLY are the same mesh.
 - Draws the texture from the reference's own camera path and saves photo | render | blend PNGs; reports how similar they are and sets the appearance thresholds (the 98th percentile of the differences on these unchanged sequences).
@@ -346,15 +363,16 @@ These may only be read inside `eval/` (scoring, checks) and `oracle/` (the upper
 | `test_contrast.py` | (M7) The surface behind an object is found through the object's own back faces and also when it touches the back face; the "seen needs contrast" vote rule on hand-made images; a pillow against a backrest removed: the old rule says "seen", the new one "no info"; a box in front of a wall is "seen" under both. |
 | `test_m7_variants.py` | (M7) Immediate commitment removes what deferred commitment calls moved (and the observation then goes to another chair or becomes "new"); the commitment frame is recorded during the walk; a cup follows its moved table and keeps it as parent. |
 | `test_ablations.py` | (M7) Config overrides (typos rejected), the experiment list, when a stored result may be reused, and the results tables / plots / acceptance on made-up results. |
+| `test_viz.py` | (M8) Room outline keeps structure, drops the ceiling; the top-down PNG with two and three panels; a Rerun recording from made-up snapshots has the camera, trajectory, node groups and the final graph after the last frame. |
+| `test_audit.py` | (M8) Per-object details do not change any count; which predictions land in which false-positive pool; the veto set; seeded sampling; the CSV round trip and the verdict summary (incl. a missing verdict being refused); Wilson interval; comparing two `metrics` blocks. |
 | `test_confidence.py` | Class-prior counting and smoothing; the worked examples (chair 2 free → deleted, bed 2 free → kept, 3 → deleted, mixed evidence kept); cap; matched / new objects; priors off; FULL vs B2 on a small room (FULL keeps the bed and the mixed-evidence item). |
 | `test_relations_eval.py` | Relation counts on a hand-made pair: subsets a / b / c / c-broad, floor split, GT vs associated universe, new-node parents, several GT parents; aggregation. |
 | `test_real_data.py` | *(slow, needs `data/`)* Renders a real dev frame and compares with its depth; val GT counts reproduce DESIGN §2.2; one dev pair end-to-end with oracle + B0, twice, with identical `metrics`; one dev pair with B1: deterministic, no more false deletions than B0, snapshots valid; one dev pair in perception mode (B1) twice: identical `metrics`, candidate files, valid graphs; B2 on one dev pair in both modes twice (identical `metrics`, valid graphs, relation counts); real CLIP on two crops. |
 
-Run with `uv run pytest -q` (185 tests, ~20 s); the slow ones with `uv run pytest -q -m slow` (10 tests, a few minutes; `test_real_data.py` also runs FULL on one dev pair twice and real DINOv2 on a reference frame).
+Run with `uv run pytest -q` (195 tests, ~20 s); the slow ones with `uv run pytest -q -m slow` (10 tests, a few minutes; `test_real_data.py` also runs FULL on one dev pair twice and real DINOv2 on a reference frame).
 
 ## 8. What is not built yet
 
-Planned in DESIGN §6 and §9 (spec v2), in order:
-- M8: visualisation (`viz/`), audit, README and write-up.
+Everything planned in DESIGN §6 and §9 is built. Optional items that were not done: the DINOv2 term in association (old B3), a door open / closed diagnostic (Erik: skipped).
 
 Since spec v2 there are two **observation modes**. `perception` (the headline) finds rescan objects from the rescan's own depth and colour. `oracle` (upper bound) uses the rescan's ground-truth objects. Both feed the same change logic.
