@@ -232,7 +232,7 @@ Cases found during development (dev pairs, not part of the sample):
 
 - **Fig. 2 — the README demo pair** (dev, 0ad2d39b → 0ad2d3a1, perception). The GT has a moved rack and a moved
   bin. Perception gives the bin's new place to a nearby "dispenser" node (a false move), leaves the rack `unknown`,
-  and adds one false `new` node ("ottoman"). The oracle run finds the rack move and leaves the bin `unknown`.
+  and adds one false `new` node ("ottoman"). The oracle run finds the rack move but calls the bin `unchanged` (a 15 cm move; the rack moved 28 cm).
 
   ![](figures/topdown_dev_0ad2d39b_perception.png)
 
