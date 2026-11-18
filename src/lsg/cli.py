@@ -318,6 +318,9 @@ def main(argv: list[str] | None = None) -> int:
         sp_.add_argument("--run-id", default=None)
 
     args = p.parse_args(argv)
+    from lsg.config import setup_hub_offline
+
+    setup_hub_offline(load_config(getattr(args, "config", None)))  # before torch / timm / open_clip load
     return args.func(args)
 
 

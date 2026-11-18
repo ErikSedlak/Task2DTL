@@ -123,6 +123,7 @@ perception:                # PerceptionSource, DESIGN §3 candidate + §6.6 (tun
     vocab_top_n: 100       # most frequent train thing/anchor labels added to the G_ref labels
     topk: 5
     cache: true            # cache/clip/<key>.json
+    hf_repo: timm/vit_base_patch32_clip_224.openai   # where open_clip fetches these weights (models.hub_offline)
 
 baselines:
   b0:
@@ -180,6 +181,10 @@ appearance:                # DESIGN §3 / §6.6 appearance residual, FULL only (
   thin_candidates: true    # output (ii): thin-object voxels from mismatches on support surfaces
   support_min_normal_z: 0.8  # support surface: |normal z| of the reference face hit
   cache: true              # cache/appearance/<key>.json (per-frame patch similarities)
+
+models:                    # frozen-model weights (DINOv2, CLIP) from the Hugging Face Hub (M7, Erik)
+  hub_offline: auto        # auto: no Hub requests once both repos are cached (HF_HUB_OFFLINE=1); true / false;
+                           # an HF_HUB_OFFLINE in the environment wins
 
 update:                    # DESIGN §6.12 graph update
   relations: update        # update (method) | stale (R0) | geometric (R1); saved / scored graph

@@ -6,6 +6,11 @@ import pytest
 
 REPO = Path(__file__).resolve().parents[1]
 
+# the slow tests load DINOv2 / CLIP: no Hub requests once the weights are cached (M7)
+from lsg.config import load_config as _load_config, setup_hub_offline as _setup_hub_offline  # noqa: E402
+
+_setup_hub_offline(_load_config())
+
 
 def random_rigid(rng: np.random.Generator) -> np.ndarray:
     q = rng.normal(size=4)

@@ -27,6 +27,49 @@ def load_config(path: str | os.PathLike | None = None) -> dict[str, Any]:
         return yaml.safe_load(f) or {}
 
 
+def hub_repos(cfg: dict[str, Any]) -> list[str]:
+    """Hugging Face Hub repos of the frozen models: DINOv2 via timm (`timm/<appearance.model>`) and
+    CLIP via open_clip (`perception.clip.hf_repo`)."""
+    out = []
+    if cfg.get("appearance", {}).get("model"):
+        out.append(f"timm/{cfg['appearance']['model']}")
+    if cfg.get("perception", {}).get("clip", {}).get("hf_repo"):
+        out.append(str(cfg["perception"]["clip"]["hf_repo"]))
+    return out
+
+
+def hub_cache_dir() -> Path:
+    """Local Hugging Face Hub cache: `HF_HUB_CACHE`, else `HF_HOME/hub`, else `~/.cache/huggingface/hub`."""
+    if os.environ.get("HF_HUB_CACHE"):
+        return Path(os.environ["HF_HUB_CACHE"])
+    if os.environ.get("HF_HOME"):
+        return Path(os.environ["HF_HOME"]) / "hub"
+    return Path.home() / ".cache" / "huggingface" / "hub"
+
+
+def hub_cached(repo: str, cache: Path | None = None) -> bool:
+    """Whether a model repo has a downloaded snapshot (at least one file) in the local cache."""
+    d = (cache or hub_cache_dir()) / ("models--" + repo.replace("/", "--")) / "snapshots"
+    return d.is_dir() and any(f.is_file() for f in d.rglob("*"))
+
+
+def setup_hub_offline(cfg: dict[str, Any]) -> str:
+    """Set `HF_HUB_OFFLINE=1` (no Hub requests) when allowed, before any model library is imported.
+
+    `models.hub_offline`: `true` -> always offline; `false` -> never set; `auto` (default) ->
+    offline only if every repo of `hub_repos` is cached, so a fresh machine still downloads the
+    weights once. An `HF_HUB_OFFLINE` already in the environment always wins. Worker processes
+    inherit the variable. Returns what was decided (`env`, `offline`, `online`).
+    """
+    if "HF_HUB_OFFLINE" in os.environ:
+        return "env"
+    mode = str(cfg.get("models", {}).get("hub_offline", "auto")).lower()
+    if mode == "true" or (mode == "auto" and all(hub_cached(r) for r in hub_repos(cfg))):
+        os.environ["HF_HUB_OFFLINE"] = "1"
+        return "offline"
+    return "online"
+
+
 def milestone_val_split(cfg: dict[str, Any], full: bool = False) -> Path:
     """Val pair list for milestone checks: the seeded subset (`splits.milestone_val.file`), or the
     full `eval_val` with `full=True` (final tables, M7). DECISIONS M6 (Erik)."""
