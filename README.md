@@ -17,7 +17,7 @@ several viewpoints) lowers its confidence. Unseen nodes stay `unknown`, not `rem
 - Spec: [docs/DESIGN.md](docs/DESIGN.md); decision log: [docs/DECISIONS.md](docs/DECISIONS.md).
 - Code map: [docs/CODE_STRUCTURE.md](docs/CODE_STRUCTURE.md).
 
-**Headline results** (full method FULL, 110 validation pairs; 95% bootstrap CIs in [docs/REPORT.md](docs/REPORT.md)):
+**Headline results** (full method FULL, 110 validation pairs; 95% bootstrap CIs in [docs/REPORT.md](docs/REPORT.md)). These are the M7 numbers with the strict candidate rules (`perception.relaxed.enabled: false`, ablation row `FULL-relaxed`); the relaxed default of [CHANGE 1](docs/CHANGE_candidate_detection.md) is not yet measured on val:
 
 | mode | removed P / R | false deletion ↓ | unchanged kept | moved F1 | new P / R |
 |---|---|---|---|---|---|
@@ -102,12 +102,14 @@ This prints a metrics table per mode and writes `outputs/demo/`:
 | `candidates/<ref>_<rescan>.json` | perception candidates (centroid, box, CLIP top-k) |
 | `metrics.json` | all scores, config, config hash and git SHA |
 
-**Expected result** (24 processed frames; the same graphs as the reported dev run, `m7_final/dev/FULL`):
+**Expected result** (24 processed frames; the oracle graph is the one of the reported dev run `m7_final/dev/FULL`; perception uses the relaxed candidate rules of [CHANGE 1](docs/CHANGE_candidate_detection.md) and differs from it only in the `new` nodes, see below):
 
 | mode | node states (things + anchors) | scored |
 |---|---|---|
 | oracle | 7 unchanged, 1 moved, 6 unknown | moved 1 TP / 1 FN, unchanged kept 6 / 6, 0 of 5 absent-unlisted deleted |
-| perception | 5 unchanged, 1 moved, 8 unknown, 1 new | moved 0 TP / 1 FP / 2 FN, 1 new FP, unchanged kept 5 / 6, 0 of 5 absent-unlisted deleted |
+| perception | 5 unchanged, 1 moved, 8 unknown, 4 new | moved 0 TP / 1 FP / 2 FN, 4 new FP (this pair has no GT-new object), unchanged kept 5 / 6, 0 of 5 absent-unlisted deleted |
+
+With `perception.relaxed.enabled: false` in the config (the ablation row `FULL-relaxed`), the perception graph is the M7 one: 1 new node.
 
 **Runtime:** about 3 s per pair once `cache/` is warm (refined alignment, DINOv2 similarities, CLIP labels). The
 first run also computes these and downloads the models.

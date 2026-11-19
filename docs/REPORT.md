@@ -120,6 +120,8 @@ pick a new parent (an anchor, a thing, or the floor).
 
 ## 4. Results
 
+> **Note (2026-11-19).** All tables, figures and numbers in this report, including the qualitative figures, are the **M7 method with the strict candidate rules** (every candidate cluster needs 3 decorrelated views; ablation row `FULL-relaxed`). The code now defaults to the relaxed rules of [CHANGE 1](CHANGE_candidate_detection.md) (2 views for small, 1 view for large clusters). Their val effect is not measured yet: `lsg ablate --names FULL,FULL-relaxed` and a rerun of `lsg m7` replace the numbers below.
+
 **Change detection on val** (%, micro-averaged over 110 pairs; 95% bootstrap CI over pairs for FULL).
 
 | method | mode | removed P / R | false deletion ↓ | unchanged strict / kept | moved P / R / F1 | new P / R | unknown |

@@ -6,7 +6,12 @@ Handoff file between milestone sessions: each milestone is done in a fresh chat.
 
 DESIGN.md (the spec) and DECISIONS.md (the dated log, with the reasons) stay the source of truth. This file is the to-do view on top of them.
 
-## Current state (2026-11-18)
+## Current state (2026-11-19)
+- **CHANGE 1 (relaxed candidate rules) is implemented and ON by default** (`perception.relaxed`, docs/CHANGE_candidate_detection.md, DECISIONS 2026-11-19). **Its val effect is not measured.** Until it is, REPORT, slides, the README headline table and `outputs/m7_final` describe the strict method = ablation row `FULL-relaxed`.
+  - Erik: `uv run lsg ablate --names FULL,FULL-relaxed --split eval_val` (both modes, > 1 min), then judge against the change document §5.4 (new R up; false deletion and unchanged kept within the FULL CIs). If it stays the default: `uv run lsg m7 --run-id m7_relaxed` (111 min) refreshes the report numbers; rebuild the slides.
+  - If the relaxed rules lose on val: set `perception.relaxed.enabled: false` in `configs/default.yaml` (everything is then as at M7).
+  - The M8 steps below are affected: step 1 (`lsg audit sample`) forces the strict rules by itself (`--relaxed` audits the new default); **step 3 (clean-clone README run) now gives the relaxed perception graph: 4 `new` nodes, see the README expected result.**
+- **M0–M7 ✅** (see Finished). **M8: code, README, report and slides done; acceptance pending** (Erik's runs, below); state of 2026-11-18:
 - **M0–M7 ✅** (see Finished). **M8: code, README, report and slides done; acceptance pending** (Erik's runs, below).
   - M8 commits: `96b85b4` (viz), `6dc69db` (audit), `f1e296a` / `fff1775` (README, report), `d00c0ec` (slides), then the M8 docs commit.
 - **To finish M8** (in this order):
@@ -383,6 +388,7 @@ All items that were listed here are in the report: door swings out of scope; val
 ---
 
 ## Decisions needed from Erik
+- **Candidate detection change (2026-11-19):** relax `min_views` for large clusters (1) and small (2), relax `tau_new` for big objects. Decided, not implemented; four open questions in `docs/CHANGE_candidate_detection.md` section 6 (notably small = 2 or 3 views; the current value is 3).
 - **Doors / articulation:** decided 2026-11-18, the door diagnostic is skipped and stated as a limitation (DECISIONS M8). Closed.
 - **AI_USAGE.md:** "Erik: (fill in)" is still open for the M0–M8 rows (Erik sends the lines at the end of M8).
 - **DECISIONS 2026-11-05 "Milestones re-scoped to M1–M8"** is still marked "provisional — Erik to confirm".
