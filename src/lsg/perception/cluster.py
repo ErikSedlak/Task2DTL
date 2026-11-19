@@ -80,21 +80,27 @@ def connected_components(coords: np.ndarray, link: int = 1, connectivity: int = 
 
 
 def cluster(
-    voxel_idx: np.ndarray, coords: np.ndarray, points: np.ndarray, cfg: Mapping[str, Any]
+    voxel_idx: np.ndarray,
+    coords: np.ndarray,
+    points: np.ndarray,
+    cfg: Mapping[str, Any],
+    min_voxels: int | None = None,
 ) -> list[Candidate]:
-    """Connected components of kept voxels with >= `perception.min_voxels` voxels.
+    """Connected components of kept voxels with >= `min_voxels` voxels.
 
     Args:
         voxel_idx: (N,) indices of the kept voxels.
         coords: (N, 3) their integer coordinates.
         points: (N, 3) their mean residual points.
         cfg: Full config.
+        min_voxels: Cluster size floor (default `perception.min_voxels`; the lenient tier of the
+            relaxed rules passes `perception.relaxed.large_min_voxels`).
 
     Returns:
         Candidates sorted by size (descending), then centroid (x, y, z).
     """
     lab = connected_components(coords, link=int(cfg["perception"].get("link_voxels", 1)))
-    min_vox = int(cfg["perception"]["min_voxels"])
+    min_vox = int(cfg["perception"]["min_voxels"] if min_voxels is None else min_voxels)
     out = []
     for c in range(int(lab.max()) + 1 if len(lab) else 0):
         m = lab == c
@@ -102,6 +108,17 @@ def cluster(
             out.append(Candidate(np.asarray(voxel_idx)[m], np.asarray(points)[m]))
     out.sort(key=lambda k: (-len(k.voxels), *np.round(k.centroid, 6).tolist()))
     return out
+
+
+def is_large(c: Candidate, cfg: Mapping[str, Any]) -> bool:
+    """Size rule of the relaxed candidate rules (CHANGE 1): enough voxels and, if set, a long enough AABB.
+
+    Uses `perception.relaxed.large_min_voxels` and `large_min_extent` (0 = no extent rule).
+    """
+    r = cfg["perception"]["relaxed"]
+    if len(c.voxels) < int(r["large_min_voxels"]):
+        return False
+    return float(np.max(c.aabb_max - c.aabb_min)) >= float(r["large_min_extent"])
 
 
 @dataclass

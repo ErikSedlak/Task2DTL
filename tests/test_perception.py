@@ -64,7 +64,18 @@ def graph_of(R):
 
 @pytest.fixture
 def cfg():
-    return copy.deepcopy(load_config())
+    """Default config with the relaxed candidate rules OFF: these tests cover the strict M4 path."""
+    c = copy.deepcopy(load_config())
+    c["perception"]["relaxed"]["enabled"] = False
+    return c
+
+
+@pytest.fixture
+def rcfg():
+    """Default config (CHANGE 1: relaxed candidate rules ON)."""
+    c = copy.deepcopy(load_config())
+    assert c["perception"]["relaxed"]["enabled"] is True
+    return c
 
 
 def run_perception(cfg, ref_parts, rescan_parts, poses, labeler=None, with_crops=False):
@@ -301,3 +312,63 @@ def test_train_scans_and_label_table():
     G = Graph(Graph.new_meta("R"), [Node("r1", "thing", "pillow", 18), Node("r2", "thing", "chair", 5)], [])
     vocab, nyu = perception_vocab(G, tab, top_n=1)
     assert vocab == ["chair", "pillow"] and nyu == {"chair": 5, "pillow": 18}
+
+
+# ---- CHANGE 1: relaxed candidate rules (size decides the evidence) ----------------------------
+
+ONE_POSE = [orbit([0.5, 0.5, 0.15])[0]] * 30  # one viewpoint, repeated: 1 decorrelated view
+TWO_POSES = [orbit([0.5, 0.5, 0.15])[0], orbit([0.5, 0.5, 0.15])[6]]  # 3 m apart: 2 decorrelated views
+WITH_BOX = {20: (*box(*NEW_BOX), 29, "box")}
+
+
+def test_nearer_mask_tau_override(cfg):
+    d_exp = np.full((4, 4), 2.0)
+    d_obs = np.full((4, 4), 1.93)  # 7 cm nearer
+    assert not nearer_mask(d_obs, d_exp, cfg).any()  # tau_new = 0.10
+    assert nearer_mask(d_obs, d_exp, cfg, tau=0.05).all()
+
+
+def test_large_cluster_needs_one_view(rcfg, cfg):
+    res, src = run_perception(rcfg, room(), room(WITH_BOX), ONE_POSE)
+    assert len(res.obs) == 1, src.stats
+    assert src.stats["large_clusters"] == 1 and src.stats["clusters"] == 1
+    assert src.stats["large_replaced"] == 0  # no strict cluster: a single view is below min_views_small
+    lo, hi = np.array(NEW_BOX[0]), np.array(NEW_BOX[1])
+    assert np.all(res.obs[0].points >= lo - 0.03) and np.all(res.obs[0].points <= hi + 0.03)
+    assert len(res.obs[0].masks) >= 1
+    res, _ = run_perception(cfg, room(), room(WITH_BOX), ONE_POSE)  # strict path: 1 view < min_views
+    assert res.obs == []
+
+
+def test_small_cluster_needs_two_views(rcfg, cfg):
+    rcfg["perception"]["relaxed"]["large_min_voxels"] = 10**6  # no cluster counts as large: strict tier only
+    res, src = run_perception(rcfg, room(), room(WITH_BOX), ONE_POSE)
+    assert res.obs == [] and src.stats["large_clusters"] == 0
+    res, _ = run_perception(rcfg, room(), room(WITH_BOX), TWO_POSES)
+    assert len(res.obs) == 1  # min_views_small = 2
+    res, _ = run_perception(cfg, room(), room(WITH_BOX), TWO_POSES)
+    assert res.obs == []  # the M7 rule needs 3
+
+
+def test_large_cluster_replaces_its_strict_clusters(rcfg, cfg):
+    poses = orbit([0.5, 0.5, 0.15])
+    res_s, _ = run_perception(cfg, room(), room(WITH_BOX), poses)
+    res, src = run_perception(rcfg, room(), room(WITH_BOX), poses)
+    assert len(res.obs) == 1 and len(res_s.obs) == 1  # merged, not duplicated
+    assert src.stats["large_clusters"] == 1 and src.stats["large_replaced"] == 1
+    assert len(res.obs[0].points) >= len(res_s.obs[0].points)  # the lenient cluster contains the strict one
+    assert res.obs[0].token == "c0"
+
+
+def test_relaxed_is_deterministic(rcfg):
+    runs = [run_perception(rcfg, room(), room(WITH_BOX), orbit([0.5, 0.5, 0.15]))[0].obs for _ in range(2)]
+    assert [o.token for o in runs[0]] == [o.token for o in runs[1]]
+    assert all(np.array_equal(a.points, b.points) for a, b in zip(*runs))
+
+
+def test_relaxed_with_neutral_values_equals_strict(rcfg, cfg):
+    rcfg["perception"]["relaxed"].update(min_views_small=int(cfg["perception"]["min_views"]), large_min_voxels=10**6)
+    a, _ = run_perception(cfg, room(), room(WITH_BOX), orbit([0.5, 0.5, 0.15]))
+    b, _ = run_perception(rcfg, room(), room(WITH_BOX), orbit([0.5, 0.5, 0.15]))
+    assert [o.token for o in a.obs] == [o.token for o in b.obs]
+    assert all(np.array_equal(x.points, y.points) for x, y in zip(a.obs, b.obs))

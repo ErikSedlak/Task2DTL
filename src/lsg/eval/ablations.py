@@ -75,6 +75,8 @@ def registry(cfg: Mapping[str, Any]) -> dict[str, Ablation]:
                  desc="depth only (the brief's ablation)"),
         Ablation("FULL-thincand", "FULL", {"appearance.thin_candidates": False}, group="component",
                  desc="no thin-object candidates (perception)"),
+        Ablation("FULL-relaxed", "FULL", {"perception.relaxed.enabled": False}, group="component",
+                 desc="strict candidates (every cluster needs min_views views at tau_new) = M7 FULL"),
         Ablation("FULL-priors", "FULL", {"confidence.class_priors": False}, group="component",
                  desc="fallback prior p = 0.9 instead of class priors"),
         Ablation("FULL-decorr", "FULL", {"decorrelation.enabled": False}, group="component",

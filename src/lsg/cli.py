@@ -230,7 +230,8 @@ def _cmd_audit_sample(args: argparse.Namespace) -> int:
 
     res = run_audit_sample(load_config(args.config), args.run_id, split=args.split, from_run=args.from_run,
                            compare=None if args.no_compare else args.compare, b2_run=args.b2_run,
-                           n_per_cat=args.n, seed=args.seed, workers=args.workers, max_pairs=args.max_pairs)  # fmt: skip
+                           n_per_cat=args.n, seed=args.seed, workers=args.workers, max_pairs=args.max_pairs,
+                           relaxed=args.relaxed)  # fmt: skip
     for k, v in res["pool_sizes"].items():
         print(f"  pool {k:22s} {v}")
     c = res["consistency"]
@@ -384,6 +385,8 @@ def main(argv: list[str] | None = None) -> int:
     a1.add_argument("--from-run", default=None, help="reuse a run with details/ instead of running FULL")
     a1.add_argument("--compare", default="m7_final/val/FULL", help="run whose metrics FULL must reproduce")
     a1.add_argument("--no-compare", action="store_true")
+    a1.add_argument("--relaxed", action="store_true",
+                    help="audit the current default (relaxed candidate rules) instead of the M7 strict FULL; use with --no-compare")
     a1.add_argument("--b2-run", default="m7_final/val/B2", help="run with B2 graphs (veto set)")
     a1.add_argument("--n", type=int, default=10, help="sample size per mode and category")
     a1.add_argument("--seed", type=int, default=0)

@@ -31,6 +31,7 @@ def test_registry_overrides_exist_and_sweeps_come_from_config():
     assert sum(a.group == "frac" for a in reg.values()) == len(mc["fracs"]) * len(mc["frac_seeds"])
     assert sum(a.group == "tau_free" for a in reg.values()) == len(mc["tau_free_sweep"])
     assert reg["FULL-contrast"].overrides == {"visibility.seen_needs_contrast": False}
+    assert reg["FULL-relaxed"].overrides == {"perception.relaxed.enabled": False}  # CHANGE 1: the M7 method
     for name in (*mc["dev_rows"], *mc["relchange_rows"], *mc["regression_refs"]):
         assert name in reg
 

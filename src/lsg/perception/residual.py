@@ -66,16 +66,18 @@ class SurfaceFilter:
         return ok
 
 
-def nearer_mask(depth: np.ndarray, d_exp: np.ndarray, cfg: Mapping[str, Any]) -> np.ndarray:
-    """Step 1: valid observed depth (<= `max_depth`) nearer than the rendered surface by > `tau_new`.
+def nearer_mask(depth: np.ndarray, d_exp: np.ndarray, cfg: Mapping[str, Any], tau: float | None = None) -> np.ndarray:
+    """Step 1: valid observed depth (<= `max_depth`) nearer than the rendered surface by > `tau`.
 
-    Pixels without a reference hit (`d_exp == 0`) are excluded: there is no expected surface
-    to be in front of.
+    `tau` defaults to `perception.tau_new`; the lenient tier of the relaxed candidate rules passes
+    `perception.relaxed.tau_new_large`. Pixels without a reference hit (`d_exp == 0`) are excluded:
+    there is no expected surface to be in front of.
     """
     pc = cfg["perception"]
+    tau = float(pc["tau_new"] if tau is None else tau)
     d_obs = np.asarray(depth, np.float64)
     d_e = np.asarray(d_exp, np.float64)
-    return (d_obs > 0) & (d_obs <= float(pc["max_depth"])) & (d_e > 0) & (d_obs < d_e - float(pc["tau_new"]))
+    return (d_obs > 0) & (d_obs <= float(pc["max_depth"])) & (d_e > 0) & (d_obs < d_e - tau)
 
 
 def nearer_points(
@@ -85,6 +87,7 @@ def nearer_points(
     pose_ref: np.ndarray,
     filt: SurfaceFilter | None,
     cfg: Mapping[str, Any],
+    tau: float | None = None,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Steps 1-2 for one frame.
 
@@ -95,11 +98,12 @@ def nearer_points(
         pose_ref: Camera -> reference frame (`T_align @ pose_c2w`).
         filt: Surface / structure filter (None = step 1 only).
         cfg: Full config.
+        tau: Nearer threshold [m] (default `perception.tau_new`).
 
     Returns:
         (points (N, 3) in the reference frame, flat pixel indices (N,) into the (H, W) image).
     """
-    m = nearer_mask(depth, d_exp, cfg)
+    m = nearer_mask(depth, d_exp, cfg, tau)
     pix = np.flatnonzero(m)
     if pix.size == 0:
         return np.zeros((0, 3)), pix

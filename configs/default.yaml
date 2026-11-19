@@ -106,8 +106,15 @@ perception:                # PerceptionSource, DESIGN §3 candidate + §6.6 (tun
   struct_dist: 0.10        # [m] drop points this close to reference structure surfaces (step 2)
   struct_exclude_nyu40: [2, 20]   # floor, floor mat: objects stand on them (handled by surf_dist)
   voxel: 0.04              # [m] voxel size (step 3)
-  min_views: 3             # decorrelated viewpoints per kept voxel (step 4; `decorrelation` block)
-  link_voxels: 2           # voxels within this Chebyshev distance [voxels] are connected (1 = 26-conn.)
+  min_views: 3             # decorrelated viewpoints per kept voxel (step 4; `decorrelation` block); also the thin-object grid, and the depth grid when `relaxed.enabled` is false
+  relaxed:                 # CHANGE 1 (docs/CHANGE_candidate_detection.md, Erik 2026-11-19): size-dependent candidate rules
+    enabled: true          # false = the M7 method (every cluster needs `min_views` views at `tau_new`); ablation row FULL-relaxed
+    min_views_small: 2     # strict tier: voxels hit at `tau_new` need this many decorrelated views (was 3)
+    min_views_large: 1     # lenient tier: voxels hit at `tau_new_large` need this many
+    tau_new_large: 0.05    # [m] lenient-tier nearer pixel (>= surf_dist: points closer to the reference mesh are dropped anyway)
+    large_min_voxels: 20   # a lenient-tier cluster is large (and kept) with at least this many voxels (tune on dev only)
+    large_min_extent: 0.0  # [m] ... and a longest AABB side of at least this (0 = no extent rule)
+  link_voxels: 2          # voxels within this Chebyshev distance [voxels] are connected (1 = 26-conn.)
   min_voxels: 5            # drop clusters with fewer kept voxels (step 5)
   door_filter: true        # drop clusters inside a reference door's swing region (M4, Erik)
   door_frac: 0.5           # share of a cluster's voxels inside a swing region -> dropped

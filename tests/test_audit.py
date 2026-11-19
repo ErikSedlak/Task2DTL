@@ -97,3 +97,26 @@ def test_compare_metrics():
     m2 = json.loads(json.dumps(m))
     m2["per_pair"][0]["counts"]["x"] = 2
     assert compare_metrics(m, m2) == ["per_pair ('R', 'S', 'oracle') differs"]
+
+
+def test_audit_runs_the_strict_candidate_rules_unless_relaxed(monkeypatch):
+    """The audit must reproduce m7_final/val/FULL, i.e. FULL with the strict candidates (CHANGE 1)."""
+    import copy
+
+    import lsg.eval.harness as harness
+    from lsg.config import load_config
+    from lsg.eval.audit import run_audit_sample
+
+    seen = []
+
+    def fake_run_eval(cfg, *a, **k):
+        seen.append(cfg["perception"]["relaxed"]["enabled"])
+        raise RuntimeError("stop")
+
+    monkeypatch.setattr(harness, "run_eval", fake_run_eval)
+    cfg = copy.deepcopy(load_config())
+    assert cfg["perception"]["relaxed"]["enabled"] is True  # the default method is relaxed
+    for relaxed in (False, True):
+        with pytest.raises(RuntimeError):
+            run_audit_sample(cfg, "x", relaxed=relaxed, max_pairs=1)
+    assert seen == [False, True]
