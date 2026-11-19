@@ -372,3 +372,20 @@ def test_relaxed_with_neutral_values_equals_strict(rcfg, cfg):
     b, _ = run_perception(rcfg, room(), room(WITH_BOX), orbit([0.5, 0.5, 0.15]))
     assert [o.token for o in a.obs] == [o.token for o in b.obs]
     assert all(np.array_equal(x.points, y.points) for x, y in zip(a.obs, b.obs))
+
+
+def test_merge_add_keeps_the_strict_cluster_and_link_knob(rcfg, cfg):
+    poses = orbit([0.5, 0.5, 0.15])
+    res_s, _ = run_perception(cfg, room(), room(WITH_BOX), poses)
+    rcfg["perception"]["relaxed"]["merge"] = "add"
+    res, src = run_perception(rcfg, room(), room(WITH_BOX), poses)
+    assert len(res.obs) == 1 and src.stats["large_replaced"] == 0 and src.stats["large_clusters"] == 0
+    assert np.array_equal(res.obs[0].points, res_s.obs[0].points)  # the strict candidate is untouched
+    # a large cluster without a strict cluster is still added
+    res, src = run_perception(rcfg, room(), room(WITH_BOX), ONE_POSE)
+    assert len(res.obs) == 1 and src.stats["large_clusters"] == 1
+    # the connectivity knob reaches the lenient tier
+    pts = np.array([[0, 0, 0], [2, 0, 0], [4, 0, 0]])  # gaps of 2 voxels
+    c = {"perception": {"link_voxels": 2, "min_voxels": 1}}
+    assert len(cluster(np.arange(3), pts, pts * 0.04, c)) == 1
+    assert len(cluster(np.arange(3), pts, pts * 0.04, c, link=1)) == 3

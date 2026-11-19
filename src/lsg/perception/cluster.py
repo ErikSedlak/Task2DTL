@@ -85,6 +85,7 @@ def cluster(
     points: np.ndarray,
     cfg: Mapping[str, Any],
     min_voxels: int | None = None,
+    link: int | None = None,
 ) -> list[Candidate]:
     """Connected components of kept voxels with >= `min_voxels` voxels.
 
@@ -95,11 +96,13 @@ def cluster(
         cfg: Full config.
         min_voxels: Cluster size floor (default `perception.min_voxels`; the lenient tier of the
             relaxed rules passes `perception.relaxed.large_min_voxels`).
+        link: Linking distance in voxels (default `perception.link_voxels`; the lenient tier
+            passes `perception.relaxed.link_voxels_large`).
 
     Returns:
         Candidates sorted by size (descending), then centroid (x, y, z).
     """
-    lab = connected_components(coords, link=int(cfg["perception"].get("link_voxels", 1)))
+    lab = connected_components(coords, link=int(cfg["perception"].get("link_voxels", 1) if link is None else link))
     min_vox = int(cfg["perception"]["min_voxels"] if min_voxels is None else min_voxels)
     out = []
     for c in range(int(lab.max()) + 1 if len(lab) else 0):

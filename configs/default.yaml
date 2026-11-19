@@ -112,7 +112,9 @@ perception:                # PerceptionSource, DESIGN §3 candidate + §6.6 (tun
     min_views_small: 2     # strict tier: voxels hit at `tau_new` need this many decorrelated views (was 3)
     min_views_large: 1     # lenient tier: voxels hit at `tau_new_large` need this many
     tau_new_large: 0.05    # [m] lenient-tier nearer pixel (>= surf_dist: points closer to the reference mesh are dropped anyway)
-    large_min_voxels: 20   # a lenient-tier cluster is large (and kept) with at least this many voxels (tune on dev only)
+    large_min_voxels: 40   # a lenient-tier cluster is large (and kept) with at least this many voxels (dev_train: 20 -> 125 candidates, 40 -> 97, same 35 explained by GT)
+    link_voxels_large: 1   # lenient-tier connectivity [voxels] (26-connected); with 2, 1-view voxels percolate into room-sized blobs (dev_train: moved-to hits 6/15)
+    merge: replace         # replace: a large cluster replaces the strict clusters inside it; add: only where no strict cluster is
     large_min_extent: 0.0  # [m] ... and a longest AABB side of at least this (0 = no extent rule)
   link_voxels: 2          # voxels within this Chebyshev distance [voxels] are connected (1 = 26-conn.)
   min_voxels: 5            # drop clusters with fewer kept voxels (step 5)

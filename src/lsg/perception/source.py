@@ -213,8 +213,10 @@ class PerceptionSource:
         Lenient tier: voxels hit at `tau_new_large` with >= `min_views_large` views, clusters with
         >= `large_min_voxels` voxels that pass `is_large` and the door filter. Every strict voxel is
         also a lenient voxel (same lattice, superset of hits), so a strict cluster lies inside one
-        lenient cluster: an accepted large cluster *replaces* the strict clusters inside it, the
-        other strict clusters stay. Order: size descending, then centroid (deterministic tokens).
+        lenient cluster. `relaxed.merge = replace`: an accepted large cluster replaces the strict
+        clusters inside it; `add`: a large cluster containing a strict cluster is dropped (strict
+        candidates are never changed, large clusters are only added where no strict cluster is).
+        Other strict clusters stay. Order: size descending, then centroid (deterministic tokens).
 
         Returns:
             (candidates, grid of each (0 strict / 1 lenient), door-dropped lenient clusters).
@@ -222,15 +224,20 @@ class PerceptionSource:
         rc = self.pc["relaxed"]
         vl = self.vox_large
         kept = vl.kept(int(rc["min_views_large"]))
-        big = cluster(kept, vl.coords(kept), vl.mean_points(kept), self.cfg, min_voxels=int(rc["large_min_voxels"]))
+        big = cluster(kept, vl.coords(kept), vl.mean_points(kept), self.cfg, min_voxels=int(rc["large_min_voxels"]),
+                      link=int(rc["link_voxels_large"]))  # fmt: skip
         big = [c for c in big if is_large(c, self.cfg)]
         big, big_dropped = drop_door_clusters(big, self.doors, float(self.pc["door_frac"]))
         replaced = np.zeros(len(strict), bool)
+        accepted = []
         for b in big:
             bkeys = vl.keys[b.voxels]
-            for i, c in enumerate(strict):
-                if not replaced[i] and np.isin(self.vox.keys[c.voxels], bkeys).any():
-                    replaced[i] = True
+            inside = [i for i, c in enumerate(strict) if np.isin(self.vox.keys[c.voxels], bkeys).any()]
+            if inside and rc["merge"] == "add":  # strict candidates stay as they are; only uncovered large clusters are added
+                continue
+            replaced[inside] = True
+            accepted.append(b)
+        big = accepted
         entries = [(c, 0) for c, r in zip(strict, replaced) if not r] + [(b, 1) for b in big]
         entries.sort(key=lambda e: (-len(e[0].voxels), *np.round(e[0].centroid, 6).tolist()))
         self.stats.update(large_voxels=len(vl), large_clusters=len(big), large_door_dropped=len(big_dropped),
