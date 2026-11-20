@@ -527,3 +527,16 @@ Format: **date — decision.** Why. *Alternatives considered.* (status: fixed / 
 - **Rule** (`association.old_place`, FULL only like contrast at M7; B0–B2 unchanged): (a) a net-seen node (counted seen > free + free-like) may only match an observation inside its own place (≥ 50% of points in its AABB + 10 cm, the absorption test), so its own instance still matches; optional for nodes without counted votes: inside-only (`unobserved_inside_only`) or a distance limit (`max_dist_unseen`); optional (c) `tau_move_seen`: a net-seen node needs a larger ICP displacement. Shared class `change.visibility.old_place_class`. Ablation row `FULL-moveev`; `M7_OVERRIDES` keeps it off. Code commit ed9f410 (its message says 232 tests; the real count was 231).
 - **Sweep** (`lsg chg3 parta`, config `chg3.part_a`): variants `off`, `a`, `a_u` (unobserved inside-only), `a_d1` (unobserved ≤ 1 m), `a_c03` (tau_move_seen 0.3), `a_u_c02`, `a_u_c03`, FULL on dev_tune, both modes.
 - **Selection rule, fixed before the sweep:** a variant passes if in both modes its false-move rate ≤ 0.5 × the `off` row's and its moved F1 ≥ the `off` row's − 2 points; among passing variants the highest mean moved F1 (oracle, perception) wins, ties to the simpler (earlier listed) one; if none passes, report and ask Erik. Unchanged kept, removed / new P / R and moved R by displacement are reported either way. (fixed)
+- **Sweep result** (`lsg chg3 parta --run-id chg3_partA_sweep`, git be30809, 7 × ≈ 80 s on CUDA; `off` = `chg3_dev_baseline/FULL`, 0 differences). Moved F1 / false move / unchanged kept, oracle | perception (moved TP / FP):
+
+  | variant | oracle | perception |
+  |---|---|---|
+  | off | 52.5 / 18.9 / 78.8 (62 / 95) | 39.6 / 13.3 / 82.7 (38 / 75) |
+  | a | 53.6 / 16.8 / 80.7 (60 / 85) | 39.8 / 8.7 / 86.4 (35 / 62) |
+  | a_u | 53.9 / 10.7 / 81.9 (59 / 81) | 42.6 / 7.1 / 88.4 (36 / 54) |
+  | a_d1 | 54.2 / 10.7 / 80.7 (61 / 85) | 40.5 / 9.7 / 87.3 (35 / 59) |
+  | a_c03 | 50.3 / 15.3 / 85.8 (48 / 64) | 41.2 / 8.2 / 89.5 (33 / 48) |
+  | a_u_c02 | **55.1 / 9.2 / 86.4** (54 / 63) | **44.9 / 7.1 / 91.2** (35 / 42) |
+  | a_u_c03 | 49.7 / 9.2 / 87.0 (46 / 60) | 44.7 / 6.6 / 91.8 (34 / 39) |
+
+  Thresholds: false move ≤ 9.45 (oracle) / 6.65 (perception), moved F1 ≥ 50.5 / 37.6. **No variant passes** (`winner: None`). Closest: `a_u_c02` misses only the perception false-move bound (7.1% = 14 of 196 objects vs ≤ 13); `a_u_c03` misses only the oracle F1 bound (49.7: `tau_move_seen` 0.3 drops oracle moved R 78.5 → 58.2). Side effects of the gate in every `a_u*` row: oracle new R 53.0 → 60.5 and new P 92.7 → 86.1 (freed observations become `new`), perception removed R 25.3 → 22.9 (2 objects), false deletion unchanged or lower. Per the rule: reported to Erik for a decision; defaults not changed (`a` stays the code default until then). (measured)
