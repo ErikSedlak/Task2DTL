@@ -117,15 +117,16 @@ class VoxelEvidence:
     def from_config(cls, cfg: Mapping[str, Any], logodds: bool = False) -> VoxelEvidence:
         """Voxel size from `perception.voxel`, thresholds from `decorrelation`.
 
-        `logodds=True`: vote weights from `confidence` (`L_hit`, `L_miss`, `clip`) and
-        `confidence.candidates` (`L_corr`, `corr_cap`, `free_margin`); else neutral weights.
+        `logodds=True`: vote weights from `confidence.candidates` (`L_vox_hit`, `L_vox_free`, `L_corr`,
+        `corr_cap`, `free_margin`; CHANGE 3: separate from the node weights `confidence.L_hit` / `L_miss`, so
+        cluster formation does not change with them) and the clip `confidence.clip`; else neutral weights.
         """
         d = cfg["decorrelation"]
         kw: dict[str, float] = {}
         if logodds:
             c = cfg["confidence"]
             cc = c["candidates"]
-            kw = {"L_hit": float(c["L_hit"]), "L_free": float(c["L_miss"]), "L_corr": float(cc["L_corr"]),
+            kw = {"L_hit": float(cc["L_vox_hit"]), "L_free": float(cc["L_vox_free"]), "L_corr": float(cc["L_corr"]),
                   "corr_cap": float(cc["corr_cap"]), "clip": float(c["clip"]), "free_margin": float(cc["free_margin"])}  # fmt: skip
         return cls(float(cfg["perception"]["voxel"]), float(d["d_dec"]), float(d["theta_dec_deg"]),
                    bool(d.get("enabled", True)), **kw)  # fmt: skip

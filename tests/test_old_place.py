@@ -31,6 +31,11 @@ def test_old_place_classes():
     assert old_place_class(NodeVotes(free=2), CFG) == "free_ev"
     assert old_place_class(NodeVotes(seen=1, free=1), CFG) == "mixed"
     assert old_place_gate(VOTES, cfg_with(enabled=False)) is None
+    # CHANGE 3 Part C: weighted evidence (equal weights = the count rule above)
+    w = copy.deepcopy(CFG)
+    w["confidence"].update(L_hit=1.0, L_miss=3.0, L_free_like=3.0)
+    assert old_place_class(NodeVotes(seen=3, free=2), w) == "free_ev"  # 3 - 6 < 0: not net-seen
+    assert old_place_class(NodeVotes(seen=4, free=1), w) == "net_seen"  # 4 > 3
 
 
 def test_net_seen_node_does_not_move_to_a_far_same_label_obs():

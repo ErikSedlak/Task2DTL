@@ -103,7 +103,7 @@ class PerceptionSource:
         self.relaxed = bool(rc.get("enabled", False))  # CHANGE 1: size-dependent candidate rules
         self.min_views_small = int(rc["min_views_small"]) if self.relaxed else int(self.pc["min_views"])
         if self.candconf:  # voxel thresholds in log-odds; without the relaxed rules: M7's min_views views
-            L_hit = float(self.cfg["confidence"]["L_hit"])
+            L_hit = float(cc["L_vox_hit"])  # voxel weight (CHANGE 3: not the node weight confidence.L_hit)
             self.l_keep_small = float(cc["l_keep_small"]) if self.relaxed else L_hit * int(self.pc["min_views"])
             self.l_keep_large = float(cc["l_keep_large"])
         self.vox_large = VoxelEvidence.from_config(self.cfg, logodds=self.candconf) if self.relaxed else None

@@ -432,6 +432,17 @@ def test_candconf_with_neutral_values_equals_change1(ccfg, rcfg, cfg):
         assert _same(a.obs, b.obs)
 
 
+def test_node_weights_do_not_change_candidates(ccfg):
+    """CHANGE 3 Part C: the voxel grid has its own weights (L_vox_*); the node weights L_hit / L_miss do not move it."""
+    w = copy.deepcopy(ccfg)
+    w["confidence"].update(L_hit=0.7, L_miss=4.0, L_free_like=4.0)
+    for kw in ({}, {"later_parts": room(), "n_first": 4}):
+        a, sa = run_perception(ccfg, room(), room(WITH_BOX), ORBIT, **kw)
+        b, sb = run_perception(w, room(), room(WITH_BOX), ORBIT, **kw)
+        assert _same(a.obs, b.obs) and [o.confidence for o in a.obs] == [o.confidence for o in b.obs]
+        assert sa.stats == sb.stats
+
+
 def test_one_observation_is_enough_and_confidence_is_set(ccfg):
     """Erik: a candidate is added after one decorrelated observation, small clusters too."""
     ccfg["perception"]["relaxed"]["large_min_voxels"] = 10**6  # strict tier only

@@ -298,14 +298,17 @@ def old_place_class(v: NodeVotes | None, cfg: Mapping[str, Any]) -> str:
     """Evidence at a node's reference place (CHANGE 3 Part A), from counted votes only.
 
     - `unobserved`: no counted seen / free / free-like vote;
-    - `net_seen`: seen > free + free-like (checked first, as FULL's removal veto: with equal vote
-      weights such a node is never deleted, so it must not be moved away either);
+    - `net_seen`: L_hit·seen > L_miss·free + L_free_like·free_like with the node weights of
+      `confidence` (CHANGE 3 Part C, Erik: the same weighted evidence as FULL's confidence, so a node
+      the removal veto keeps is never moved away and vice versa); checked first;
     - `free_ev`: §3 free evidence (`has_free_evidence`);
     - `mixed`: everything else.
     """
     if v is None or v.seen == v.free == v.free_like == 0:
         return "unobserved"
-    if v.seen > v.free + v.free_like:
+    cc = cfg.get("confidence") or {}
+    w_s, w_f, w_fl = (float(cc.get(k, 1.0)) for k in ("L_hit", "L_miss", "L_free_like"))
+    if w_s * v.seen > w_f * v.free + w_fl * v.free_like + 1e-12:
         return "net_seen"
     if has_free_evidence(v, cfg):
         return "free_ev"

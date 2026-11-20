@@ -195,7 +195,9 @@ confidence:                # DESIGN §6.11 log-odds confidence, FULL only (M6, E
                            # = 3.58: 2 net counted free votes delete, 1 cannot, for every class (= M7 FULL-priors)
   candidates:              # CHANGE 2 Part B (docs/CHANGE_confidence_unified.md): per-voxel log-odds of perception candidates
     enabled: true          # false = CHANGE 1 view counts (ablation row FULL-candconf)
-    L_corr: 0.25           # correlated (same viewpoint region) hit / see-through vote; decorrelated ones use L_hit / L_miss
+    L_vox_hit: 2.5         # per decorrelated voxel hit (CHANGE 3: own key; was confidence.L_hit, the node weight)
+    L_vox_free: 2.5        # per decorrelated see-through vote on a voxel (was confidence.L_miss)
+    L_corr: 0.25           # correlated (same viewpoint region) hit / see-through vote; decorrelated ones use L_vox_hit / L_vox_free
     corr_cap: 1.0          # sum of correlated additions since the voxel's last decorrelated vote of that kind
     free_votes: true       # see-through votes lower a voxel (false = ablation row FULL-candconf-free)
     free_margin: 0.15      # [m] see-through: minimum depth of the window > z(voxel) + free_margin (= tau_free)
