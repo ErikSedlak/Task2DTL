@@ -338,6 +338,13 @@ chg3:                      # CHANGE 3 dev_tune sweeps (`lsg chg3 parta`; docs/CH
         sam: {perception.segment.method: sam}
         sam_add: {perception.segment.method: sam, perception.relaxed.merge: add}
       criterion: {f1_drop: 0.01, tie_objects: 2}
+    explain_ref:           # N2 (`lsg chg3 partn-ref --seg <N1 winner>`), at p_new_min 0 like N1
+      variants:
+        ref_off: {association.explain_ref.enabled: false}
+        d10: {association.explain_ref.enabled: true, association.explain_ref.dist: 0.10}
+        d15: {association.explain_ref.enabled: true, association.explain_ref.dist: 0.15}
+      order: [d10, ref_off, d15]   # tie preference (DECISIONS: ties -> 0.10, then off; "off" would parse as a YAML bool)
+      criterion: {r_drop: 0.01, tie_f1: 0.005}
   part_c:                  # §5: confidence policy from sensor statistics (lsg chg3 votestats; DECISIONS 2026-11-20)
     votestats:             # vote weights as likelihood ratios (eval/votestats.py), written before the run
       min_votes: 20        # a vote kind with fewer counted votes in either class keeps `fallback`
