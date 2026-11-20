@@ -80,3 +80,23 @@ def test_p_del_selection_rule():
     tie = select_p_del({"p0.05": row(0.03, 0.4), "p0.3": row(0.03, 0.4)}, {"p0.05": 0.05, "p0.3": 0.3}, ref, crit)
     assert tie["winner"] == "p0.3"  # equal F1: nearer 0.2
     assert select_p_del({"p0.4": row(0.05, 0.6)}, {"p0.4": 0.4}, ref, crit)["winner"] is None
+
+
+def test_part_n_segment_rule():
+    """CHANGE 3 Part N (N1) pre-written rule: most class-agnostic hits among variants passing the F1 guards;
+    ties within 2 objects go to the simpler variant."""
+    from lsg.eval.chg3_checks import select_segment
+
+    def row(hn, hm, mf1, af1):
+        p = {"diag_cand_new_hit": hn, "diag_cand_moved_hit": hm, "moved_F1": mf1, "new_ag_F1": af1}
+        return {"perception": p, "oracle": {}}
+
+    rows = {"none": row(73, 59, 0.47, 0.05), "geometric": row(100, 60, 0.465, 0.06), "sam": row(101, 60, 0.47, 0.07),
+            "sam_add": row(120, 60, 0.40, 0.08)}  # sam_add fails the moved-F1 guard
+    crit = {"f1_drop": 0.01, "tie_objects": 2}
+    order = ["none", "geometric", "sam", "sam_add"]
+    sel = select_segment(rows, crit, order)
+    assert sel["verdict"]["sam_add"]["pass"] is False
+    assert sel["winner"] == "geometric"  # 160 vs 161 hits: within the tie band -> the simpler one
+    rows["sam"] = row(110, 60, 0.47, 0.07)
+    assert select_segment(rows, crit, order)["winner"] == "sam"

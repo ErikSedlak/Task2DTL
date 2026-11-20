@@ -26,13 +26,17 @@ from lsg.runinfo import new_run_id, write_metrics
 
 KEYS = ("moved_P", "moved_R", "moved_F1", "false_move_rate", "false_deletion_rate", "unchanged_acc", "unchanged_kept",
         "removed_P", "removed_R", "removed_F1", "new_P", "new_R", "unknown_rate", "moved_R_disp[0.1,0.3)", "moved_R_disp[0.3,1)",
-        "moved_R_disp>=1")  # fmt: skip
+        "moved_R_disp>=1", "new_F1", "new_ag_P", "new_ag_R", "new_ag_F1", "cand_per_pair", "cand_recall_new",
+        "cand_new_in_blob")  # fmt: skip
+CAND_COUNTS = ("diag_cand_n", "diag_cand_new_hit", "diag_cand_moved_hit", "diag_cand_multi", "diag_cand_multi_n", "new_tp",
+               "new_fp", "new_ag_tp", "new_ag_fp")  # fmt: skip
 
 
 def _pick(summary: Mapping[str, Any]) -> dict[str, Any]:
     M = summary["metrics"]
-    return {k: M[k]["value"] for k in KEYS if k in M} | {"moved_fp": summary["counts"]["moved_fp"],
-                                                       "moved_tp": summary["counts"]["moved_tp"]}  # fmt: skip
+    C = summary["counts"]
+    return ({k: M[k]["value"] for k in KEYS if k in M} | {"moved_fp": C["moved_fp"], "moved_tp": C["moved_tp"]}
+            | {k: C[k] for k in CAND_COUNTS if k in C})  # fmt: skip
 
 
 def select(rows: Mapping[str, Mapping[str, Mapping[str, Any]]], crit: Mapping[str, Any], base: str = "off") -> dict[str, Any]:
@@ -53,13 +57,28 @@ def select(rows: Mapping[str, Mapping[str, Mapping[str, Any]]], crit: Mapping[st
 
 
 def run_variants(cfg: dict[str, Any], variants: Mapping[str, Mapping[str, Any]], rid: str, split: str,
-                 workers: int | None = None) -> tuple[dict[str, Any], dict[str, str]]:  # fmt: skip
-    """FULL on `split` (both modes) once per variant (dotted overrides) into `outputs/<rid>/<variant>`."""
+                 workers: int | None = None, details: bool = False, resume: bool = False,
+                 only: list[str] | None = None) -> tuple[dict[str, Any], dict[str, str]]:  # fmt: skip
+    """FULL on `split` (both modes) once per variant (dotted overrides) into `outputs/<rid>/<variant>`.
+
+    `resume`: a variant whose `metrics.json` exists is read back instead of rerun (CHANGE 3 Part N: the SAM
+    variants wait for the SAM cache). `only`: run just these variants (others are read back if present).
+    """
+    import json
+
     rows: dict[str, Any] = {}
     paths: dict[str, str] = {}
     for name, ov in variants.items():
+        mp = outputs_root(cfg) / rid / name / "metrics.json"
+        if (resume and mp.exists()) or (only is not None and name not in only):
+            if mp.exists():
+                summ = json.loads(mp.read_text(encoding="utf-8"))["metrics"]["summary"]
+                rows[name] = {m: _pick(summ[m]) for m in MODES}
+                paths[name] = str(mp)
+            continue
         c = apply_overrides(cfg, ov)
-        r = run_split(c, split, obs_modes=list(MODES), method="FULL", run_id=f"{rid}/{name}", workers=workers)
+        r = run_split(c, split, obs_modes=list(MODES), method="FULL", run_id=f"{rid}/{name}", workers=workers,
+                      details=details)  # fmt: skip
         rows[name] = {m: _pick(r["summary"][m]) for m in MODES}
         paths[name] = r["metrics_path"]
     return rows, paths
@@ -147,4 +166,70 @@ def format_part_c_pdel(res: Mapping[str, Any]) -> str:
     for n, v in res["verdict"].items():
         lines.append(f"{n:<12} pass={v['pass']}  mean removed F1 {100 * v['mean_removed_F1']:.1f}")
     lines.append(f"winner: {res['winner']}")
+    return "\n".join(lines)
+
+
+# --------------------------------------------------------------------------------------------
+# CHANGE 3 Part N (N1): blob splitting variants
+# --------------------------------------------------------------------------------------------
+
+
+def select_segment(rows: Mapping[str, Mapping[str, Mapping[str, Any]]], crit: Mapping[str, Any],
+                   order: list[str], base: str = "none") -> dict[str, Any]:  # fmt: skip
+    """Pre-written N1 rule (DECISIONS 2026-11-20, CHANGE 3 Part N): primary = perception class-agnostic candidate
+    hits on change targets (`diag_cand_new_hit + diag_cand_moved_hit`); guards (perception): moved F1 and
+    class-agnostic new F1 (at `p_new_min` 0) >= base - `f1_drop`; ties within `tie_objects` -> earlier in `order`."""
+    b = rows[base]["perception"]
+    drop, tie = float(crit["f1_drop"]), int(crit["tie_objects"])
+    verdict: dict[str, Any] = {}
+    for name in order:
+        if name not in rows:
+            continue
+        p = rows[name]["perception"]
+        ok = name == base or ((p["moved_F1"] or 0) >= (b["moved_F1"] or 0) - drop - 1e-12
+                              and (p["new_ag_F1"] or 0) >= (b["new_ag_F1"] or 0) - drop - 1e-12)  # fmt: skip
+        verdict[name] = {"pass": bool(ok), "hits": int(p["diag_cand_new_hit"] + p["diag_cand_moved_hit"])}
+    passing = [n for n in order if n in verdict and verdict[n]["pass"]]
+    best = max(verdict[n]["hits"] for n in passing)
+    winner = next(n for n in passing if verdict[n]["hits"] >= best - tie)  # simplest within the tie band
+    return {"verdict": verdict, "winner": winner, "missing": [n for n in order if n not in rows]}
+
+
+def run_part_n_segment(cfg: dict[str, Any], run_id: str = "chg3_partN_seg", split: str = "dev_tune",
+                       workers: int | None = None, only: list[str] | None = None) -> dict[str, Any]:  # fmt: skip
+    """The N1 variants (`chg3.part_n.segment`) on the tuning set, resumable, + the selection once all ran."""
+    t0 = time.time()
+    pc = cfg["chg3"]["part_n"]["segment"]
+    common = dict(pc.get("common") or {})
+    variants = {n: {**common, **(ov or {})} for n, ov in pc["variants"].items()}
+    rows, paths = run_variants(cfg, variants, run_id, split, workers, details=True, resume=True, only=only)
+    order = list(pc["variants"])
+    sel = select_segment(rows, pc["criterion"], order) if "none" in rows else {"verdict": {}, "winner": None}
+    if sel.get("missing"):
+        sel["winner"] = None  # not all variants ran yet
+    res = {"split": split, "variants": variants, "rows": rows, "criterion": dict(pc["criterion"]), **sel,
+           "metrics_paths": paths}  # fmt: skip
+    path = write_metrics(outputs_root(cfg) / run_id, res, cfg, extra={"wall_time_s": time.time() - t0})
+    return {**res, "metrics_path": str(path)}
+
+
+def format_part_n_segment(res: Mapping[str, Any]) -> str:
+    """Table of the N1 variants (perception candidates and new objects, both modes' moved), verdicts, winner."""
+    cols = [("cands", "diag_cand_n", 0), ("new hit", "diag_cand_new_hit", 0), ("mv hit", "diag_cand_moved_hit", 0),
+            ("in blob", "diag_cand_multi", 0), ("new P", "new_P", 1), ("new R", "new_R", 1), ("ag P", "new_ag_P", 1),
+            ("ag R", "new_ag_R", 1), ("ag F1", "new_ag_F1", 1), ("moved F1", "moved_F1", 1),
+            ("f.move", "false_move_rate", 1)]  # fmt: skip
+    head = f"{'variant':<14} {'mode':<11}" + "".join(f"{c[0]:>9}" for c in cols)
+    lines = [head]
+    for name, r in res["rows"].items():
+        for m in MODES:
+            v = r[m]
+            cells = []
+            for _, k, pct in cols:
+                x = v.get(k)
+                cells.append(f"{'-' if x is None else (f'{100 * x:.1f}' if pct else str(int(x))):>9}")
+            lines.append(f"{name:<14} {m:<11}" + "".join(cells))
+    for n, v in res.get("verdict", {}).items():
+        lines.append(f"{n:<14} pass={v['pass']}  hits(new+moved) {v['hits']}")
+    lines.append(f"winner: {res.get('winner')}" + (f"  (missing: {res['missing']})" if res.get("missing") else ""))
     return "\n".join(lines)

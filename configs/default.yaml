@@ -327,6 +327,17 @@ chg3:                      # CHANGE 3 dev_tune sweeps (`lsg chg3 parta`; docs/CH
     criterion:             # written before the sweep (DECISIONS 2026-11-20): pass in both modes
       false_move_frac: 0.5 # false-move rate <= 0.5 x the `off` row's
       f1_drop: 0.02        # moved F1 >= the `off` row's - 0.02; winner = highest mean moved F1 of passing rows
+  part_n:                  # CHANGE 3 Part N (new objects; DECISIONS 2026-11-20), rules written before the runs
+    segment:               # N1 blob splitting (`lsg chg3 partn-seg`), list order = simplicity order (ties)
+      common: {confidence.candidates.p_new_min: 0.0}   # emit every candidate: the F1 guard sees the fragments
+      variants:            # `none` also scores identity pairs (tau_id -1: rejects nothing) for `lsg chg3 idstats`
+        none: {perception.segment.method: none, association.identity.enabled: true, association.identity.tau_id: -1.0}
+        none_add: {perception.segment.method: none, perception.relaxed.merge: add}
+        geometric: {perception.segment.method: geometric}
+        geometric_add: {perception.segment.method: geometric, perception.relaxed.merge: add}
+        sam: {perception.segment.method: sam}
+        sam_add: {perception.segment.method: sam, perception.relaxed.merge: add}
+      criterion: {f1_drop: 0.01, tie_objects: 2}
   part_c:                  # §5: confidence policy from sensor statistics (lsg chg3 votestats; DECISIONS 2026-11-20)
     votestats:             # vote weights as likelihood ratios (eval/votestats.py), written before the run
       min_votes: 20        # a vote kind with fewer counted votes in either class keeps `fallback`

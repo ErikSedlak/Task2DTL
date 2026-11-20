@@ -377,6 +377,17 @@ def _cmd_chg3_votestats(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_chg3_partn_seg(args: argparse.Namespace) -> int:
+    """`lsg chg3 partn-seg`: CHANGE 3 Part N (N1) blob-splitting variants on dev_tune + the pre-written selection."""
+    from lsg.eval.chg3_checks import format_part_n_segment, run_part_n_segment
+
+    only = args.only.split(",") if args.only else None
+    res = run_part_n_segment(load_config(args.config), args.run_id, args.split, args.workers, only)
+    print(format_part_n_segment(res))
+    print(f"metrics: {res['metrics_path']}")
+    return 0
+
+
 def _cmd_chg3_idstats(args: argparse.Namespace) -> int:
     """`lsg chg3 idstats --run <dir>`: identity-check similarity of same / different pairs (CHANGE 3 Part N)."""
     from pathlib import Path
@@ -562,6 +573,13 @@ def main(argv: list[str] | None = None) -> int:
     smc.add_argument("--config", default=None)
     smc.set_defaults(func=_cmd_sam_cache)
 
+    pns = c3s.add_parser("partn-seg", help="Part N (N1): blob-splitting variants + selection (resumable)")
+    pns.add_argument("--run-id", default="chg3_partN_seg")
+    pns.add_argument("--split", default="dev_tune", help="tuning split only (hard rule 4)")
+    pns.add_argument("--only", default=None, help="comma list of variants to run now (others read back if present)")
+    pns.add_argument("--workers", type=int, default=None)
+    pns.add_argument("--config", default=None)
+    pns.set_defaults(func=_cmd_chg3_partn_seg)
     ids = c3s.add_parser("idstats", help="Part N: identity-check similarity of same / different pairs from details/")
     ids.add_argument("--run", required=True, help="run directory (or id under outputs/) with details/<mode>/")
     ids.add_argument("--modes", default="oracle,perception")
