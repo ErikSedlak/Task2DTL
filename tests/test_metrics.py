@@ -247,3 +247,29 @@ def test_perception_obs_truth_and_candidate_counts(gt):
     # oracle pairs carry no candidate diagnostics
     so = score_pair(G, gt, "oracle", CFG)
     assert so["counts"]["diag_cand"] == 0 and aggregate([so], CFG)["metrics"]["cand_recall_new"]["value"] is None
+
+
+def test_class_agnostic_new_counts(gt):
+    """CHANGE 3 Part N: perception new P/R without the label condition; oracle = labelled."""
+    G = graph([node("n0", "bag", "new", (2.05, 0, 0)), node("n1", "lamp", "new", (0, 2.0, 0), h=0.3),
+               node("n2", "chair", "new", (3, 3, 0)), node("n3", "plant", "new", (7, 7, 0))])  # fmt: skip
+    c = score_pair(G, gt, "perception", CFG)["counts"]
+    assert (c["new_tp"], c["new_fp"], c["new_fn"], c["new_ignored"]) == (1, 3, 1, 0)  # bag != box, chair != pillow
+    assert (c["new_ag_tp"], c["new_ag_fp"], c["new_ag_fn"], c["new_ag_ignored"]) == (2, 1, 0, 1)
+    M = aggregate([score_pair(G, gt, "perception", CFG)], CFG)["metrics"]
+    assert M["new_ag_R"]["value"] == 1.0 and M["new_ag_P"]["value"] == pytest.approx(2 / 3)
+    co = score_pair(good_prediction(), gt, "oracle", CFG, obs_truth=TRUTH)["counts"]
+    assert [co[f"new_ag_{k}"] for k in ("tp", "fp", "fn", "ignored")] == [co[f"new_{k}"] for k in ("tp", "fp", "fn", "ignored")]
+
+
+def test_blob_diagnostic_and_candidate_class(gt):
+    """CHANGE 3 Part N: a candidate holding both GT-new centroids is a blob; candidate classes."""
+    from lsg.eval.metrics import candidate_counts, candidate_detail_rows
+    from lsg.obs import ObsInstance
+
+    blob = ObsInstance("c0", "box", [("box", 1.0)], None, A([[-0.2, -0.2, -0.1], [2.2, 2.2, 0.1]], float))
+    cands = [blob, _cand("c1", "table", (1.0, 1.0, 0)), _cand("c2", "lamp", (9, 9, 9)), _cand("c3", "bag", (2.05, 0, 0))]
+    c = candidate_counts(cands, gt, CFG)
+    assert (c["diag_cand_multi"], c["diag_cand_multi_n"]) == (2, 1)
+    rows = {r["token"]: r["cls"] for r in candidate_detail_rows(cands, gt, CFG)}
+    assert rows == {"c0": "ref", "c1": "ref", "c2": "none", "c3": "new"}  # the blob's centroid is near the table

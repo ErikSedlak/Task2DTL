@@ -159,6 +159,7 @@ def match_new(
     cfg: Mapping[str, Any],
     obs_truth: Mapping[str, tuple[int, str]] | None = None,
     label_nyu: Mapping[str, int] | None = None,
+    use_label: bool = True,
 ) -> dict[str, Any]:
     """Match predicted new nodes to GT new objects with the mode's rule (§5).
 
@@ -170,6 +171,8 @@ def match_new(
         cfg: Full config (`cfg["eval"]` thresholds).
         obs_truth: Oracle: `{token: (rescan objectId, label)}` (unshuffled, eval only).
         label_nyu: Perception: label -> nyu40 fallback.
+        use_label: Perception: False drops the class condition (class-agnostic new P/R, CHANGE 3
+            Part N); oracle matching is by instance and does not use labels.
 
     Returns:
         `{"tp": {pred id: GT id}, "fp": [pred ids], "ignored": [pred ids], "fn": [GT ids]}`.
@@ -185,10 +188,10 @@ def match_new(
             elif oid is not None and oid in gt.objects and gt.objects[oid].status == "dont_care":
                 ignored.append(n.id)
     elif mode == "perception":
-        tp = greedy_perception_match(pred_new, _gt_new_boxes(gt), cfg, label_nyu)
+        tp = greedy_perception_match(pred_new, _gt_new_boxes(gt), cfg, label_nyu, use_label)
         rest = [n for n in pred_new if n.id not in tp]
         dc = _dont_care_boxes(gt)
-        ignored = [n.id for n in rest if any(perception_compatible(n, g, cfg, label_nyu)[0] for g in dc)]
+        ignored = [n.id for n in rest if any(perception_compatible(n, g, cfg, label_nyu, use_label)[0] for g in dc)]
     else:
         raise ValueError(f"unknown mode {mode!r}")
     ign = set(ignored)
@@ -231,7 +234,7 @@ def perception_obs_truth(
 
 CAND_KEYS = ("diag_cand", "diag_cand_n", "diag_cand_new_n", "diag_cand_new_hit", "diag_cand_new_lab",
              "diag_cand_moved_n", "diag_cand_moved_hit", "diag_cand_moved_lab", "diag_cand_explained",
-             "diag_cand_app_n", "diag_cand_app_explained")  # fmt: skip
+             "diag_cand_app_n", "diag_cand_app_explained", "diag_cand_multi", "diag_cand_multi_n")  # fmt: skip
 
 
 def candidate_counts(
@@ -244,7 +247,10 @@ def candidate_counts(
       IoU >= `match_new_iou`), one-to-one greedy over all targets jointly;
     - `*_lab`: the same with the §5 label condition;
     - `diag_cand_explained`: candidates within the geometric gate of *any* GT rescan instance
-      (many-to-one); the rest are unexplained (people, mesh holes, structure, unannotated).
+      (many-to-one); the rest are unexplained (people, mesh holes, structure, unannotated);
+    - `diag_cand_multi` (CHANGE 3 Part N): GT new objects whose centroid lies inside a candidate
+      AABB (+ `MULTI_MARGIN`) that holds >= 2 GT-new centroids (merged "blobs");
+      `diag_cand_multi_n`: such candidates.
     """
     nodes = [obs_node(o) for o in obs if len(o.points)]
     new = _gt_new_boxes(gt)
@@ -261,7 +267,29 @@ def candidate_counts(
     kinds = [getattr(o, "kind", "depth") for o in obs if len(o.points)]
     c["diag_cand_app_n"] = sum(k == "appearance" for k in kinds)
     c["diag_cand_app_explained"] = sum(e for e, k in zip(expl, kinds) if k == "appearance")
+    c["diag_cand_multi"], c["diag_cand_multi_n"] = multi_object_candidates(nodes, new)
     return c
+
+
+MULTI_MARGIN = 0.05  # [m] AABB margin of the blob diagnostic (eval only)
+
+
+def multi_object_candidates(nodes: Sequence[Node], new: Sequence[GTBox]) -> tuple[int, int]:
+    """(GT new objects inside a candidate that holds >= 2 GT-new centroids, number of such candidates)."""
+    C = np.array([b.centroid for b in new if b.centroid is not None], float).reshape(-1, 3)
+    if not len(C):
+        return 0, 0
+    inside_any = np.zeros(len(C), bool)
+    n_multi = 0
+    for n in nodes:
+        assert n.bbox_3d is not None
+        lo = np.asarray(n.bbox_3d["min"], float) - MULTI_MARGIN
+        hi = np.asarray(n.bbox_3d["max"], float) + MULTI_MARGIN
+        m = np.all((C >= lo) & (C <= hi), axis=1)
+        if m.sum() >= 2:
+            n_multi += 1
+            inside_any |= m
+    return int(inside_any.sum()), n_multi
 
 
 # --------------------------------------------------------------------------------------------
@@ -279,8 +307,8 @@ THIN_CONF_KEYS = ("diag_freelike_removed", "diag_freelike_unch", "diag_thin_remo
 def count_keys(cfg: Mapping[str, Any]) -> list[str]:
     """All count names `score_pair` emits (fixed order; used for the bootstrap matrix)."""
     nb = len(cfg["eval"]["disp_buckets"])
-    keys = [f"{k}_{x}" for k in ("moved", "removed", "new") for x in ("tp", "fp", "fn")]
-    keys += ["new_ignored", "unch_n", "unch_strict", "unch_kept", "absent_n", "absent_del", "absent_move",
+    keys = [f"{k}_{x}" for k in ("moved", "removed", "new", "new_ag") for x in ("tp", "fp", "fn")]
+    keys += ["new_ignored", "new_ag_ignored", "unch_n", "unch_strict", "unch_kept", "absent_n", "absent_del", "absent_move",
              "ref_n", "ref_unknown", "ref_no_node", "assoc_n", "assoc_strict", "assoc_label",
              "moved_no_disp", "diag_free_unch", "diag_free_removed", "diag_free_absent",
              "diag_seen_absent", "diag_votes", "diag_free_unch_removed", "graph_invalid", *CAND_KEYS,
@@ -436,6 +464,10 @@ def score_pair(
     m = match_new(pred_new, gt, mode, cfg, truth, label_nyu)
     c["new_tp"], c["new_fp"], c["new_fn"] = len(m["tp"]), len(m["fp"]), len(m["fn"])
     c["new_ignored"] = len(m["ignored"])
+    # class-agnostic new P/R (CHANGE 3 Part N): perception without the label condition; oracle = labelled
+    m_ag = match_new(pred_new, gt, mode, cfg, truth, label_nyu, use_label=False) if mode == "perception" else m
+    c["new_ag_tp"], c["new_ag_fp"], c["new_ag_fn"] = len(m_ag["tp"]), len(m_ag["fp"]), len(m_ag["fn"])
+    c["new_ag_ignored"] = len(m_ag["ignored"])
     matched = set(m["tp"].values())
     for gid, g in gt.new.items():
         c[f"new_n_{g.size}"] += 1
@@ -457,16 +489,22 @@ def score_pair(
 
 def candidate_detail_rows(obs: Sequence[Any], gt: GTLabels, cfg: Mapping[str, Any]) -> list[dict[str, Any]]:
     """Per perception candidate: explained by any GT rescan instance (the `candidate_counts` gate), its
-    cluster votes and confidence (CHANGE 3 Part C, `lsg chg3 votestats`)."""
+    cluster votes and confidence (CHANGE 3 Part C, `lsg chg3 votestats`), and its class `cls`
+    (CHANGE 3 Part N): "new" = near a GT new object, "ref" = near only rescan instances of reference
+    objects, "none" = unexplained."""
     allb = gt_rescan_boxes(gt)
+    newb = _gt_new_boxes(gt)
+    new_ids = {b.id for b in newb}
     rows = []
     for o in obs:
         if not len(o.points):
             continue
         n = obs_node(o)
+        near = [b for b in allb if perception_compatible(n, b, cfg, None, use_label=False)[0]]
+        cls = "new" if any(b.id in new_ids for b in near) else ("ref" if near else "none")
         rows.append({"token": o.token, "kind": getattr(o, "kind", "depth"), "confidence": o.confidence,
                      "cand_votes": None if getattr(o, "cand_votes", None) is None else [int(x) for x in o.cand_votes],
-                     "explained": bool(any(perception_compatible(n, b, cfg, None, use_label=False)[0] for b in allb))})  # fmt: skip
+                     "explained": bool(near), "cls": cls})  # fmt: skip
     return rows
 
 
@@ -504,7 +542,7 @@ def object_rows(G_upd: Graph, gt: GTLabels, truth: Mapping[str, tuple[int, str]]
 def metric_defs(cfg: Mapping[str, Any]) -> dict[str, tuple[list[str], list[str], list[str]]]:
     """`{metric: (numerator keys, denominator keys, support keys)}`; value = Σnum / Σden."""
     d: dict[str, tuple[list[str], list[str], list[str]]] = {}
-    for k in ("moved", "removed", "new"):
+    for k in ("moved", "removed", "new", "new_ag"):
         tp, fp, fn = f"{k}_tp", f"{k}_fp", f"{k}_fn"
         d[f"{k}_P"] = ([tp], [tp, fp], [tp, fp])
         d[f"{k}_R"] = ([tp], [tp, fn], [tp, fn])
@@ -540,6 +578,8 @@ def metric_defs(cfg: Mapping[str, Any]) -> dict[str, tuple[list[str], list[str],
     d["cand_recall_new_labelled"] = (["diag_cand_new_lab"], ["diag_cand_new_n"], ["diag_cand_new_n"])
     d["cand_recall_moved_labelled"] = (["diag_cand_moved_lab"], ["diag_cand_moved_n"], ["diag_cand_moved_n"])
     d["cand_explained"] = (["diag_cand_explained"], ["diag_cand_n"], ["diag_cand_n"])
+    d["cand_new_in_blob"] = (["diag_cand_multi"], ["diag_cand_new_n"], ["diag_cand_new_n"])
+    d["cand_blobs_per_pair"] = (["diag_cand_multi_n"], ["diag_cand"], ["diag_cand_multi_n"])
     for b, name in enumerate(bucket_names(cfg["eval"]["disp_buckets"])):
         d[f"moved_R_disp{name}"] = ([f"moved_tp_d{b}"], [f"moved_n_d{b}"], [f"moved_n_d{b}"])
     for k in ("moved", "new"):
