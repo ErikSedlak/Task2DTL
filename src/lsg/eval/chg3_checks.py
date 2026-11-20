@@ -25,7 +25,7 @@ from lsg.eval.harness import MODES, run_split
 from lsg.runinfo import new_run_id, write_metrics
 
 KEYS = ("moved_P", "moved_R", "moved_F1", "false_move_rate", "false_deletion_rate", "unchanged_acc", "unchanged_kept",
-        "removed_P", "removed_R", "new_P", "new_R", "unknown_rate", "moved_R_disp[0.1,0.3)", "moved_R_disp[0.3,1)",
+        "removed_P", "removed_R", "removed_F1", "new_P", "new_R", "unknown_rate", "moved_R_disp[0.1,0.3)", "moved_R_disp[0.3,1)",
         "moved_R_disp>=1")  # fmt: skip
 
 
@@ -52,19 +52,26 @@ def select(rows: Mapping[str, Mapping[str, Mapping[str, Any]]], crit: Mapping[st
     return {"verdict": verdict, "winner": winner}
 
 
+def run_variants(cfg: dict[str, Any], variants: Mapping[str, Mapping[str, Any]], rid: str, split: str,
+                 workers: int | None = None) -> tuple[dict[str, Any], dict[str, str]]:  # fmt: skip
+    """FULL on `split` (both modes) once per variant (dotted overrides) into `outputs/<rid>/<variant>`."""
+    rows: dict[str, Any] = {}
+    paths: dict[str, str] = {}
+    for name, ov in variants.items():
+        c = apply_overrides(cfg, ov)
+        r = run_split(c, split, obs_modes=list(MODES), method="FULL", run_id=f"{rid}/{name}", workers=workers)
+        rows[name] = {m: _pick(r["summary"][m]) for m in MODES}
+        paths[name] = r["metrics_path"]
+    return rows, paths
+
+
 def run_part_a(cfg: dict[str, Any], run_id: str | None = None, split: str = "dev_tune",
                workers: int | None = None) -> dict[str, Any]:  # fmt: skip
     """All Part A variants on the tuning set + the selection; returns the result dict."""
     t0 = time.time()
     pc = cfg["chg3"]["part_a"]
     rid = run_id or new_run_id("chg3_partA")
-    rows: dict[str, Any] = {}
-    paths: dict[str, str] = {}
-    for name, ov in pc["variants"].items():
-        c = apply_overrides(cfg, ov)
-        r = run_split(c, split, obs_modes=list(MODES), method="FULL", run_id=f"{rid}/{name}", workers=workers)
-        rows[name] = {m: _pick(r["summary"][m]) for m in MODES}
-        paths[name] = r["metrics_path"]
+    rows, paths = run_variants(cfg, pc["variants"], rid, split, workers)
     sel = select(rows, pc["criterion"])
     res = {"split": split, "variants": {n: dict(v) for n, v in pc["variants"].items()}, "rows": rows,
            "criterion": dict(pc["criterion"]), **sel, "metrics_paths": paths}  # fmt: skip
@@ -85,5 +92,59 @@ def format_part_a(res: Mapping[str, Any]) -> str:
                                                        for c in cols) + f"{v['moved_tp']:>5}/{v['moved_fp']:<4}")  # fmt: skip
     for n, v in res["verdict"].items():
         lines.append(f"{n:<10} pass={v['pass']}  mean moved F1 {100 * v['mean_moved_F1']:.1f}")
+    lines.append(f"winner: {res['winner']}")
+    return "\n".join(lines)
+
+
+# ---- Part C (C1): p_del at the learned vote weights ---------------------------------------------
+
+
+def select_p_del(rows: Mapping[str, Mapping[str, Mapping[str, Any]]], values: Mapping[str, float],
+                 ref: Mapping[str, Mapping[str, Any]], crit: Mapping[str, Any]) -> dict[str, Any]:  # fmt: skip
+    """Pre-written rule (DECISIONS 2026-11-20): false deletion <= ref + `fd_margin` in both modes; then the
+    highest mean removed F1 (oracle, perception); ties to the value nearest `tie_target`; None if none qualifies."""
+    margin, target = float(crit["fd_margin"]), float(crit["tie_target"])
+    verdict: dict[str, Any] = {}
+    for name, r in rows.items():
+        ok = all(r[m]["false_deletion_rate"] is not None
+                 and r[m]["false_deletion_rate"] <= ref[m]["false_deletion_rate"] + margin + 1e-12 for m in MODES)  # fmt: skip
+        verdict[name] = {"pass": bool(ok), "p_del": float(values[name]),
+                         "mean_removed_F1": sum(r[m]["removed_F1"] or 0.0 for m in MODES) / len(MODES)}  # fmt: skip
+    ok = [n for n in rows if verdict[n]["pass"]]
+    winner = (max(ok, key=lambda n: (round(verdict[n]["mean_removed_F1"], 9), -abs(verdict[n]["p_del"] - target)))
+              if ok else None)  # fmt: skip
+    return {"verdict": verdict, "winner": winner}
+
+
+def run_part_c_pdel(cfg: dict[str, Any], run_id: str | None = None, split: str = "dev_tune",
+                    workers: int | None = None) -> dict[str, Any]:  # fmt: skip
+    """The p_del sweep at the configured (learned) weights + the selection against the Part A reference run."""
+    import json
+
+    t0 = time.time()
+    pc = cfg["chg3"]["part_c"]["p_del"]
+    rid = run_id or new_run_id("chg3_partC_pdel")
+    values = {f"p{v:g}": float(v) for v in pc["values"]}
+    rows, paths = run_variants(cfg, {n: {"confidence.p_del": v} for n, v in values.items()}, rid, split, workers)
+    ref_m = json.loads((outputs_root(cfg) / pc["ref_run"] / "metrics.json").read_text(encoding="utf-8"))["metrics"]
+    ref = {m: _pick(ref_m["summary"][m]) for m in MODES}
+    sel = select_p_del(rows, values, ref, pc["criterion"])
+    res = {"split": split, "values": values, "rows": rows, "ref_run": pc["ref_run"], "ref_rows": ref,
+           "criterion": dict(pc["criterion"]), **sel, "metrics_paths": paths}  # fmt: skip
+    path = write_metrics(outputs_root(cfg) / rid, res, cfg, extra={"wall_time_s": time.time() - t0})
+    return {**res, "metrics_path": str(path)}
+
+
+def format_part_c_pdel(res: Mapping[str, Any]) -> str:
+    """Table of the p_del sweep with the Part A reference row, the verdicts and the winner."""
+    cols = ("removed_F1", "removed_P", "removed_R", "false_deletion_rate", "unchanged_kept", "moved_F1", "false_move_rate")
+    lines = [f"{'variant':<12} {'mode':<11}" + "".join(f"{c[:14]:>15}" for c in cols)]
+    for name, r in {"ref(PartA)": res["ref_rows"], **res["rows"]}.items():
+        for m in MODES:
+            v = r[m]
+            lines.append(f"{name:<12} {m:<11}" + "".join(f"{'n/a' if v.get(c) is None else f'{100 * v[c]:.1f}':>15}"
+                                                        for c in cols))  # fmt: skip
+    for n, v in res["verdict"].items():
+        lines.append(f"{n:<12} pass={v['pass']}  mean removed F1 {100 * v['mean_removed_F1']:.1f}")
     lines.append(f"winner: {res['winner']}")
     return "\n".join(lines)

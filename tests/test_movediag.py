@@ -62,3 +62,21 @@ def test_part_a_selection_rule():
     assert s["verdict"]["a"]["pass"] and not s["verdict"]["b"]["pass"] and not s["verdict"]["c"]["pass"]
     assert s["winner"] == "a"  # a and d tie: the first listed wins
     assert select({"off": row(0.2, 0.5), "x": row(0.15, 0.5)}, crit)["winner"] is None
+
+
+def test_p_del_selection_rule():
+    """CHANGE 3 Part C: false deletion <= ref + 1 point in both modes, best mean removed F1, ties nearest 0.2."""
+    from lsg.eval.chg3_checks import select_p_del
+
+    def row(fd, f1):
+        return {m: {"false_deletion_rate": fd, "removed_F1": f1} for m in ("oracle", "perception")}
+
+    ref = row(0.03, 0.30)
+    crit = CFG["chg3"]["part_c"]["p_del"]["criterion"]
+    rows = {"p0.1": row(0.035, 0.40), "p0.3": row(0.035, 0.45), "p0.4": row(0.05, 0.60)}
+    vals = {"p0.1": 0.1, "p0.3": 0.3, "p0.4": 0.4}
+    s = select_p_del(rows, vals, ref, crit)
+    assert not s["verdict"]["p0.4"]["pass"] and s["winner"] == "p0.3"  # p0.4 deletes too much
+    tie = select_p_del({"p0.05": row(0.03, 0.4), "p0.3": row(0.03, 0.4)}, {"p0.05": 0.05, "p0.3": 0.3}, ref, crit)
+    assert tie["winner"] == "p0.3"  # equal F1: nearer 0.2
+    assert select_p_del({"p0.4": row(0.05, 0.6)}, {"p0.4": 0.4}, ref, crit)["winner"] is None

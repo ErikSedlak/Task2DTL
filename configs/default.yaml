@@ -287,3 +287,7 @@ chg3:                      # CHANGE 3 dev_tune sweeps (`lsg chg3 parta`; docs/CH
       fallback: 2.5
       n_boot: 1000
       seed: 0
+    p_del:                 # sweep at the learned weights (`lsg chg3 pdel`), rule written before the run (DECISIONS)
+      values: [0.05, 0.1, 0.2, 0.3, 0.4]
+      ref_run: chg3_partA_final/FULL   # the Part A default (equal weights 2.5)
+      criterion: {fd_margin: 0.01, tie_target: 0.2}   # false deletion <= ref + 1 point in both modes; best mean removed F1

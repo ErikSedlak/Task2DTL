@@ -317,6 +317,16 @@ def _cmd_chg3_parta(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_chg3_pdel(args: argparse.Namespace) -> int:
+    """`lsg chg3 pdel`: p_del sweep on dev_tune at the learned weights + the pre-written selection (Part C)."""
+    from lsg.eval.chg3_checks import format_part_c_pdel, run_part_c_pdel
+
+    res = run_part_c_pdel(load_config(args.config), run_id=args.run_id, split=args.split, workers=args.workers)
+    print(format_part_c_pdel(res))
+    print(f"metrics: {res['metrics_path']}")
+    return 0
+
+
 def _cmd_chg3_votestats(args: argparse.Namespace) -> int:
     """`lsg chg3 votestats --run <dir>`: vote weights as likelihood ratios from a details run (CHANGE 3 Part C)."""
     from pathlib import Path
@@ -482,6 +492,12 @@ def main(argv: list[str] | None = None) -> int:
     pa.add_argument("--workers", type=int, default=None)
     pa.add_argument("--config", default=None)
     pa.set_defaults(func=_cmd_chg3_parta)
+    pd = c3s.add_parser("pdel", help="Part C: p_del sweep at the configured vote weights + selection")
+    pd.add_argument("--run-id", default="chg3_partC_pdel")
+    pd.add_argument("--split", default="dev_tune", help="tuning split only (hard rule 4)")
+    pd.add_argument("--workers", type=int, default=None)
+    pd.add_argument("--config", default=None)
+    pd.set_defaults(func=_cmd_chg3_pdel)
     vs = c3s.add_parser("votestats", help="Part C: vote weights (likelihood ratios) from a run's details/")
     vs.add_argument("--run", required=True, help="run directory (or id under outputs/) with details/<mode>/")
     vs.add_argument("--modes", default="oracle,perception")
