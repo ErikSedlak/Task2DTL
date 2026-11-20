@@ -498,3 +498,17 @@ Format: **date — decision.** Why. *Alternatives considered.* (status: fixed / 
 - **CLIP vocabulary excludes `dev_tune`'s rooms** (Erik, answer 2; `train_meta.exclude_splits`). Top-100 labels vs the M7 vocabulary: in coffee machine, flowers, toy; out flower, rug, stuffed animal. Every default perception number shifts slightly (new vocabulary, new CLIP cache keys). `ablations.M7_OVERRIDES` pins the M7 exclusion list, so `FULL-m7` and the audit still reproduce `m7_final`. (fixed)
 - **CLAUDE.md hard rule 4: tune on `splits/dev_tune.txt`**; `dev_train` stays the 3-pair smoke / regression set (Erik's answer 1). (fixed)
 - No new dependency. (fixed)
+- **Download + baseline (2026-11-20, Erik asked Claude Code to run the steps).** Tier 3: 60 scans (3.3 GB incl. textures) + 30 texture sets, all `sequence.zip` pass `testzip`, all 66 `dev_tune` scans load; two downloads failed on dropped connections (one file already present from the first attempt, `bcb0fe1b…/semseg.v2.json` re-downloaded). Regression: `lsg ablate --names FULL-m7 --split dev_train --run-id chg3_reg_m7` = `m7_final/dev/FULL`, **0 differences in 2,898 summary + per-pair values** (43 s). Baseline `lsg ablate --names FULL --split dev_tune --run-id chg3_dev_baseline` (git 7a98d01, clean; 153 s on CUDA after a CPU start that was stopped when CUDA came back; ≈ 10 pairs' features were computed on CPU, cached, device not in the key). GT support: moved 79, removed 83, new 215, unchanged 353, absent-unlisted 196 (791 reference nodes).
+
+  | FULL on dev_tune (CHANGE 1 + 2 + flat 0.9) | oracle | perception |
+  |---|---|---|
+  | removed P / R | 83.3 / 24.1 | 50.0 / 25.3 |
+  | false deletion | 2.6 | 4.6 |
+  | **false move** | **18.9** (37 / 196) | **13.3** (26 / 196) |
+  | unchanged strict / kept | 71.1 / 78.8 | 53.3 / 82.7 |
+  | moved P / R / F1 | 39.5 / 78.5 / 52.5 (95 FP) | 33.6 / 48.1 / 39.6 (75 FP) |
+  | new P / R | 92.7 / 53.0 | 2.4 / 10.2 (935 new nodes) |
+  | unknown rate | 24.9 | 39.7 |
+  | candidates per pair / explained / recall new, moved-to | – | 34.8 / 30.1% / 34.0%, 74.7% |
+
+  Reading: the largest error is wrong moves (oracle 95 moved FP against 62 TP; 19% of absent-unlisted nodes moved), which is exactly CHANGE 3 Part A's target; removed recall is low (24–25%) at a high oracle precision, Part C's target (seen-vote weight). These are the comparison numbers for Parts A and C (`docs/CHANGE_online_graph.md` §7.3). (measured)

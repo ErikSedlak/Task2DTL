@@ -1,6 +1,6 @@
 # CHANGE 3 — tuning set, move evidence, incremental graph, confidence policy (proposal, 2026-11-20)
 
-**Status (2026-11-20): all questions answered (§8); Part 0 implemented, waiting for the tier-3 download.** Builds on CHANGE 1 + 2,
+**Status (2026-11-20): all questions answered (§8); Part 0 done (incl. download and the `dev_tune` baseline); next Part A.** Builds on CHANGE 1 + 2,
 which Erik fixed as the **final method** (2026-11-20). Comes from a logic review of the whole solution (chat,
 2026-11-20). Nothing here changes DESIGN.md before sign-off.
 
@@ -216,7 +216,8 @@ Original questions:
 - [x] answers to §8
 - [x] Part 0: `lsg splits devtune`, split + download lists, vocabulary exclusion, CLAUDE.md hard rule 4, flat
       0.9 / 0.2 start value (2026-11-20)
-- [ ] **Erik:** download tier 3 + textures; then the `dev_tune` baseline (≈ 1.5 min)
+- [x] download tier 3 + textures; regression `FULL-m7` = `m7_final` on dev_train; baseline
+      `outputs/chg3_dev_baseline/FULL` (numbers in DECISIONS 2026-11-20)
 - [ ] Part A: rule + variants, tests, dev_tune comparison
 - [ ] Part C: vote statistics on dev_tune, weights, candidate track confidence, `p_new_min`
 - [ ] Part B: `peek()`, candidate tracks, snapshot method runs, CLIP relabel rule, online alignment (per §8.4),
