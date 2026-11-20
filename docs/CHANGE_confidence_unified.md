@@ -1,8 +1,12 @@
 # CHANGE 2 — one confidence for reference nodes and new objects (proposal, 2026-11-20)
 
-**Status: decided by Erik, all open questions answered (2026-11-20), NOT implemented.** No code or config has changed. Part A needs no code (a config
-flip). Part B is a design for review; the open questions in §7 must be answered first.
-Builds on CHANGE 1 (`docs/CHANGE_candidate_detection.md`, implemented 2026-11-19, val effect not measured yet).
+**Status (2026-11-20): IMPLEMENTED, default ON** (Parts A and B). Code: `confidence` block of
+`configs/default.yaml` (`class_priors: false`, `prior_p`, `p_del: 0.027`, `confidence.candidates`),
+`perception/voxels.py`, `perception/source.py`, `change/confidence.py`, `change/baselines.py` (`emits_new`),
+`change/online.py` (snapshot sidecar), `viz/rerun_timeline.py` (`world/candidates`), `eval/newcurve.py`
+(`lsg newcurve`), ablation rows `FULL-candconf`, `FULL-candconf-free`, `FULL+classprior`, `FULL-m7`.
+Choices made where this document was silent, and the dev evidence: DECISIONS "2026-11-20 — CHANGE 2 implemented".
+Builds on CHANGE 1 (`docs/CHANGE_candidate_detection.md`, implemented 2026-11-19).
 
 ## 1. Why
 
@@ -182,13 +186,14 @@ No new dependency (numpy / scipy).
 5. ~~Weight of correlated views~~: **answered** (Erik): they keep the small weight (`L_corr` 0.25, `corr_cap` 1.0).
 6. ~~Snapshots / visualisation~~: **answered** (Erik): yes. Snapshots get a candidates sidecar (box, label, confidence per candidate at that frame) and `lsg viz rerun` draws it as `world/candidates`, coloured by confidence, so candidates are seen appearing, being confirmed and being deleted.
 
-## 8. Work list (not started)
+## 8. Work list
 
 - [x] all questions of §7 answered (the last: drop low-confidence candidates)
-- [ ] Part A: config flip (`class_priors: false`, `prior_p: 0.5`, `p_del: 0.027`), ablation row `FULL+classprior`, dev check that it reproduces `FULL-priors` and a margin between 1 and 2 votes
-- [ ] `perception/voxels.py`: per-voxel log-odds, correlated cap, `kept_by_logodds`; see-through update (`observe_free(depth, K, pose)`); `perception/source.py`: call it per frame, thresholds in `finish`, candidate confidence; `obs/base.py`: `ObsInstance.confidence`; `change/confidence.py`: new node from candidate confidence; emission threshold in the update step
-- [ ] config block `confidence.candidates` (`enabled: true`, `L_corr`, `corr_cap`, `free_margin`, `free_window`, `l_keep_small` 2.5, `l_keep_large` 2.5, `p_new_min`)
-- [ ] snapshots: per-frame candidate sidecar (`candidates_frame_XXXXXX.json`: box, label, confidence), `viz/rerun_timeline.py` draws `world/candidates` coloured by confidence (the live label stays "candidate"; moved / new are assigned at the end)
-- [ ] unit tests: equivalence with CHANGE 1; a transient (box present for a few frames, then removed) is dropped by see-through votes; occlusion and out-of-view give no free vote; silhouette window; correlated cap; determinism; `tests/test_no_leak.py`
-- [ ] harness / eval: candidates with confidence saved; `new_pr_curve` helper; ablation rows; `lsg ablate` run by Erik (> 1 min)
-- [ ] DECISIONS, DESIGN §3 / §6.11, CODE_STRUCTURE, REPORT note, STATUS
+- [x] Part A: config (`class_priors: false`, `prior_p: 0.5` (renamed from `fallback_p`), `p_del: 0.027`), ablation rows `FULL+classprior` and `FULL-priors` (now with explicit 0.9 / 0.2); unit test: the same decisions as `FULL-priors` for every vote combination
+- [x] `perception/voxels.py`: per-voxel log-odds, correlated cap, `kept_by_logodds`, `observe_free(dmin, K, pose, skip)`, `window_min_depth`; `perception/source.py`: free votes per frame on both depth grids, thresholds in `_depth_clusters`, candidate confidence; `obs/base.py`: `ObsInstance.confidence`; `change/confidence.py`: `obs_logodds`; emission threshold in `change/baselines.py` (`emits_new`, all methods)
+- [x] config block `confidence.candidates` (`enabled: true`, `L_corr`, `corr_cap`, `free_votes`, `free_margin`, `free_window`, `l_keep_small` 2.5, `l_keep_large` 2.5, `p_new_min`)
+- [x] snapshots: per-frame candidate sidecar (`candidates_frame_XXXXXX.json`: box, confidence, size, tier; no labels mid-walk), `viz/rerun_timeline.py` draws `world/candidates` grey → green by confidence
+- [x] unit tests (`tests/test_perception.py`, `test_confidence.py`, `test_newcurve.py`, `test_viz.py`, `test_ablations.py`, `test_audit.py`); `tests/test_no_leak.py` passes
+- [x] harness / eval: candidates saved with `confidence` / `emits_new`; `lsg newcurve` instead of 3 val rows at different `p_new_min` (scored from the saved graphs); ablation rows; the audit forces `FULL-m7`
+- [x] DECISIONS, DESIGN §3 / §6.11, CODE_STRUCTURE, REPORT / README notes, STATUS
+- [ ] val: FULL (new default) on `eval_val`, then the comparison rows and `lsg newcurve` (§6)

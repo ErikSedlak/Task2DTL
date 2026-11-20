@@ -17,7 +17,7 @@ several viewpoints) lowers its confidence. Unseen nodes stay `unknown`, not `rem
 - Spec: [docs/DESIGN.md](docs/DESIGN.md); decision log: [docs/DECISIONS.md](docs/DECISIONS.md).
 - Code map: [docs/CODE_STRUCTURE.md](docs/CODE_STRUCTURE.md).
 
-**Headline results** (full method FULL, 110 validation pairs; 95% bootstrap CIs in [docs/REPORT.md](docs/REPORT.md)). These are the M7 numbers with the strict candidate rules (`perception.relaxed.enabled: false`, ablation row `FULL-relaxed`); the relaxed default of [CHANGE 1](docs/CHANGE_candidate_detection.md) is not yet measured on val:
+**Headline results** (full method FULL, 110 validation pairs; 95% bootstrap CIs in [docs/REPORT.md](docs/REPORT.md)). These are the M7 numbers (strict candidate rules and learned class priors, ablation row `FULL-m7`); the current defaults of [CHANGE 1](docs/CHANGE_candidate_detection.md) (relaxed candidate rules) and [CHANGE 2](docs/CHANGE_confidence_unified.md) (no class prior, candidate confidence with see-through votes) are reported separately in `docs/DECISIONS.md`:
 
 | mode | removed P / R | false deletion ↓ | unchanged kept | moved F1 | new P / R |
 |---|---|---|---|---|---|
@@ -102,14 +102,14 @@ This prints a metrics table per mode and writes `outputs/demo/`:
 | `candidates/<ref>_<rescan>.json` | perception candidates (centroid, box, CLIP top-k) |
 | `metrics.json` | all scores, config, config hash and git SHA |
 
-**Expected result** (24 processed frames; the oracle graph is the one of the reported dev run `m7_final/dev/FULL`; perception uses the relaxed candidate rules of [CHANGE 1](docs/CHANGE_candidate_detection.md) and differs from it only in the `new` nodes, see below):
+**Expected result** (24 processed frames; the oracle states are those of the reported dev run `m7_final/dev/FULL`, only the confidence values differ since [CHANGE 2](docs/CHANGE_confidence_unified.md) removed the class prior; perception uses the defaults of [CHANGE 1](docs/CHANGE_candidate_detection.md) and CHANGE 2, one decorrelated observation per candidate voxel):
 
 | mode | node states (things + anchors) | scored |
 |---|---|---|
 | oracle | 7 unchanged, 1 moved, 6 unknown | moved 1 TP / 1 FN, unchanged kept 6 / 6, 0 of 5 absent-unlisted deleted |
-| perception | 5 unchanged, 1 moved, 8 unknown, 4 new | moved 0 TP / 1 FP / 2 FN, 4 new FP (this pair has no GT-new object), unchanged kept 5 / 6, 0 of 5 absent-unlisted deleted |
+| perception | 5 unchanged, 2 moved, 7 unknown, 11 new | moved 0 TP / 1 FP / 2 FN, 11 new FP (this pair has no GT-new object), unchanged kept 5 / 6, 0 of 5 absent-unlisted deleted, 1 of 5 falsely moved |
 
-With `perception.relaxed.enabled: false` in the config (the ablation row `FULL-relaxed`), the perception graph is the M7 one: 1 new node.
+With the M7 method (the overrides of the ablation row `FULL-m7`: `perception.relaxed.enabled: false`, `confidence.candidates.enabled: false`, `confidence.class_priors: true`, `prior_p: 0.9`, `p_del: 0.2`), the perception graph is the M7 one: 1 new node. Perception runs also write `snapshots/perception/<pair>/candidates_frame_XXXXXX.json`; `lsg viz rerun` draws them as `world/candidates`, grey → green by confidence.
 
 **Runtime:** about 3 s per pair once `cache/` is warm (refined alignment, DINOv2 similarities, CLIP labels). The
 first run also computes these and downloads the models.

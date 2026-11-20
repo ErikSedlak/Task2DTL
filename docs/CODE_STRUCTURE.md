@@ -38,7 +38,7 @@ Task2/
 │   ├── change/              CHANGE LOGIC (method side)
 │   │   ├── pipeline.py      frame selection, per-pair preparation (G_ref, refined T_align)
 │   │   ├── visibility.py    per-frame votes (seen / free / free-like / no info), viewpoint decorrelation
-│   │   ├── confidence.py    log-odds confidence with class priors (M6)
+│   │   ├── confidence.py    log-odds confidence (M6; no class prior since CHANGE 2)
 │   │   ├── online.py        the online frame loop + tentative snapshots
 │   │   ├── association.py   B2 matching: confirmed nodes absorb their observations, then Hungarian
 │   │   ├── classify.py      final states: ICP moved test, removed / unknown rule
@@ -57,6 +57,7 @@ Task2/
 │   │   ├── ablations.py     the list of M7 experiments (rows) and `lsg ablate`
 │   │   ├── m7_checks.py     `lsg m7`: every row on dev / val / relchange, results.md, plots, determinism
 │   │   ├── audit.py         `lsg audit`: sample false positives, photo panels, CSV for manual verdicts (M8)
+│   │   ├── newcurve.py      `lsg newcurve`: new-object P / R over the candidate-confidence threshold (CHANGE 2)
 │   │   └── figures.py       the GT panel of the top-down figure (M8)
 │   ├── viz/                 PICTURES (M8; reads only method inputs / outputs)
 │   │   ├── topdown.py       before / after top-down PNG, nodes coloured by state
@@ -65,7 +66,7 @@ Task2/
 │   │   └── source.py        OracleSource
 │   └── perception/          finds rescan objects from depth/colour alone: the headline mode
 │       ├── residual.py      "nearer" depth pixels -> 3D points, minus reference surfaces / structure
-│       ├── voxels.py        4 cm voxel grid counting distinct viewpoints per voxel
+│       ├── voxels.py        4 cm voxel grid counting distinct viewpoints per voxel; per-voxel log-odds with see-through votes (CHANGE 2)
 │       ├── cluster.py       groups kept voxels into candidates; door swing-region filter
 │       ├── labeler.py       CLIP zero-shot labels from colour crops (cached)
 │       ├── appearance.py    rendered texture vs photo, DINOv2 patch features (cached) (M6)
@@ -215,7 +216,7 @@ The rule: no imports from `oracle/` / `eval/`, and no rescan annotations. Inputs
 | File | What it does |
 |---|---|
 | `residual.py` | Per frame: pixels where the camera measured something at least 10 cm **in front of** the rendered reference surface ("nearer"), turned into 3D points. Points within 5 cm of the reference mesh are dropped, and so are points within 10 cm of walls, doors, windows and other structure (not the floor, so objects standing on it survive). `SurfaceFilter` does the distance tests. |
-| `voxels.py` | `VoxelEvidence`: puts the points into 4 cm cubes and counts from how many *different* viewpoints each cube was hit, with the same 30 cm / 20° rule as the votes. A person walking by or sensor noise hits a cube from one viewpoint only; real objects are seen from many. |
+| `voxels.py` | `VoxelEvidence`: puts the points into 4 cm cubes and counts from how many *different* viewpoints each cube was hit, with the same 30 cm / 20° rule as the votes. A person walking by or sensor noise hits a cube from one viewpoint only; real objects are seen from many. CHANGE 2: each cube also has a log-odds confidence; a hit from a new viewpoint adds 2.5, a repeated viewpoint 0.25 (at most 1.0 in a row), and a later frame that sees *through* the cube (the depth around its pixel is > 15 cm behind it) subtracts the same. One new-viewpoint hit keeps a cube; a person who walks away is seen through and drops out. |
 | `cluster.py` | Cubes seen from enough viewpoints (CHANGE 1: 2 for small clusters; a second, lenient pass with 1 viewpoint keeps only clusters of at least 40 cubes, which replace the small ones inside them; `perception.relaxed`) are grouped into candidates (cubes at most 2 cubes apart belong together); groups of fewer than 5 cubes are dropped. Groups lying mostly in the swing area of a reference door are dropped too: a door opened since the reference visit would otherwise look like a new object. |
 | `labeler.py` | `CLIPLabeler`: shows CLIP the colour crops of a candidate and scores them against "a photo of a {label}" for every vocabulary label; keeps the top 5. Results are cached in `cache/clip/`, so reruns give identical labels. `StubLabeler` gives fixed answers for tests. |
 | `appearance.py` | (M6) Compares the real photo with the reference texture drawn from the same camera, in 14x14-pixel patches, with DINOv2 features (or a plain colour fallback). Only where depth says nothing is in front and nothing was seen through. Distances are taken relative to the frame's typical distance, because rescans are lit differently. `AppearanceRunner` does this per frame and caches the result in `cache/appearance/`. |
@@ -253,10 +254,10 @@ The rule: no imports from `oracle/` / `eval/`, and no rescan annotations. Inputs
 - Every method only decides states and geometry; relations are recomputed afterwards by `update.update_graph`.
 - M7 switches: `states.commitment: immediate` makes "removed" final at the frame where it was first tentatively reached, even if the object turns up later (B2 / FULL; an experiment showing why waiting until the end matters). `update.children_follow_parent` (FULL, `follow_parent`): an unseen thing standing on furniture that moved moves with it.
 
-### `change/confidence.py` — how sure are we that an object still exists (M6)
-- Start value = the class prior (e.g. 96.8% for a chair), as log-odds. Each counted "seen" vote adds `L_hit`, each counted "seen through" (or appearance free-like) vote subtracts 2.5; the total change per visit is capped at ±8.
-- A matched object gets credit for the viewpoints its observation was seen from; its old-place "seen through" votes are ignored (it moved). New objects start at 50%.
-- With these values, 2 "seen through" votes and nothing else delete a chair (17%), a bed needs 3, and an object seen 12 times and seen through 7 times is kept.
+### `change/confidence.py` — how sure are we that an object still exists (M6, CHANGE 2)
+- Start value: 50% for every object since CHANGE 2 ("no information", log-odds 0); before, the class prior (e.g. 96.8% for a chair), still available as the ablation row `FULL+classprior`. Each counted "seen" vote adds `L_hit` = 2.5, each counted "seen through" (or appearance free-like) vote subtracts 2.5; the total change is capped at ±8.
+- An object is deleted below 2.7% (`p_del` 0.027): 2 net "seen through" votes delete any object, 1 cannot, an object seen once and seen through twice is kept. These are the same decisions as M7's flat-prior row (90% / 20%).
+- A matched object gets credit for the viewpoints its observation was seen from; its old-place "seen through" votes are ignored (it moved). A new object takes its candidate's confidence (perception, CHANGE 2) or credit for its views (oracle).
 
 ### `change/association.py` — who is who (M5)
 - `absorb_confirmed(...)`: an observation lying mostly (≥ 50% of its points) inside the box (+10 cm) of an object confirmed in place, with a compatible label, belongs to that object. It is then neither new nor available for matching. In oracle mode this is the object's own instance; in perception mode it is usually a fake candidate from a mesh hole (black TV screen) or a plant.

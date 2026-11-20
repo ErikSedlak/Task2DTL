@@ -6,7 +6,12 @@ Handoff file between milestone sessions: each milestone is done in a fresh chat.
 
 DESIGN.md (the spec) and DECISIONS.md (the dated log, with the reasons) stay the source of truth. This file is the to-do view on top of them.
 
-## Current state (2026-11-19)
+## Current state (2026-11-20)
+- **CHANGE 2 (no class prior; candidate confidence with see-through votes) is implemented and ON by default** (`confidence`, `confidence.candidates`, docs/CHANGE_confidence_unified.md, DECISIONS 2026-11-20). `FULL-m7` (`ablations.M7_OVERRIDES`) is the M7 method and reproduces `m7_final` bit for bit on dev; REPORT, slides, the README headline table and `outputs/m7_final` describe it.
+  - Val: FULL (the new default) on `eval_val`; comparison rows `FULL-candconf`, `FULL-candconf-free`, `FULL+classprior`, `FULL-relaxed` (`lsg ablate`, > 1 min each); `lsg newcurve --run <FULL run>` for new P / R over `p_new_min`. Judge against the change document §6.4.
+  - The M8 audit (step 1) forces `M7_OVERRIDES` by itself; the README expected result (step 3) is regenerated for the new default (perception: 11 `new` nodes).
+
+## State of 2026-11-19
 - **CHANGE 1 (relaxed candidate rules) is implemented and ON by default** (`perception.relaxed`, docs/CHANGE_candidate_detection.md, DECISIONS 2026-11-19). **Its val effect is not measured.** Until it is, REPORT, slides, the README headline table and `outputs/m7_final` describe the strict method = ablation row `FULL-relaxed`.
   - Erik: `uv run lsg ablate --names FULL,FULL-relaxed --split eval_val` (both modes, > 1 min), then judge against the change document §5.4 (new R up; false deletion and unchanged kept within the FULL CIs). If it stays the default: `uv run lsg m7 --run-id m7_relaxed` (111 min) refreshes the report numbers; rebuild the slides.
   - If the relaxed rules lose on val: set `perception.relaxed.enabled: false` in `configs/default.yaml` (everything is then as at M7).
