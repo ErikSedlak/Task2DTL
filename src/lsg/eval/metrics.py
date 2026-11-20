@@ -472,6 +472,7 @@ def object_rows(G_upd: Graph, gt: GTLabels, truth: Mapping[str, tuple[int, str]]
             "votes": None if v is None else {"seen": v.seen, "free": v.free, "free_like": v.free_like,
                                              "raw_seen": v.raw_seen, "raw_free": v.raw_free, "noinfo": v.noinfo},
             "bbox_3d": n.bbox_3d, "centroid": n.centroid,
+            "centroid_ref": None if o.centroid_ref is None else [float(x) for x in o.centroid_ref],
             "gt_aabb_new": None if o.aabb_new_min is None else [list(map(float, o.aabb_new_min)),
                                                                list(map(float, o.aabb_new_max))],
         })  # fmt: skip

@@ -285,6 +285,28 @@ def _cmd_newcurve(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_movediag(args: argparse.Namespace) -> int:
+    """`lsg movediag --run <dir>`: predicted moves by old-place evidence (CHANGE 3 Part A)."""
+    import json
+    from pathlib import Path
+
+    from lsg.config import outputs_root
+    from lsg.eval.movediag import format_breakdown, move_breakdown
+
+    cfg = load_config(args.config)
+    run = Path(args.run)
+    if not run.is_dir():
+        run = outputs_root(cfg) / args.run
+    res = move_breakdown(run, cfg)
+    if not res:
+        print(f"no details/ in {run} (run with details=True)")
+        return 1
+    print(format_breakdown(res))
+    if args.json:
+        (run / "movediag.json").write_text(json.dumps(res, indent=1), encoding="utf-8")
+    return 0
+
+
 def _cmd_audit_sample(args: argparse.Namespace) -> int:
     """`lsg audit sample`: FULL on val with per-object details, FP pools, seeded sample, panels, CSVs (§7.4)."""
     from lsg.eval.audit import run_audit_sample
@@ -422,6 +444,12 @@ def main(argv: list[str] | None = None) -> int:
     nc.add_argument("--thresholds", default=None, help="comma list (default: p_new_min + m7.p_new_sweep)")
     nc.add_argument("--config", default=None)
     nc.set_defaults(func=_cmd_newcurve)
+
+    md = sub.add_parser("movediag", help="predicted moves by old-place evidence from a run's details/ (CHANGE 3)")
+    md.add_argument("--run", required=True, help="run directory (or id under outputs/) with details/<mode>/")
+    md.add_argument("--json", action="store_true", help="also write <run>/movediag.json")
+    md.add_argument("--config", default=None)
+    md.set_defaults(func=_cmd_movediag)
 
     sp = sub.add_parser("splits", help="split-file helpers")
     sps = sp.add_subparsers(dest="splits_cmd", required=True)
