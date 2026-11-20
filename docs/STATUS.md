@@ -7,6 +7,7 @@ Handoff file between milestone sessions: each milestone is done in a fresh chat.
 DESIGN.md (the spec) and DECISIONS.md (the dated log, with the reasons) stay the source of truth. This file is the to-do view on top of them.
 
 ## Current state (2026-11-20)
+- **CHANGE 1 + 2 is the final method** (Erik, 2026-11-20). **CHANGE 3 proposed** (`docs/CHANGE_online_graph.md`, DECISIONS 2026-11-20): tuning set `dev_tune` (33 train pairs, download ≈ 2–3 GB), move needs old-place evidence, incremental graph during the walk, confidence policy from sensor statistics, class-agnostic new P / R. All §8 questions answered (DECISIONS 2026-11-20); nothing implemented. Next: Part 0 (`lsg splits devtune`, download lists, CLAUDE.md hard rule 4).
 - **CHANGE 2 (no class prior; candidate confidence with see-through votes) is implemented and ON by default** (`confidence`, `confidence.candidates`, docs/CHANGE_confidence_unified.md, DECISIONS 2026-11-20). `FULL-m7` (`ablations.M7_OVERRIDES`) is the M7 method and reproduces `m7_final` bit for bit on dev; REPORT, slides, the README headline table and `outputs/m7_final` describe it.
   - **Val FULL measured** (`outputs/chg2_val/FULL`, DECISIONS 2026-11-20): new R 8.8 → 14.6%, moved F1 31.7 → 37.4, false deletion 7.7 → 6.9%, but unchanged kept 95.3 → 88.8% (outside the CI) and false move 1.6 → 6.4%, new P 2.0 → 1.0%. Erik decides whether the defaults stay.
   - Still open on val: comparison rows `FULL-candconf`, `FULL-candconf-free`, `FULL+classprior`, `FULL-relaxed` (`lsg ablate`, > 1 min each); `lsg newcurve --run <FULL run>` for new P / R over `p_new_min`. Judge against the change document §6.4.
@@ -394,6 +395,7 @@ All items that were listed here are in the report: door swings out of scope; val
 ---
 
 ## Decisions needed from Erik
+- **CHANGE 3 (2026-11-20):** §8 answered. Erik runs the tier-3 download once the lists exist.
 - **CHANGE 2 (2026-11-20): class-agnostic prior + one confidence for new objects.** Proposed, not implemented; all questions of `docs/CHANGE_confidence_unified.md` section 7 answered, ready to implement; answered by Erik: drop low-confidence candidates, no prior value (l0 = 0, margin via `p_del` = 0.027), correlated views keep the small weight, one observation is enough for every cluster, ON by default, confidence logged into the snapshots. Builds on CHANGE 1, whose val effect is not measured yet.
 - **Candidate detection change (2026-11-19):** relax `min_views` for large clusters (1) and small (2), relax `tau_new` for big objects. Decided, not implemented; four open questions in `docs/CHANGE_candidate_detection.md` section 6 (notably small = 2 or 3 views; the current value is 3).
 - **Doors / articulation:** decided 2026-11-18, the door diagnostic is skipped and stated as a limitation (DECISIONS M8). Closed.
