@@ -23,16 +23,18 @@ from lsg.train_meta import PriorTable, logit, prior_counts
 
 @pytest.fixture
 def cfg():
-    """The M7 confidence (class priors, flat fallback 0.9, p_del 0.2) = ablation row FULL+classprior."""
+    """The M7 confidence (class priors, flat fallback 0.9, p_del 0.2, equal vote weights 2.5) = FULL+classprior at M7."""
     c = copy.deepcopy(load_config())
-    c["confidence"].update(class_priors=True, prior_p=0.9, p_del=0.2)
+    c["confidence"].update(class_priors=True, prior_p=0.9, p_del=0.2, L_hit=2.5, L_miss=2.5, L_free_like=2.5)
     return c
 
 
 @pytest.fixture
 def cfg_a():
-    """The default: no class prior (CHANGE 2 Part A), flat 0.9 with p_del 0.2 (CHANGE 3)."""
-    return copy.deepcopy(load_config())
+    """No class prior (CHANGE 2 Part A), flat 0.9 with p_del 0.2 (CHANGE 3), equal vote weights 2.5 (before Part C)."""
+    c = copy.deepcopy(load_config())
+    c["confidence"].update(p_del=0.2, L_hit=2.5, L_miss=2.5, L_free_like=2.5)
+    return c
 
 
 def table(**labels):

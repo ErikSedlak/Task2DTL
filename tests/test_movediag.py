@@ -6,6 +6,7 @@ from lsg.config import load_config
 from lsg.eval.movediag import assoc_class, distance_bucket, evidence_class, format_breakdown, move_breakdown
 
 CFG = load_config()
+CFG["confidence"].update(L_hit=2.5, L_miss=2.5, L_free_like=2.5)  # the class tests below use equal vote weights
 
 
 def test_evidence_classes():

@@ -14,6 +14,10 @@ from lsg.change.visibility import NodeVotes, old_place_class
 from test_b2 import CFG, OBJ, VOTES, oobs, scene
 
 
+EQ = copy.deepcopy(CFG)
+EQ["confidence"].update(L_hit=2.5, L_miss=2.5, L_free_like=2.5)  # equal vote weights: the Part A count rule
+
+
 def cfg_with(**old_place):
     c = copy.deepcopy(CFG)
     c["association"]["old_place"].update(old_place)
@@ -25,11 +29,11 @@ def states(G):
 
 
 def test_old_place_classes():
-    assert old_place_class(None, CFG) == "unobserved"
-    assert old_place_class(NodeVotes(seen=2), CFG) == "net_seen"
-    assert old_place_class(NodeVotes(seen=3, free=2), CFG) == "net_seen"  # net seen first (removal veto)
-    assert old_place_class(NodeVotes(free=2), CFG) == "free_ev"
-    assert old_place_class(NodeVotes(seen=1, free=1), CFG) == "mixed"
+    assert old_place_class(None, EQ) == "unobserved"
+    assert old_place_class(NodeVotes(seen=2), EQ) == "net_seen"
+    assert old_place_class(NodeVotes(seen=3, free=2), EQ) == "net_seen"  # net seen first (removal veto)
+    assert old_place_class(NodeVotes(free=2), EQ) == "free_ev"
+    assert old_place_class(NodeVotes(seen=1, free=1), EQ) == "mixed"
     assert old_place_gate(VOTES, cfg_with(enabled=False)) is None
     # CHANGE 3 Part C: weighted evidence (equal weights = the count rule above)
     w = copy.deepcopy(CFG)
