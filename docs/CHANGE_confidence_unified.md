@@ -30,30 +30,42 @@ Decided:
 - A candidate is added after a single (decorrelated) observation; its confidence is then updated by later
   frames (confirm / see through), decorrelated views carrying a larger vote (Part B).
 
-Open (§7): the value of the class-agnostic prior, the evidence needed for small clusters, whether low-confidence
-candidates are dropped or kept, the default (on / off), the weight of correlated views.
+Answered 2026-11-20 (Erik): **no prior value is needed** (Part A: l0 = 0, the deletion margin is set through
+`p_del`); **correlated views keep the small weight** (§4.3).
 
-## 3. Part A — class-agnostic prior (no new code)
+Open (§7): the evidence needed for small clusters, whether low-confidence candidates are dropped or kept, the
+default (on / off), snapshot logging.
 
-`confidence.class_priors: false` already exists: `l0 = logit(confidence.fallback_p)` for every node (ablation
-row `FULL-priors`, M7). Change: make that the default and rename the meaning: `fallback_p` becomes `prior_p`,
-**one** hyper-parameter, "a reference object is assumed to be still there", not learned from the data.
+## 3. Part A — no prior at all (no new code)
 
-Effect of the value (L = 2.5 per counted vote, deletion needs p < `p_del` = 0.2, i.e. l < −1.39, **and** free
-evidence, i.e. ≥ 2 counted free votes):
+**The prior and `p_del` are one parameter.** A node is deleted when `l0 + E < logit(p_del)`, with `E` the net
+evidence (counted votes, in log-odds units). That is the same as `E < −M` with the **margin**
+`M = l0 − logit(p_del)`. Only `M` matters: how much net evidence the method needs before it deletes.
+- M7 FULL: `M` depends on the class. Chair: 3.41 + 1.39 = 4.80 (2 votes); bed: 5.52 + 1.39 = 6.91 (3 votes).
+- M7 `FULL-priors` (flat p = 0.9, `p_del` 0.2): `M` = 2.20 + 1.39 = 3.59 for every class.
 
-| `prior_p` | l0 | 2 free votes | 1 seen + 2 free votes (mixed evidence) | 1 free vote |
-|---|---|---|---|---|
-| 0.5 (neutral) | 0 | −5.0 → p 0.007: deleted | −2.5 → p 0.076: **deleted** | −2.5, blocked by the ≥ 2 votes rule |
-| 0.9 (= M7 `FULL-priors`) | 2.20 | −2.80 → p 0.057: deleted | −0.30 → p 0.43: protected | blocked |
-| 0.968 (old chair prior) | 3.41 | −1.59 → p 0.17: deleted | 0.91 → p 0.71: protected | blocked |
+So no prior value has to be chosen. Proposal: **`l0 = 0` for every reference node (p = 0.5, "no information")**
+and the margin set directly through `p_del`: `M` = 3.6, i.e. `p_del = sigmoid(−3.6)` = **0.027**. Net evidence of
+2 counted votes (−5.0) deletes, 1 vote (−2.5) cannot. This is exactly the behaviour of `FULL-priors`, so its val
+numbers (oracle removed P / R 56.4 / 30.1, false deletion 8.4; perception 23.7 / 37.0, 8.0) apply to it:
 
-So with a neutral prior, mixed evidence (one seen vote cancelling one free vote) no longer protects a node. The
-protection of mixed evidence needs `prior_p` ≥ about 0.8. Proposal: keep 0.9 (its M7 numbers are known) and test
-0.5 / 0.8 / 0.9 on dev; the remaining assumption is stated openly in the report.
+| evidence (L = 2.5 per counted vote) | E | p = sigmoid(E) | deleted? (needs ≥ 2 counted free votes **and** p < 0.027) |
+|---|---|---|---|
+| 2 free | −5.0 | 0.007 | yes |
+| 1 free | −2.5 | 0.076 | no (also blocked by the ≥ 2 votes rule) |
+| 1 seen + 2 free (mixed) | −2.5 | 0.076 | no: protected |
+| 1 seen + 3 free | −5.0 | 0.007 | yes |
+| any class, bed or chair | same | same | same |
 
-`train_meta.class_priors` (the learned table) stays in the code as the ablation row `FULL+classprior`
-(= the M7 FULL).
+Consequences:
+- A bed needs the same evidence as a chair, whatever the dataset says about beds.
+- The confidence score becomes a pure evidence score on one scale for reference nodes and new nodes (both
+  start at 0). A node with no counted votes reports p = 0.5 ("no evidence"), not 0.97. This changes what the
+  `confidence` field means (documented in DESIGN §6.11 after sign-off).
+- Config: `confidence.class_priors: false`, `confidence.prior_p: 0.5` (was `fallback_p`), `confidence.p_del: 0.027`.
+  `M` is the only caution parameter left (not learned from data); checked on dev against `FULL-priors` and varied
+  between 1 and 2 votes (`p_del` 0.076 to 0.007).
+- The learned table `train_meta.class_priors` stays in the code as the ablation row `FULL+classprior` (= M7 FULL).
 
 ## 4. Part B — candidate confidence as per-voxel log-odds (perception only)
 
@@ -80,6 +92,7 @@ case (`lv = 2.5 · views`), and one new kind of vote is added: **seeing through 
 - **Correlated** vote (same viewpoint region): `L_corr` = 0.25, with the sum of correlated additions since the last
   decorrelated vote capped at `corr_cap` = 1.0. This keeps 30 frames from one spot from adding up to a full
   confidence (frames are strongly correlated), but a repeated view is no longer worth exactly zero.
+  **Decided by Erik (2026-11-20): correlated views keep this small weight.**
 - Per-visit clip as before.
 - `L_corr = 0`, `corr_cap = 0`, free votes off reproduces the CHANGE 1 candidates exactly (§6, test).
 
@@ -126,8 +139,9 @@ separate change).
   sliding objects can still produce see-through votes (limitation, same as for reference nodes).
 - **Cost:** about 13–17k tracked voxels per pair × 240–390 frames, vectorised projection; to be measured against the
   current ~3 s per pair. Two grids double it.
-- **Prior value (Part A):** with a flat 0.9, anchors lose their protection (a bed now needs 2 free votes). On val
-  the M7 numbers say this is neutral overall; the audit veto set shows which GT-removed objects are involved.
+- **No class prior (Part A):** anchors lose their extra protection (a bed now needs 2 net free votes like a chair).
+  On val the M7 `FULL-priors` numbers say this is neutral overall; the audit veto set shows which GT-removed
+  objects are involved.
 - **Dev is tiny** (3 pairs, 3 GT-new objects): the thresholds `l_keep_*`, `p_new_min` and the weights cannot be
   tuned reliably there; val is reported once.
 
@@ -137,7 +151,7 @@ separate change).
 2. **Dev check** (`dev_train`, candidate geometry as in CHANGE 1): candidates per pair, share explained by GT, candidate recall (new / moved-to), number of candidates deleted by see-through votes, overlays. Tune only here (hard rule 4); report if the evidence is too thin.
 3. **Ablation rows on the full `eval_val`** (both modes, `lsg ablate`), each reported once with 95% bootstrap CIs:
    - `FULL` (CHANGE 1 default) as the baseline;
-   - `FULL-priors` (exists; flat prior only, Part A);
+   - `FULL-priors` (exists, M7: flat prior 0.9 with `p_del` 0.2, the same margin as Part A; Part A itself is the default of the new rows);
    - `FULL+candconf` (Part B with the flat prior);
    - `FULL+candconf-free` (Part B without see-through votes: isolates the free-space effect);
    - `FULL+candconf` at 3 values of `p_new_min` (precision / recall curve).
@@ -153,17 +167,17 @@ No new dependency (numpy / scipy).
 
 ## 7. Open questions (answer before implementing)
 
-1. **Value of the class-agnostic prior** (`prior_p`): 0.9 (known M7 behaviour, keeps mixed-evidence protection) or neutral 0.5? Proposal: 0.9, tested at 0.5 / 0.8 / 0.9 on dev.
+1. ~~Value of the class-agnostic prior~~: **answered**, no prior value needed (§3): `l0 = 0`, margin via `p_del` = 0.027.
 2. **Small clusters:** one observation for every cluster (`l_keep_small` = 2.5) or two (5.0, as in CHANGE 1)? "After one observation" literally means 2.5; the size rule of CHANGE 1 (≥ 40 voxels for the 1-view tier) was added because 1-view voxels percolate into blobs.
 3. **Low-confidence candidates:** drop below `p_new_min`, or emit them as `new` nodes with their confidence and let the evaluation threshold decide? Proposal: drop (smaller graph), all kept in `candidates/` for the curve.
 4. **Default:** on or off until the val ablation? CHANGE 1 was set ON by Erik; the same here would make every perception number change again (REPORT already carries a note).
-5. **Weight of correlated views** (`L_corr` 0.25, `corr_cap` 1.0): fine as a starting point, or should repeats count zero as today?
+5. ~~Weight of correlated views~~: **answered** (Erik): they keep the small weight (`L_corr` 0.25, `corr_cap` 1.0).
 6. **Snapshots / visualisation:** log candidate confidence into the snapshots so `lsg viz rerun` shows candidates appearing and being confirmed or deleted? (Small, optional; fits Erik's earlier wish for a viewer that follows the scan.)
 
 ## 8. Work list (not started)
 
-- [ ] answer §7 with Erik
-- [ ] Part A: config flip (`class_priors: false`, `prior_p`), ablation row `FULL+classprior`, dev check of 0.5 / 0.8 / 0.9
+- [ ] answer the remaining questions of §7 with Erik (2, 3, 4, 6)
+- [ ] Part A: config flip (`class_priors: false`, `prior_p: 0.5`, `p_del: 0.027`), ablation row `FULL+classprior`, dev check that it reproduces `FULL-priors` and a margin between 1 and 2 votes
 - [ ] `perception/voxels.py`: per-voxel log-odds, correlated cap, `kept_by_logodds`; see-through update (`observe_free(depth, K, pose)`); `perception/source.py`: call it per frame, thresholds in `finish`, candidate confidence; `obs/base.py`: `ObsInstance.confidence`; `change/confidence.py`: new node from candidate confidence; emission threshold in the update step
 - [ ] config block `confidence.candidates` (`enabled`, `L_corr`, `corr_cap`, `free_margin`, `free_window`, `l_keep_small`, `l_keep_large`, `p_new_min`)
 - [ ] unit tests: equivalence with CHANGE 1; a transient (box present for a few frames, then removed) is dropped by see-through votes; occlusion and out-of-view give no free vote; silhouette window; correlated cap; determinism; `tests/test_no_leak.py`
