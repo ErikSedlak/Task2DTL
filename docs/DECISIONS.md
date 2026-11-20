@@ -512,3 +512,18 @@ Format: **date — decision.** Why. *Alternatives considered.* (status: fixed / 
   | candidates per pair / explained / recall new, moved-to | – | 34.8 / 30.1% / 34.0%, 74.7% |
 
   Reading: the largest error is wrong moves (oracle 95 moved FP against 62 TP; 19% of absent-unlisted nodes moved), which is exactly CHANGE 3 Part A's target; removed recall is low (24–25%) at a high oracle precision, Part C's target (seen-vote weight). These are the comparison numbers for Parts A and C (`docs/CHANGE_online_graph.md` §7.3). (measured)
+
+## 2026-11-20 — CHANGE 3 Part A: diagnostic, rule, sweep plan and selection rule (Claude Code; plan approved by Erik)
+- **Diagnostic** (`lsg movediag`, `outputs/chg3_partA/base_details`: FULL on dev_tune with per-object details; reproduces `chg3_dev_baseline/FULL`, 0 differences in 16,178 values). Predicted `moved` nodes by GT status × old-place class (counted votes; net-seen checked first, as the removal veto):
+
+  | | net-seen | free ev. | unobserved | mixed |
+  |---|---|---|---|---|
+  | oracle: GT moved (TP) | 16 | 43 | 2 | 1 |
+  | oracle: false (unchanged / absent-unlisted / removed) | 30 / 12 / 6 | 19 / 11 / 15 | 12 / 10 / 0 | 11 / 4 / 2 |
+  | perception: GT moved (TP) | 8 | 28 | 0 | 2 |
+  | perception: false | 27 / 12 / 7 | 14 / 8 / 12 | 8 / 4 / 2 | 4 / 2 / 1 |
+
+  Also: 59 of the 72 oracle false moves of GT-unchanged objects are matched to their **own** instance (ICP noise on partial views, 41 of them < 0.3 m); all oracle absent-unlisted / removed false moves take **another** object. Reading: net-seen and unobserved old places hold most false moves at few true ones; free evidence holds most true moves (its errors are wrong partners, not Part A's target).
+- **Rule** (`association.old_place`, FULL only like contrast at M7; B0–B2 unchanged): (a) a net-seen node (counted seen > free + free-like) may only match an observation inside its own place (≥ 50% of points in its AABB + 10 cm, the absorption test), so its own instance still matches; optional for nodes without counted votes: inside-only (`unobserved_inside_only`) or a distance limit (`max_dist_unseen`); optional (c) `tau_move_seen`: a net-seen node needs a larger ICP displacement. Shared class `change.visibility.old_place_class`. Ablation row `FULL-moveev`; `M7_OVERRIDES` keeps it off. Code commit ed9f410 (its message says 232 tests; the real count was 231).
+- **Sweep** (`lsg chg3 parta`, config `chg3.part_a`): variants `off`, `a`, `a_u` (unobserved inside-only), `a_d1` (unobserved ≤ 1 m), `a_c03` (tau_move_seen 0.3), `a_u_c02`, `a_u_c03`, FULL on dev_tune, both modes.
+- **Selection rule, fixed before the sweep:** a variant passes if in both modes its false-move rate ≤ 0.5 × the `off` row's and its moved F1 ≥ the `off` row's − 2 points; among passing variants the highest mean moved F1 (oracle, perception) wins, ties to the simpler (earlier listed) one; if none passes, report and ask Erik. Unchanged kept, removed / new P / R and moved R by displacement are reported either way. (fixed)

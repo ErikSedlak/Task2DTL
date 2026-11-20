@@ -46,3 +46,18 @@ def test_breakdown_counts_only_predicted_moves(tmp_path):
     assert res["by_assoc"] == {"absent_unlisted|other": 1, "moved|own": 1}
     assert res["by_distance"] == {"absent_unlisted|>=1": 1, "moved|[0.3,1)": 1}
     assert "net_seen" in format_breakdown({"oracle": res})
+
+
+def test_part_a_selection_rule():
+    """CHANGE 3 Part A selection (chg3_checks.select): both modes must pass; best mean F1 wins, ties to the first."""
+    from lsg.eval.chg3_checks import select
+
+    def row(fm, f1):
+        return {"oracle": {"false_move_rate": fm, "moved_F1": f1}, "perception": {"false_move_rate": fm, "moved_F1": f1}}
+
+    crit = CFG["chg3"]["part_a"]["criterion"]
+    rows = {"off": row(0.20, 0.50), "a": row(0.10, 0.49), "b": row(0.08, 0.47), "c": row(0.11, 0.60), "d": row(0.10, 0.49)}
+    s = select(rows, crit)
+    assert s["verdict"]["a"]["pass"] and not s["verdict"]["b"]["pass"] and not s["verdict"]["c"]["pass"]
+    assert s["winner"] == "a"  # a and d tie: the first listed wins
+    assert select({"off": row(0.2, 0.5), "x": row(0.15, 0.5)}, crit)["winner"] is None

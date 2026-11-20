@@ -257,3 +257,23 @@ m1:
   rule_tune_split: splits/dev_train.txt                      # reference-rule sanity, tuning
   rule_report_split: splits/eval_val.txt                     # reference-rule sanity, report only
   expected_texture_refs: 72
+
+chg3:                      # CHANGE 3 dev_tune sweeps (`lsg chg3 parta`; docs/CHANGE_online_graph.md; tuning set only)
+  part_a:                  # §3: a move needs consistent old-place evidence; variants listed simple -> complex
+    variants:
+      "off": {association.old_place.enabled: false}
+      a: {association.old_place.enabled: true, association.old_place.unobserved_inside_only: false,
+          association.old_place.max_dist_unseen: null, association.old_place.tau_move_seen: null}
+      a_u: {association.old_place.enabled: true, association.old_place.unobserved_inside_only: true,
+            association.old_place.max_dist_unseen: null, association.old_place.tau_move_seen: null}
+      a_d1: {association.old_place.enabled: true, association.old_place.unobserved_inside_only: false,
+             association.old_place.max_dist_unseen: 1.0, association.old_place.tau_move_seen: null}
+      a_c03: {association.old_place.enabled: true, association.old_place.unobserved_inside_only: false,
+              association.old_place.max_dist_unseen: null, association.old_place.tau_move_seen: 0.3}
+      a_u_c02: {association.old_place.enabled: true, association.old_place.unobserved_inside_only: true,
+                association.old_place.max_dist_unseen: null, association.old_place.tau_move_seen: 0.2}
+      a_u_c03: {association.old_place.enabled: true, association.old_place.unobserved_inside_only: true,
+                association.old_place.max_dist_unseen: null, association.old_place.tau_move_seen: 0.3}
+    criterion:             # written before the sweep (DECISIONS 2026-11-20): pass in both modes
+      false_move_frac: 0.5 # false-move rate <= 0.5 x the `off` row's
+      f1_drop: 0.02        # moved F1 >= the `off` row's - 0.02; winner = highest mean moved F1 of passing rows

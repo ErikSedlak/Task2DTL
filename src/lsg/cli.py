@@ -307,6 +307,16 @@ def _cmd_movediag(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_chg3_parta(args: argparse.Namespace) -> int:
+    """`lsg chg3 parta`: CHANGE 3 Part A variants on dev_tune (both modes) + the pre-written selection."""
+    from lsg.eval.chg3_checks import format_part_a, run_part_a
+
+    res = run_part_a(load_config(args.config), run_id=args.run_id, split=args.split, workers=args.workers)
+    print(format_part_a(res))
+    print(f"metrics: {res['metrics_path']}")
+    return 0
+
+
 def _cmd_audit_sample(args: argparse.Namespace) -> int:
     """`lsg audit sample`: FULL on val with per-object details, FP pools, seeded sample, panels, CSVs (§7.4)."""
     from lsg.eval.audit import run_audit_sample
@@ -444,6 +454,15 @@ def main(argv: list[str] | None = None) -> int:
     nc.add_argument("--thresholds", default=None, help="comma list (default: p_new_min + m7.p_new_sweep)")
     nc.add_argument("--config", default=None)
     nc.set_defaults(func=_cmd_newcurve)
+
+    c3 = sub.add_parser("chg3", help="CHANGE 3 dev_tune sweeps")
+    c3s = c3.add_subparsers(dest="chg3_cmd", required=True)
+    pa = c3s.add_parser("parta", help="Part A (move needs old-place evidence): variants + selection")
+    pa.add_argument("--run-id", default="chg3_partA_sweep")
+    pa.add_argument("--split", default="dev_tune", help="tuning split only (hard rule 4)")
+    pa.add_argument("--workers", type=int, default=None)
+    pa.add_argument("--config", default=None)
+    pa.set_defaults(func=_cmd_chg3_parta)
 
     md = sub.add_parser("movediag", help="predicted moves by old-place evidence from a run's details/ (CHANGE 3)")
     md.add_argument("--run", required=True, help="run directory (or id under outputs/) with details/<mode>/")
