@@ -36,6 +36,8 @@ M7_OVERRIDES: dict[str, Any] = {
     "confidence.class_priors": True,
     "confidence.prior_p": 0.9,
     "confidence.p_del": 0.2,
+    # M7 vocabulary (CHANGE 3 also excludes dev_tune's rooms): same CLIP vocabulary and cache keys as m7_final
+    "train_meta.exclude_splits": ["splits/dev_train.txt", "splits/eval_relchange_train.txt"],
 }
 
 

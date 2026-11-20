@@ -60,7 +60,18 @@ splits:
     - splits/dev_train.txt
     - splits/eval_val.txt
     - splits/eval_relchange_train.txt
+    - splits/dev_tune.txt
   texture_list: splits/download_textures.txt
+  dev_tune:                # tuning set (CHANGE 3 Part 0, Erik 2026-11-20): `lsg splits devtune`, metadata only
+    file: splits/dev_tune.txt
+    download_list: splits/download_tier3.txt   # scans of dev_tune not yet downloaded (hard rule 6)
+    n_heavy: 20            # rooms with the most changes (best rescan per room)
+    n_random: 10           # further rooms, seeded, one rescan each
+    seed: 0
+    weights: {removed: 2.0, new: 1.0, rigid: 0.5}   # room score; removals are rarest (158 of 718 train pairs)
+    include: [splits/dev_train.txt]                 # appended; dev_train stays the 3-pair regression set
+    exclude_splits: [splits/dev_train.txt, splits/eval_relchange_train.txt]   # rooms never selected
+    already_downloaded: [splits/download_tier1.txt, splits/download_tier2.txt]
   milestone_val:           # val subset for per-milestone checks (M6, Erik); full eval_val only for the final tables (M7)
     source: splits/eval_val.txt
     file: splits/eval_val_small.txt   # written by `lsg splits subset`

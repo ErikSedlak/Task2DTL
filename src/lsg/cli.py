@@ -149,6 +149,51 @@ def _cmd_splits_subset(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_splits_devtune(args: argparse.Namespace) -> int:
+    """`lsg splits devtune`: write the tuning set and its download list (CHANGE 3 Part 0; metadata only)."""
+    from lsg.config import REPO_ROOT, data_root
+    from lsg.eval.devtune import download_ids, pair_counts, select_dev_tune, totals
+    from lsg.io.dssg import load_objects
+    from lsg.io.scan3r import load_meta, read_pairs
+    from lsg.io.splits import write_pairs
+    from lsg.train_meta import excluded_references
+
+    cfg = load_config(args.config)
+    dc = cfg["splits"]["dev_tune"]
+    root = data_root(cfg)
+    rows = pair_counts(load_meta(root), lambda s: load_objects(root, s),
+                       excluded_references([REPO_ROOT / f for f in dc["exclude_splits"]]))  # fmt: skip
+    w = dc["weights"]
+    heavy, rand = select_dev_tune(rows, int(dc["n_heavy"]), int(dc["n_random"]), int(dc["seed"]), w)
+    include = [p for f in dc["include"] for p in read_pairs(REPO_ROOT / f)]
+    pairs = [(r.ref, r.rescan) for r in heavy + rand] + [p for p in include if p not in {(r.ref, r.rescan) for r in heavy + rand}]
+    print(f"eligible train pairs: {len(rows)} in {len({r.ref for r in rows})} rooms; totals {totals(rows)}")
+    print(f"{'part':<7} {'reference':<38} {'rescan':<38} rem rigid new score")
+    for part, rs in (("heavy", heavy), ("random", rand)):
+        for r in rs:
+            print(f"{part:<7} {r.ref:<38} {r.rescan:<38} {r.removed:>3} {r.rigid:>5} {r.new:>3} {r.score(w):>5.1f}")
+    th, tr = totals(heavy), totals(rand)
+    print(f"heavy {th}\nrandom {tr}\nselected (without include) {totals(heavy + rand)}; include: {len(include)} pairs")
+    already = {line.strip() for f in dc["already_downloaded"] for line in (REPO_ROOT / f).read_text(encoding="utf-8").splitlines()
+               if line.strip() and not line.startswith("#")}  # fmt: skip
+    ids = download_ids(pairs, already)
+    print(f"{len(pairs)} pairs; {len(ids)} scans to download")
+    if args.dry_run:
+        return 0
+    out = REPO_ROOT / (args.out or dc["file"])
+    t = totals(heavy + rand)
+    write_pairs(pairs, out, f"{len(pairs)} pairs: {len(heavy)} change-heavy + {len(rand)} random train rooms (seed {dc['seed']}), "
+                            f"one rescan each, + {len(include)} include pairs ({', '.join(dc['include'])})\n"
+                            f"metadata counts of the {len(heavy) + len(rand)} selected pairs (things/anchors): removed {t['removed']}, "
+                            f"rigid {t['rigid']} (incl. < 10 cm), new {t['new']}\n"
+                            "written by `lsg splits devtune`; tuning only (CLAUDE.md hard rule 4, CHANGE 3)")  # fmt: skip
+    dl = REPO_ROOT / dc["download_list"]
+    dl.write_text("".join(f"{i}\n" for i in ids), encoding="utf-8", newline="\n")
+    print(f"wrote {out} and {dl}\nnext: `uv run lsg splits textures`, then download (DESIGN §2.3 commands with {dl.name} "
+          f"and {cfg['splits']['texture_list']})")  # fmt: skip
+    return 0
+
+
 def _cmd_graph(args: argparse.Namespace) -> int:
     """`lsg graph --scan R --mode gt|geometric`: export one reference graph as JSON."""
     from lsg.config import data_root
@@ -391,6 +436,11 @@ def main(argv: list[str] | None = None) -> int:
     ss.add_argument("--seed", type=int, default=None)
     ss.add_argument("--out", default=None, help="relative to the repo root")
     ss.set_defaults(func=_cmd_splits_subset)
+    dt = sps.add_parser("devtune", help="write the tuning set splits/dev_tune.txt + download list (splits.dev_tune)")
+    dt.add_argument("--config", default=None)
+    dt.add_argument("--out", default=None, help="pair list, relative to the repo root (default splits.dev_tune.file)")
+    dt.add_argument("--dry-run", action="store_true", help="print the selection, write nothing")
+    dt.set_defaults(func=_cmd_splits_devtune)
 
     gr = sub.add_parser("graph", help="export a reference scene graph as JSON")
     gr.add_argument("--scan", required=True, help="reference scan id")
