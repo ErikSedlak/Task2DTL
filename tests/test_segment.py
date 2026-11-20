@@ -82,7 +82,7 @@ def test_seg_method_and_cache_key():
     with pytest.raises(ValueError):
         seg_method(c)
     c2 = copy.deepcopy(CFG)
-    c2["perception"]["segment"]["sam"]["points_per_side"] = 12
+    c2["perception"]["segment"]["sam"]["points_per_side"] = 16
     assert rescan_dir(CFG, "S") != rescan_dir(c2, "S") and rescan_dir(CFG, "S").name == "S"
 
 
