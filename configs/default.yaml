@@ -143,7 +143,7 @@ perception:                # PerceptionSource, DESIGN §3 candidate + §6.6 (tun
     bridge_unseen: 0       # pairs never seen in one frame link only up to this Chebyshev distance [voxels] (null = link_voxels)
     sam:                   # `lsg sam cache` (SamAutomaticMaskGenerator on the upright colour frame)
       model: vit_b
-      points_per_side: 16
+      points_per_side: 12     # 16: 3.3 s / frame on the GTX 1650, 12: 2.4 s with nearly the same masks (encoder 1.1 s)
       pred_iou_thresh: 0.86
       stability_score_thresh: 0.92
       min_mask_region_area: 0

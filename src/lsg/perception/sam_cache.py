@@ -35,7 +35,7 @@ def sam_cfg(cfg: Mapping[str, Any]) -> Mapping[str, Any]:
 def gen_params(cfg: Mapping[str, Any]) -> dict[str, Any]:
     """`SamAutomaticMaskGenerator` keyword arguments from the config."""
     s = sam_cfg(cfg)
-    return {"points_per_side": int(s.get("points_per_side", 16)),
+    return {"points_per_side": int(s.get("points_per_side", 12)),
             "pred_iou_thresh": float(s.get("pred_iou_thresh", 0.86)),
             "stability_score_thresh": float(s.get("stability_score_thresh", 0.92)),
             "min_mask_region_area": int(s.get("min_mask_region_area", 0))}  # fmt: skip
