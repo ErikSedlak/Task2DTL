@@ -38,6 +38,7 @@ M7_OVERRIDES: dict[str, Any] = {
     "confidence.p_del": 0.2,
     # M7 vocabulary (CHANGE 3 also excludes dev_tune's rooms): same CLIP vocabulary and cache keys as m7_final
     "train_meta.exclude_splits": ["splits/dev_train.txt", "splits/eval_relchange_train.txt"],
+    "association.old_place.enabled": False,  # CHANGE 3 Part A off
 }
 
 
@@ -98,6 +99,8 @@ def registry(cfg: Mapping[str, Any]) -> dict[str, Ablation]:
         Ablation("FULL-priors", "FULL", {"confidence.class_priors": False, "confidence.prior_p": 0.9,
                                          "confidence.p_del": 0.2}, group="component",
                  desc="M7 row: flat prior p = 0.9, p_del 0.2 (= the default since CHANGE 3)"),
+        Ablation("FULL-moveev", "FULL", {"association.old_place.enabled": False}, group="component",
+                 desc="a move needs no old-place evidence (CHANGE 3 Part A off)"),
         Ablation("FULL-m7", "FULL", M7_OVERRIDES, group="component",
                  desc="the M7 method (CHANGE 1 and 2 off) = outputs/m7_final"),
         Ablation("FULL-decorr", "FULL", {"decorrelation.enabled": False}, group="component",

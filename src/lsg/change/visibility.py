@@ -294,6 +294,24 @@ def has_free_evidence(v: NodeVotes | None, cfg: Mapping[str, Any]) -> bool:
     return v.free > 0 or v.free_like >= int(st.get("k_free_like", 3))
 
 
+def old_place_class(v: NodeVotes | None, cfg: Mapping[str, Any]) -> str:
+    """Evidence at a node's reference place (CHANGE 3 Part A), from counted votes only.
+
+    - `unobserved`: no counted seen / free / free-like vote;
+    - `net_seen`: seen > free + free-like (checked first, as FULL's removal veto: with equal vote
+      weights such a node is never deleted, so it must not be moved away either);
+    - `free_ev`: §3 free evidence (`has_free_evidence`);
+    - `mixed`: everything else.
+    """
+    if v is None or v.seen == v.free == v.free_like == 0:
+        return "unobserved"
+    if v.seen > v.free + v.free_like:
+        return "net_seen"
+    if has_free_evidence(v, cfg):
+        return "free_ev"
+    return "mixed"
+
+
 def confirmed_in_place(v: NodeVotes | None, cfg: Mapping[str, Any]) -> bool:
     """§3: >= k_seen counted seen votes and no counted free or free-like vote."""
     return v is not None and v.seen >= int(cfg["states"]["k_seen"]) and v.free == 0 and v.free_like == 0

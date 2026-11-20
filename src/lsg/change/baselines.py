@@ -42,7 +42,7 @@ from typing import Any
 
 import numpy as np
 
-from lsg.change.association import absorb_confirmed, associate
+from lsg.change.association import absorb_confirmed, associate, old_place_gate
 from lsg.change.classify import Decision, classify
 from lsg.change.confidence import below_p_del, node_logodds, obs_logodds, prior_logodds, probability
 from lsg.change.visibility import NodeVotes, confirmed_in_place, has_free_evidence
@@ -312,9 +312,11 @@ def _b2_core(G_ref, obs, cfg, rescan_id, obs_mode, votes, ref_ctx, method):
     rest_obs = [o for o in usable if o.token not in ab.absorbed]
     conf_ids = {n.id for n in conf}
     skip = conf_ids | committed
-    pairs, unmatched, unmatched_obs = associate([n for n in nodes if n.id not in skip], rest_obs, mode, cfg)
+    # CHANGE 3 Part A (FULL only, like contrast at M7, so the B0-B2 rows stay as reported)
+    gate = old_place_gate(vs, cfg) if method == "FULL" else None
+    pairs, unmatched, unmatched_obs = associate([n for n in nodes if n.id not in skip], rest_obs, mode, cfg, gate=gate)
     P = ref_node_points(G, ref_ctx)
-    dec = classify(pairs, unmatched, vs, conf, P, cfg)
+    dec = classify(pairs, unmatched, vs, conf, P, cfg, old_place=gate is not None)
     dec.update({nid: Decision("removed") for nid in committed})
     tok = {n.id: o.token for n, o, _ in pairs} | ab.token_of
     for n in nodes:

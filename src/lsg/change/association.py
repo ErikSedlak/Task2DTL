@@ -18,19 +18,27 @@ Label term: oracle = hard gate (0 if labels are equal, `nyu_penalty` if only nyu
 the class is not a catch-all in `nyu_fallback_exclude` (39 otherfurniture, 40 otherprop; M5),
 else +inf); perception = soft, -log max(p(label_ref), p_min) from the candidate's `label_topk`.
 
-Method side: imports only `graph`, `obs` (no-leak test).
+Old-place gate (CHANGE 3 Part A, FULL only, `association.old_place`): a move claims that the object
+left its reference place, so it needs evidence there, as a removal does. A node whose place is
+net-seen (counted seen > free + free-like) may only take an observation inside its own place
+(the absorption geometry), so its own instance can still match (-> ICP -> usually unchanged) but a
+distant same-label observation cannot. Optionally the same for nodes without any counted vote
+(`unobserved_inside_only`), or a distance limit for them (`max_dist_unseen`).
+
+Method side: imports only `change.visibility`, `graph`, `obs` (no-leak test).
 """
 
 from __future__ import annotations
 
 import math
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
 from scipy.optimize import linear_sum_assignment
 
+from lsg.change.visibility import NodeVotes, old_place_class
 from lsg.graph.model import Node
 from lsg.obs.base import ObsInstance
 
@@ -151,14 +159,40 @@ def absorb_confirmed(
     return Absorption({nid: k[2] for nid, k in best.items()}, absorbed)
 
 
+Gate = Callable[[Node, ObsInstance], bool]
+
+
+def old_place_gate(votes: Mapping[str, NodeVotes] | None, cfg: Mapping[str, Any]) -> Gate | None:
+    """The Part A pair gate (module docstring); None if `association.old_place.enabled` is false."""
+    oc = _acfg(cfg).get("old_place") or {}
+    if not oc.get("enabled", False):
+        return None
+    vs = votes or {}
+    frac, margin = float(oc["inside_frac"]), float(oc["margin"])
+    unseen_inside = bool(oc.get("unobserved_inside_only", False))
+    dmax = oc.get("max_dist_unseen")
+
+    def gate(n: Node, o: ObsInstance) -> bool:
+        c = old_place_class(vs.get(n.id), cfg)
+        if c == "net_seen" or (c == "unobserved" and unseen_inside):
+            return inside_frac(n, o, margin) >= frac
+        if c == "unobserved" and dmax is not None:
+            d = float(np.linalg.norm(o.centroid - np.asarray(n.centroid, float)))
+            return d <= float(dmax) or inside_frac(n, o, margin) >= frac
+        return True
+
+    return gate
+
+
 def associate(
-    nodes: Sequence[Node], obs: Sequence[ObsInstance], mode: str, cfg: Mapping[str, Any]
+    nodes: Sequence[Node], obs: Sequence[ObsInstance], mode: str, cfg: Mapping[str, Any], gate: Gate | None = None
 ) -> tuple[list[tuple[Node, ObsInstance, float]], list[Node], list[ObsInstance]]:
     """Stage 1: Hungarian assignment with gate `tau_assoc` (DESIGN §6.9).
 
     Costs are clipped at tau (= "leave unmatched" costs tau), so the assignment is optimal
     among gated pairs; assigned pairs with cost >= tau are dropped. Inputs are sorted by node
     id / token first, so the result is deterministic.
+    `gate(node, obs)` False -> the pair costs +inf (the Part A old-place gate, `old_place_gate`).
 
     Returns:
         (pairs (node, obs, cost), unmatched nodes, unmatched observations).
@@ -168,7 +202,7 @@ def associate(
     tau = tau_assoc(mode, cfg)
     if not N or not O:
         return [], N, O
-    C = np.array([[pair_cost(n, o, mode, cfg) for o in O] for n in N], float)
+    C = np.array([[pair_cost(n, o, mode, cfg) if gate is None or gate(n, o) else INF for o in O] for n in N], float)
     rows, cols = linear_sum_assignment(np.minimum(C, tau))
     pairs = [(N[i], O[j], float(C[i, j])) for i, j in zip(rows, cols) if C[i, j] < tau]
     mn = {p[0].id for p in pairs}

@@ -37,6 +37,8 @@ def test_registry_overrides_exist_and_sweeps_come_from_config():
     assert reg["FULL-candconf-free"].overrides == {"confidence.candidates.free_votes": False}
     assert reg["FULL+classprior"].overrides == {"confidence.class_priors": True, "confidence.p_del": 0.2}
     assert reg["FULL-m7"].overrides == abl.M7_OVERRIDES
+    assert reg["FULL-moveev"].overrides == {"association.old_place.enabled": False}
+    assert abl.M7_OVERRIDES["association.old_place.enabled"] is False
     for a in reg.values():
         abl.apply_overrides(CFG, a.overrides)
     m7 = abl.apply_overrides(CFG, abl.M7_OVERRIDES)

@@ -13,6 +13,7 @@ def test_evidence_classes():
     assert evidence_class({"seen": 0, "free": 0, "free_like": 0}, CFG) == "unobserved"
     assert evidence_class({"seen": 2, "free": 0, "free_like": 0}, CFG) == "net_seen"
     assert evidence_class({"seen": 1, "free": 2, "free_like": 0}, CFG) == "free_ev"  # free evidence wins
+    assert evidence_class({"seen": 3, "free": 2, "free_like": 0}, CFG) == "net_seen"  # net seen first (removal veto)
     assert evidence_class({"seen": 1, "free": 1, "free_like": 0}, CFG) == "mixed"
 
 

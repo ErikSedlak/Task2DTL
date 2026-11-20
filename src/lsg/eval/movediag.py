@@ -5,8 +5,8 @@ Reads the per-object rows of a run with details (`run_eval(details=True)` ->
 
 - GT status: `moved` (TP) / `unchanged` / `absent_unlisted` / `removed` / `dont_care` (incl. nonrigid);
 - old-place evidence from its counted votes (the classes the Part A rules act on):
-  `net_seen` (seen > free + free-like), `free_ev` (§3 free evidence), `unobserved` (no counted vote),
-  `mixed` (anything else);
+  `net_seen` (seen > free + free-like, checked first), `free_ev` (§3 free evidence), `unobserved` (no counted
+  vote), `mixed` (anything else);
 - association: `own` (the matched observation is the node's own rescan instance), `other`, `none`
   (no GT instance behind the observation);
 - predicted move distance ‖c_pred − c_ref‖ in the eval displacement buckets.
@@ -24,24 +24,18 @@ from typing import Any
 
 import numpy as np
 
-from lsg.change.visibility import NodeVotes, has_free_evidence
+from lsg.change.visibility import NodeVotes, old_place_class
 
 STATUSES = ("moved", "unchanged", "absent_unlisted", "removed", "dont_care")
 EVIDENCE = ("net_seen", "free_ev", "unobserved", "mixed")
 
 
 def evidence_class(votes: Mapping[str, int] | None, cfg: Mapping[str, Any]) -> str:
-    """Old-place evidence class of one node from its counted votes (module docstring)."""
+    """Old-place evidence class of one details row (`change.visibility.old_place_class`, the rule's own test)."""
     if not votes:
-        return "unobserved"
-    s, f, fl = int(votes.get("seen", 0)), int(votes.get("free", 0)), int(votes.get("free_like", 0))
-    if s == f == fl == 0:
-        return "unobserved"
-    if has_free_evidence(NodeVotes(seen=s, free=f, free_like=fl), cfg):
-        return "free_ev"
-    if s > f + fl:
-        return "net_seen"
-    return "mixed"
+        return old_place_class(None, cfg)
+    return old_place_class(NodeVotes(seen=int(votes.get("seen", 0)), free=int(votes.get("free", 0)),
+                                     free_like=int(votes.get("free_like", 0))), cfg)  # fmt: skip
 
 
 def assoc_class(row: Mapping[str, Any]) -> str:

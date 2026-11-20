@@ -22,7 +22,7 @@ from typing import Any
 
 import numpy as np
 
-from lsg.change.visibility import NodeVotes, has_free_evidence
+from lsg.change.visibility import NodeVotes, has_free_evidence, old_place_class
 from lsg.geom.transforms import apply
 from lsg.graph.model import Node
 from lsg.obs.base import ObsInstance
@@ -110,6 +110,7 @@ def classify(
     confirmed: Sequence[Node],
     ref_points: Mapping[str, np.ndarray],
     cfg: Mapping[str, Any],
+    old_place: bool = False,
 ) -> dict[str, Decision]:
     """Final states of all scored reference nodes (module docstring).
 
@@ -121,8 +122,11 @@ def classify(
         ref_points: Node id -> reference points (reference frame). A node without points
             falls back to its stored centroid (pure translation).
         cfg: Full config (`classify`, `states`).
+        old_place: FULL with CHANGE 3 Part A on: a net-seen node needs displacement >
+            `association.old_place.tau_move_seen` (if set) instead of `tau_move`.
     """
     tau = float(cfg["classify"]["tau_move"])
+    t_seen = cfg["association"].get("old_place", {}).get("tau_move_seen") if old_place else None
     vs = votes or {}
     out: dict[str, Decision] = {}
     for n in confirmed:
@@ -139,7 +143,10 @@ def classify(
             info = {"fallback": True, "fitness": None, "rmse": None}
         d = displacement(T, c_ref)
         info["cost"] = cost
-        out[n.id] = Decision("moved" if d > tau else "unchanged", T, d, info)
+        t = tau
+        if t_seen is not None and old_place_class(vs.get(n.id), cfg) == "net_seen":
+            t = max(tau, float(t_seen))
+        out[n.id] = Decision("moved" if d > t else "unchanged", T, d, info)
     for n in unmatched_ref:
         out[n.id] = Decision("removed" if has_free_evidence(vs.get(n.id), cfg) else "unknown")
     return out
