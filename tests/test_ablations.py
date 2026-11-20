@@ -42,6 +42,9 @@ def test_registry_overrides_exist_and_sweeps_come_from_config():
     m7 = abl.apply_overrides(CFG, abl.M7_OVERRIDES)
     assert not m7["perception"]["relaxed"]["enabled"] and not m7["confidence"]["candidates"]["enabled"]
     assert m7["confidence"]["class_priors"] and m7["confidence"]["p_del"] == 0.2 and m7["confidence"]["prior_p"] == 0.9
+    # CHANGE 3: the default vocabulary also excludes dev_tune's rooms; FULL-m7 keeps the M7 exclusions
+    assert "splits/dev_tune.txt" in CFG["train_meta"]["exclude_splits"]
+    assert m7["train_meta"]["exclude_splits"] == ["splits/dev_train.txt", "splits/eval_relchange_train.txt"]
     for name in (*mc["dev_rows"], *mc["relchange_rows"], *mc["regression_refs"]):
         assert name in reg
 

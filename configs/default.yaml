@@ -108,7 +108,8 @@ oracle:                    # OracleSource, DESIGN §6.5 (upper bound)
   crop_k: 5
 
 train_meta:                # train-split metadata for vocabulary / priors (DESIGN §2.3)
-  exclude_splits: [splits/dev_train.txt, splits/eval_relchange_train.txt]   # their rooms never count
+  exclude_splits: [splits/dev_train.txt, splits/eval_relchange_train.txt, splits/dev_tune.txt]   # their rooms never
+                           # count (dev_tune: CHANGE 3, Erik; the M7 list is pinned in ablations.M7_OVERRIDES)
 
 perception:                # PerceptionSource, DESIGN §3 candidate + §6.6 (tune on dev only)
   tau_new: 0.10            # [m] nearer pixel: d_obs < d_exp - tau_new (step 1)
