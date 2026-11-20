@@ -23,6 +23,15 @@ from lsg.train_meta import PriorTable, logit, prior_counts
 
 @pytest.fixture
 def cfg():
+    """The M7 confidence (class priors, flat fallback 0.9, p_del 0.2) = ablation row FULL+classprior."""
+    c = copy.deepcopy(load_config())
+    c["confidence"].update(class_priors=True, prior_p=0.9, p_del=0.2)
+    return c
+
+
+@pytest.fixture
+def cfg_a():
+    """The default since CHANGE 2 Part A: no prior (l0 = 0), p_del 0.027."""
     return copy.deepcopy(load_config())
 
 
@@ -93,6 +102,61 @@ def test_priors_off_uses_fallback(cfg):
     cfg["confidence"]["class_priors"] = False
     assert prior_logodds("chair", 40, t, cfg) == pytest.approx(logit(0.9))
     assert prior_logodds("chair", 40, None, cfg) == pytest.approx(logit(0.9))
+
+
+def test_part_a_default_has_no_prior_and_one_margin_for_every_class(cfg_a):
+    """CHANGE 2 Part A: l0 = 0 for chair and bed alike; 2 net free votes delete, 1 cannot, mixed protects."""
+    cc = cfg_a["confidence"]
+    assert cc["class_priors"] is False and cc["prior_p"] == 0.5
+    t = table(chair=(968, 32), bed=(996, 4))
+    l_chair = prior_logodds("chair", 40, t, cfg_a)
+    l_bed = prior_logodds("bed", 4, t, cfg_a)
+    assert l_chair == l_bed == pytest.approx(0.0)
+    for l0 in (l_chair, l_bed):
+        assert below_p_del(node_logodds(l0, NodeVotes(free=2), cfg_a), cfg_a)
+        assert not below_p_del(node_logodds(l0, NodeVotes(free=1), cfg_a), cfg_a)
+        assert not below_p_del(node_logodds(l0, NodeVotes(free=2, seen=1), cfg_a), cfg_a)
+        assert below_p_del(node_logodds(l0, NodeVotes(free=3, seen=1), cfg_a), cfg_a)
+    assert probability(node_logodds(0.0, None, cfg_a)) == 0.5  # no votes = no information
+
+
+def test_part_a_decisions_equal_the_m7_flat_prior_row(cfg_a):
+    """Same deletion decisions as FULL-priors (prior 0.9, p_del 0.2) for every vote combination."""
+    m7 = copy.deepcopy(cfg_a)
+    m7["confidence"].update(class_priors=False, prior_p=0.9, p_del=0.2)
+    l_a, l_m = prior_logodds("x", None, None, cfg_a), prior_logodds("x", None, None, m7)
+    for seen in range(6):
+        for free in range(6):
+            for fl in range(3):
+                v = NodeVotes(seen=seen, free=free, free_like=fl)
+                assert below_p_del(node_logodds(l_a, v, cfg_a), cfg_a) == below_p_del(node_logodds(l_m, v, m7), m7)
+
+
+def test_new_node_takes_candidate_confidence(cfg_a):
+    """CHANGE 2 Part B: a candidate's own confidence becomes the new node's; oracle obs keep views."""
+    G = room()
+    cand = ObsInstance("c0", "box", [("box", 1.0)], 29, cube([6, 6, 0.2]), masks={}, confidence=0.97)
+    orc = ObsInstance("o1", "box", [("box", 1.0)], 29, cube([9, 9, 0.2]), masks={})
+    g = full(G, [cand, orc], cfg_a, "S", "perception", votes={}, obs_views={"c0": 1, "o1": 3})
+    conf = {n.obs_token: n.confidence for n in g.nodes if n.state == "new"}
+    assert conf["c0"] == pytest.approx(0.97, abs=1e-6)
+    assert conf["o1"] == pytest.approx(probability(3 * cfg_a["confidence"]["L_hit"]))
+
+
+def test_low_confidence_candidates_are_not_emitted(cfg_a):
+    """Candidates below p_new_min are dropped from the new nodes (Erik: drop); p_new_min 0 emits all."""
+    G = room()
+    hi = ObsInstance("c0", "box", [("box", 1.0)], 29, cube([6, 6, 0.2]), masks={}, confidence=0.99)
+    lo = ObsInstance("c1", "box", [("box", 1.0)], 29, cube([9, 9, 0.2]), masks={}, confidence=0.6)
+    for method in (b2, full):
+        g = method(G, [hi, lo], cfg_a, "S", "perception", votes={})
+        assert sorted(n.obs_token for n in g.nodes if n.state == "new") == ["c0"]
+        assert [n.id for n in g.nodes if n.state == "new"] == ["n0"] and validate(g) == []
+    c0 = copy.deepcopy(cfg_a)
+    c0["confidence"]["candidates"]["p_new_min"] = 0.0
+    assert len([n for n in full(G, [hi, lo], c0, "S", "perception", votes={}).nodes if n.state == "new"]) == 2
+    c0["confidence"]["candidates"].update(p_new_min=0.92, enabled=False)
+    assert len([n for n in b2(G, [hi, lo], c0, "S", "perception", votes={}).nodes if n.state == "new"]) == 2
 
 
 # ---- FULL vs B2 on a point-box room ------------------------------------------------------------

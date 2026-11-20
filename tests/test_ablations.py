@@ -31,7 +31,17 @@ def test_registry_overrides_exist_and_sweeps_come_from_config():
     assert sum(a.group == "frac" for a in reg.values()) == len(mc["fracs"]) * len(mc["frac_seeds"])
     assert sum(a.group == "tau_free" for a in reg.values()) == len(mc["tau_free_sweep"])
     assert reg["FULL-contrast"].overrides == {"visibility.seen_needs_contrast": False}
-    assert reg["FULL-relaxed"].overrides == {"perception.relaxed.enabled": False}  # CHANGE 1: the M7 method
+    assert reg["FULL-relaxed"].overrides == {"perception.relaxed.enabled": False}  # CHANGE 1 off
+    # CHANGE 2 rows; every override key exists (apply_overrides raises on typos)
+    assert reg["FULL-candconf"].overrides == {"confidence.candidates.enabled": False}
+    assert reg["FULL-candconf-free"].overrides == {"confidence.candidates.free_votes": False}
+    assert reg["FULL+classprior"].overrides == {"confidence.class_priors": True, "confidence.p_del": 0.2}
+    assert reg["FULL-m7"].overrides == abl.M7_OVERRIDES
+    for a in reg.values():
+        abl.apply_overrides(CFG, a.overrides)
+    m7 = abl.apply_overrides(CFG, abl.M7_OVERRIDES)
+    assert not m7["perception"]["relaxed"]["enabled"] and not m7["confidence"]["candidates"]["enabled"]
+    assert m7["confidence"]["class_priors"] and m7["confidence"]["p_del"] == 0.2 and m7["confidence"]["prior_p"] == 0.9
     for name in (*mc["dev_rows"], *mc["relchange_rows"], *mc["regression_refs"]):
         assert name in reg
 

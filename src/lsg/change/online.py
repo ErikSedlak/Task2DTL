@@ -236,12 +236,13 @@ def run_online(
         k += 1
         last_idx = frame.idx
         if snap_dir is not None and every > 0 and k % every == 0:
-            snaps.append(_snapshot(G_ref, votes, frame.idx, cfg, seq_info, obs_mode, snap_dir, priors))
+            snaps.append(_snapshot(G_ref, votes, frame.idx, cfg, seq_info, obs_mode, snap_dir, priors, obs_source))
+    last_snap = snap_dir is not None and last_idx is not None and (every <= 0 or k % every != 0)
+    if last_snap:  # before `finish`, so the sidecar shows the candidates of the walk
+        snaps.append(_snapshot(G_ref, votes, last_idx, cfg, seq_info, obs_mode, snap_dir, priors, obs_source))
     t3 = time.time()
     obs = obs_source.finish()
     t_finish = time.time() - t3
-    if snap_dir is not None and last_idx is not None and (every <= 0 or k % every != 0):
-        snaps.append(_snapshot(G_ref, votes, last_idx, cfg, seq_info, obs_mode, snap_dir, priors))
     times = {"render_votes": t_render, "observe": t_obs, "finish": t_finish, "total": time.time() - t0}
     if contrast:
         times["contrast"] = t_contrast
@@ -253,10 +254,22 @@ def run_online(
     return OnlineResult(obs, votes, k, snaps, times, observation_views(obs, poses, cfg), stats)
 
 
-def _snapshot(G_ref, votes, frame_idx, cfg, seq_info, obs_mode, snap_dir: Path, priors=None) -> Path:
-    """Write one tentative snapshot and return its path."""
+def _snapshot(G_ref, votes, frame_idx, cfg, seq_info, obs_mode, snap_dir: Path, priors=None, source=None) -> Path:
+    """Write one tentative snapshot and return its path.
+
+    If the observation source has `live_candidates` (perception, CHANGE 2), its current
+    candidates go to the sidecar `candidates_frame_XXXXXX.json` (box, confidence, size, tier).
+    """
     G = tentative_graph(G_ref, votes, frame_idx, cfg, seq_info.rescan_id, obs_mode, priors)
-    return G.save(snap_dir / f"frame_{int(frame_idx):06d}.json")
+    p = G.save(snap_dir / f"frame_{int(frame_idx):06d}.json")
+    live = getattr(source, "live_candidates", None)
+    if live is not None:
+        import json
+
+        rows = live()
+        (snap_dir / f"candidates_frame_{int(frame_idx):06d}.json").write_text(
+            json.dumps({"frame_idx": int(frame_idx), "candidates": rows}), encoding="utf-8")  # fmt: skip
+    return p
 
 
 def _write_seq_info(snap_dir: Path, ref_id: str, seq_info: SeqInfo) -> Path:

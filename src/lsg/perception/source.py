@@ -19,6 +19,15 @@ decides how much evidence a candidate needs. *Strict tier* = the steps above wit
 >= `large_min_voxels` voxels (and `large_min_extent`) are kept, and they replace the strict clusters
 inside them. `relaxed.enabled: false` = the M7 method (`min_views` views at `tau_new`, no lenient tier).
 
+Candidate confidence (CHANGE 2 Part B, `confidence.candidates`, docs/CHANGE_confidence_unified.md):
+both depth grids carry per-voxel log-odds (`voxels`): hits raise a voxel, see-through votes of
+later frames lower it (`VoxelEvidence.observe_free`, every frame on every tracked voxel). The
+view-count rules become thresholds: strict voxels need `lv >= l_keep_small` (relaxed off:
+`L_hit · min_views`), lenient voxels `lv >= l_keep_large`. Each depth candidate gets
+`confidence = sigmoid(median lv)`; the update step drops candidates below `p_new_min` from the
+new nodes (`change.baselines.emits_new`). `live_candidates()` gives the current candidates for
+the snapshot sidecars. Appearance candidates are unchanged (view counts, confidence None).
+
 Thin-object candidates (M6, DESIGN §6.6 output ii; `appearance.thin_candidates`): when the
 online loop passes an `AppearanceMap` in `RefRender`, mismatching pixels whose depth agrees with
 the reference (|d_obs - d_exp| <= tau_near) and whose first hit is a support surface (a non-thin
@@ -46,7 +55,7 @@ from lsg.obs.base import ObsInstance, PackedMasks, RefContext, RefRender, SeqInf
 from lsg.perception.cluster import Candidate, cluster, door_regions, drop_door_clusters, is_large
 from lsg.perception.labeler import Labeler
 from lsg.perception.residual import SurfaceFilter, nearer_mask, nearer_points
-from lsg.perception.voxels import VoxelEvidence
+from lsg.perception.voxels import VoxelEvidence, window_min_depth
 
 UNLABELLED = "object"  # label of a candidate without usable crops
 
@@ -86,11 +95,18 @@ class PerceptionSource:
         self.ctx, self.info = ref_ctx, seq_info
         self.filt = SurfaceFilter(ref_ctx, self.cfg)
         self.doors = door_regions(ref_ctx, float(self.pc["door_margin"])) if self.pc.get("door_filter", True) else []
-        self.vox = VoxelEvidence.from_config(self.cfg)
+        cc = (self.cfg.get("confidence", {}) or {}).get("candidates") or {}
+        self.candconf = bool(cc.get("enabled", False))  # CHANGE 2: per-voxel log-odds
+        self.free_votes = self.candconf and bool(cc.get("free_votes", True))
+        self.vox = VoxelEvidence.from_config(self.cfg, logodds=self.candconf)
         rc = self.pc.get("relaxed") or {}
         self.relaxed = bool(rc.get("enabled", False))  # CHANGE 1: size-dependent candidate rules
         self.min_views_small = int(rc["min_views_small"]) if self.relaxed else int(self.pc["min_views"])
-        self.vox_large = VoxelEvidence.from_config(self.cfg) if self.relaxed else None
+        if self.candconf:  # voxel thresholds in log-odds; without the relaxed rules: M7's min_views views
+            L_hit = float(self.cfg["confidence"]["L_hit"])
+            self.l_keep_small = float(cc["l_keep_small"]) if self.relaxed else L_hit * int(self.pc["min_views"])
+            self.l_keep_large = float(cc["l_keep_large"])
+        self.vox_large = VoxelEvidence.from_config(self.cfg, logodds=self.candconf) if self.relaxed else None
         self._frames_large: list[tuple[int, np.ndarray, np.ndarray]] = []
         W, H = seq_info.intrinsics.depth_wh
         self._wh = (W, H)
@@ -100,6 +116,10 @@ class PerceptionSource:
                       "clusters": 0, "door_dropped": 0, "doors": len(self.doors), "labelled": 0}  # fmt: skip
         if self.relaxed:  # extra keys only with the relaxed rules, so the strict path keeps its stats
             self.stats.update(large_pts=0, large_voxels=0, large_clusters=0, large_door_dropped=0, large_replaced=0)
+        if self.candconf:
+            self.stats.update(free_votes=0, seen_through_voxels=0, below_p_new_min=0)
+            if self.relaxed:
+                self.stats.update(large_free_votes=0, large_seen_through_voxels=0)
         # thin-object candidates (output ii)
         self.vox_app = VoxelEvidence.from_config(self.cfg)
         self._frames_app: list[tuple[int, np.ndarray, np.ndarray]] = []
@@ -129,6 +149,7 @@ class PerceptionSource:
         if self.wants_appearance and ref_render is not None and ref_render.appearance is not None:
             self._observe_appearance(frame, ref_render, K, pose)
         tau = float(self.pc["tau_new"])
+        vl = None
         if not self.relaxed:
             pts, pix = nearer_points(frame.depth, d_exp, K, pose, self.filt, self.cfg)
         else:
@@ -141,11 +162,22 @@ class PerceptionSource:
                 self._frames_large.append((int(frame.idx), pix.astype(np.int32), vl.astype(np.int32)))
             strict = np.asarray(frame.depth, np.float64).ravel()[pix] < np.asarray(d_exp, np.float64).ravel()[pix] - tau
             pts, pix = pts[strict], pix[strict]
-        if len(pts) == 0:
-            return
-        self.stats["residual_pts"] += len(pts)
-        vidx = self.vox.add(pts, pose)
-        self._frames.append((int(frame.idx), pix.astype(np.int32), vidx.astype(np.int32)))
+        vidx = None
+        if len(pts):
+            self.stats["residual_pts"] += len(pts)
+            vidx = self.vox.add(pts, pose)
+            self._frames.append((int(frame.idx), pix.astype(np.int32), vidx.astype(np.int32)))
+        if self.free_votes:
+            self._observe_free(frame.depth, K, pose, vidx, vl)
+
+    def _observe_free(self, depth: np.ndarray, K: np.ndarray, pose: np.ndarray, vidx, vl) -> None:
+        """CHANGE 2: see-through votes of this frame on both depth grids (voxels hit now are skipped)."""
+        cc = self.cfg["confidence"]["candidates"]
+        dmin = window_min_depth(depth, int(cc["free_window"]), float(self.pc["max_depth"]))
+        self.stats["free_votes"] += self.vox.observe_free(dmin, K, pose, None if vidx is None else np.unique(vidx))
+        if self.vox_large is not None:
+            self.stats["large_free_votes"] += self.vox_large.observe_free(dmin, K, pose,
+                                                                          None if vl is None else np.unique(vl))  # fmt: skip
 
     def _observe_appearance(self, frame: Frame, rr: RefRender, K: np.ndarray, pose: np.ndarray) -> None:
         """Output (ii): mismatching support-surface pixels -> the appearance voxel grid."""
@@ -178,14 +210,14 @@ class PerceptionSource:
 
     def finish(self) -> list[ObsInstance]:
         """Cluster kept voxels into candidates and turn them into `ObsInstance`s."""
-        kept = self.vox.kept(self.min_views_small)
-        cands = cluster(kept, self.vox.coords(kept), self.vox.mean_points(kept), self.cfg)
-        cands, dropped = drop_door_clusters(cands, self.doors, float(self.pc["door_frac"]))
-        self.stats.update(voxels=len(self.vox), kept_voxels=len(kept), clusters=len(cands), door_dropped=len(dropped))
-        grid = [0] * len(cands)  # 0 = strict grid `vox`, 1 = lenient grid `vox_large`
-        if self.relaxed:
-            cands, grid, big_dropped = self._merge_large(cands)
-            dropped = dropped + big_dropped
+        cands, grid, dropped = self._depth_clusters(record=True)
+        conf = [self._confidence(c, g) for c, g in zip(cands, grid)]
+        if self.candconf:
+            p_min = float(self.cfg["confidence"]["candidates"]["p_new_min"])
+            self.stats["seen_through_voxels"] = self.vox.seen_through(self.l_keep_small)
+            if self.vox_large is not None:
+                self.stats["large_seen_through_voxels"] = self.vox_large.seen_through(self.l_keep_large)
+            self.stats["below_p_new_min"] = int(sum(bool(p is not None and p < p_min) for p in conf))
         masks = self._tier_masks(cands, grid)
         kinds = ["depth"] * len(cands)
         app = self._appearance_candidates([(self.vox_large if g else self.vox).coords(c.voxels) for c, g in zip(cands, grid)])
@@ -197,17 +229,66 @@ class PerceptionSource:
         crops = self._crops(masks) if self.with_crops else [[] for _ in all_c]
         k_top = int(self.pc["clip"]["topk"])
         out = []
-        for k, (c, pm, cr, kind) in enumerate(zip(all_c, masks, crops, kinds)):
+        conf += [None] * len(app)
+        for k, (c, pm, cr, kind, p) in enumerate(zip(all_c, masks, crops, kinds, conf)):
             topk = self.labeler.topk(cr, k_top) if (self.labeler is not None and cr) else []
             self.stats["labelled"] += bool(topk)
             label = topk[0][0] if topk else UNLABELLED
             out.append(ObsInstance(
                 token=f"c{k}", label=label, label_topk=[(a, float(b)) for a, b in topk],
                 nyu40=self.label_nyu.get(label), points=c.points.copy(), masks=pm, crops=cr, kind=kind,
+                confidence=p,
             ))  # fmt: skip
         return out
 
-    def _merge_large(self, strict: list[Candidate]) -> tuple[list[Candidate], list[int], list[Candidate]]:
+    def live_candidates(self) -> list[dict[str, Any]]:
+        """Depth candidates as they stand now (mid-walk; snapshot sidecar, CHANGE 2): no labels, no masks.
+
+        Rows `{"min", "max", "confidence", "n_voxels", "tier"}` (confidence None without
+        `confidence.candidates`); `stats` is not changed.
+        """
+        if not hasattr(self, "vox"):
+            return []
+        cands, grid, _ = self._depth_clusters(record=False)
+        return [{"min": [round(float(v), 4) for v in c.points.min(axis=0)],
+                 "max": [round(float(v), 4) for v in c.points.max(axis=0)],
+                 "confidence": self._confidence(c, g), "n_voxels": int(len(c.voxels)),
+                 "tier": "large" if g else "small"} for c, g in zip(cands, grid)]  # fmt: skip
+
+    def _confidence(self, c: Candidate, grid: int) -> float | None:
+        """sigmoid(median voxel log-odds) of a depth candidate (CHANGE 2), None when off."""
+        if not self.candconf:
+            return None
+        vox = self.vox_large if grid else self.vox
+        m = float(np.median(vox.logodds(c.voxels)))
+        return round(float(1.0 / (1.0 + np.exp(-m))), 6)
+
+    def _depth_clusters(self, record: bool = True) -> tuple[list[Candidate], list[int], list[Candidate]]:
+        """Kept voxels -> clusters -> door filter (-> lenient tier merge with CHANGE 1).
+
+        Kept: `lv >= l_keep_small` with candidate log-odds (CHANGE 2), else `>= min_views_small`
+        views. `record`: write the counts into `stats` (False for mid-walk snapshots).
+
+        Returns:
+            (candidates, grid of each (0 strict `vox` / 1 lenient `vox_large`), door-dropped clusters).
+        """
+        kept = self.vox.kept_by_logodds(self.l_keep_small) if self.candconf else self.vox.kept(self.min_views_small)
+        cands = cluster(kept, self.vox.coords(kept), self.vox.mean_points(kept), self.cfg)
+        cands, dropped = drop_door_clusters(cands, self.doors, float(self.pc["door_frac"]))
+        st: dict[str, Any] = {"voxels": len(self.vox), "kept_voxels": len(kept), "clusters": len(cands),
+                              "door_dropped": len(dropped)}  # fmt: skip
+        grid = [0] * len(cands)
+        if self.relaxed:
+            cands, grid, big_dropped, st_large = self._merge_large(cands)
+            dropped = dropped + big_dropped
+            st.update(st_large)
+        if record:
+            self.stats.update(st)
+        return cands, grid, dropped
+
+    def _merge_large(
+        self, strict: list[Candidate]
+    ) -> tuple[list[Candidate], list[int], list[Candidate], dict[str, int]]:
         """Add the large clusters of the lenient grid (CHANGE 1).
 
         Lenient tier: voxels hit at `tau_new_large` with >= `min_views_large` views, clusters with
@@ -218,12 +299,14 @@ class PerceptionSource:
         candidates are never changed, large clusters are only added where no strict cluster is).
         Other strict clusters stay. Order: size descending, then centroid (deterministic tokens).
 
+        With candidate log-odds (CHANGE 2) the lenient voxels are those with `lv >= l_keep_large`.
+
         Returns:
-            (candidates, grid of each (0 strict / 1 lenient), door-dropped lenient clusters).
+            (candidates, grid of each (0 strict / 1 lenient), door-dropped lenient clusters, stats).
         """
         rc = self.pc["relaxed"]
         vl = self.vox_large
-        kept = vl.kept(int(rc["min_views_large"]))
+        kept = vl.kept_by_logodds(self.l_keep_large) if self.candconf else vl.kept(int(rc["min_views_large"]))
         big = cluster(kept, vl.coords(kept), vl.mean_points(kept), self.cfg, min_voxels=int(rc["large_min_voxels"]),
                       link=int(rc["link_voxels_large"]))  # fmt: skip
         big = [c for c in big if is_large(c, self.cfg)]
@@ -240,9 +323,9 @@ class PerceptionSource:
         big = accepted
         entries = [(c, 0) for c, r in zip(strict, replaced) if not r] + [(b, 1) for b in big]
         entries.sort(key=lambda e: (-len(e[0].voxels), *np.round(e[0].centroid, 6).tolist()))
-        self.stats.update(large_voxels=len(vl), large_clusters=len(big), large_door_dropped=len(big_dropped),
-                          large_replaced=int(replaced.sum()), clusters=len(entries))  # fmt: skip
-        return [e[0] for e in entries], [e[1] for e in entries], big_dropped
+        st = {"large_voxels": len(vl), "large_clusters": len(big), "large_door_dropped": len(big_dropped),
+              "large_replaced": int(replaced.sum()), "clusters": len(entries)}  # fmt: skip
+        return [e[0] for e in entries], [e[1] for e in entries], big_dropped, st
 
     def _tier_masks(self, cands: list[Candidate], grid: list[int]) -> list[PackedMasks]:
         """Masks per candidate from the (pixel, voxel) pairs of the grid the candidate lives in."""

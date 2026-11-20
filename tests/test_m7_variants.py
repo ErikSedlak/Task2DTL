@@ -85,7 +85,9 @@ def _walk_votes(priors=None):
     S = make_scan(room_parts(with_box=False), "S", T=invert(T_ALIGN))
     seq = FakeSeq(S, walk())
     info = SeqInfo("S", Path("."), INTR, T_ALIGN, list(seq.frame_ids))
-    res = run_online(RefContext("REF", R, G, 0.0), info, seq, RecordingSource([]), copy.deepcopy(CFG), priors=priors)
+    cfg = copy.deepcopy(CFG)
+    cfg["confidence"].update(class_priors=True, p_del=0.2)  # the class-prior machinery (FULL+classprior, M7)
+    res = run_online(RefContext("REF", R, G, 0.0), info, seq, RecordingSource([]), cfg, priors=priors)
     return res.votes["r10"], res.votes["r11"]
 
 

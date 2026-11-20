@@ -1,20 +1,25 @@
-"""Log-odds node confidence with class priors (DESIGN §6.11; M6, values rescaled by Erik).
+"""Log-odds node confidence (DESIGN §6.11; M6, values rescaled by Erik; CHANGE 2).
 
-l0 = logit(p_persist(class)) from train metadata (`train_meta.class_priors`; label -> nyu40 ->
-global back-off), or logit(`fallback_p`) with `class_priors: false` (ablation).
+l0 = logit(`prior_p`) with `class_priors: false` (default since CHANGE 2 Part A: `prior_p` 0.5,
+l0 = 0, no dataset prior; the deletion margin is set by `p_del` alone), or logit(p_persist(class))
+from train metadata (`train_meta.class_priors`; label -> nyu40 -> global back-off) with
+`class_priors: true` (M7 FULL, ablation row FULL+classprior).
 
 - Reference node, unmatched or confirmed in place:
   l = l0 + clip(L_hit·seen - L_miss·free - L_free_like·free_like, ±clip), counted votes only.
 - Matched reference node: l = l0 + clip(L_hit·views), where `views` = decorrelated viewpoints
   in which its observation was seen (`OnlineResult.obs_views`); free votes at the old place
   are ignored (they are explained by the move / the match).
-- New node: l = clip(L_hit·views) from l = 0 (no prior for a newly observed object).
+- New node: l = clip(L_hit·views) from l = 0 (no prior for a newly observed object); a perception
+  candidate with its own confidence (CHANGE 2 Part B, per-voxel log-odds) keeps that one.
 
 Removal (FULL): unmatched, §3 free evidence, and p = sigmoid(l) < p_del.
 
 With the spec's L = 0.4 and clip ±3, train priors of 0.91-1.0 could never reach p_del = 0.2;
 L_miss = 2.5 makes 2 counted free votes delete a median-prior thing (chair: p = 0.17), while a
 bed (p_persist ~0.996) needs 3 and mixed seen / free evidence protects a node (DECISIONS M6).
+Without priors (CHANGE 2): l0 = 0 and p_del = 0.027 (margin 3.6) -> 2 net free votes delete any
+class, 1 cannot; the same decisions as M7 `FULL-priors` (0.9 / 0.2, margin 3.58).
 """
 
 from __future__ import annotations
@@ -28,10 +33,10 @@ from lsg.train_meta import PriorTable, logit
 
 
 def prior_logodds(label: str | None, nyu40: int | None, priors: PriorTable | None, cfg: Mapping[str, Any]) -> float:
-    """l0 of a reference node (class prior, or the fallback prior)."""
+    """l0 of a reference node (class prior, or the flat `prior_p`)."""
     cc = cfg["confidence"]
-    if priors is None or not cc.get("class_priors", True):
-        return logit(float(cc["fallback_p"]))
+    if priors is None or not cc.get("class_priors", False):
+        return logit(float(cc["prior_p"]))
     return logit(priors.p_persist(label, nyu40))
 
 
@@ -73,6 +78,14 @@ def node_logodds(
 def new_logodds(views: int, cfg: Mapping[str, Any]) -> float:
     """Log-odds of a new node: clip(L_hit·views) from 0."""
     return _clip(float(cfg["confidence"]["L_hit"]) * int(views), cfg)
+
+
+def obs_logodds(confidence: float | None, views: int, cfg: Mapping[str, Any]) -> float:
+    """Log-odds of a new node: its candidate's own confidence (CHANGE 2) if set, else `new_logodds`."""
+    if confidence is None:
+        return new_logodds(views, cfg)
+    p = min(max(float(confidence), 1e-12), 1.0 - 1e-12)
+    return math.log(p / (1.0 - p))
 
 
 def probability(l: float) -> float:

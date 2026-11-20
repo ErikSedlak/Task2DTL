@@ -28,6 +28,16 @@ from lsg.runinfo import git_sha
 
 MODES = ("perception", "oracle")
 
+# The M7 method (= outputs/m7_final, REPORT tables): CHANGE 1 (relaxed candidates) and CHANGE 2 (no class
+# prior, candidate log-odds) off. Ablation row FULL-m7 and the §7.4 audit rerun use it.
+M7_OVERRIDES: dict[str, Any] = {
+    "perception.relaxed.enabled": False,
+    "confidence.candidates.enabled": False,
+    "confidence.class_priors": True,
+    "confidence.prior_p": 0.9,
+    "confidence.p_del": 0.2,
+}
+
 
 @dataclass(frozen=True)
 class Ablation:
@@ -76,9 +86,18 @@ def registry(cfg: Mapping[str, Any]) -> dict[str, Ablation]:
         Ablation("FULL-thincand", "FULL", {"appearance.thin_candidates": False}, group="component",
                  desc="no thin-object candidates (perception)"),
         Ablation("FULL-relaxed", "FULL", {"perception.relaxed.enabled": False}, group="component",
-                 desc="strict candidates (every cluster needs min_views views at tau_new) = M7 FULL"),
-        Ablation("FULL-priors", "FULL", {"confidence.class_priors": False}, group="component",
-                 desc="fallback prior p = 0.9 instead of class priors"),
+                 desc="CHANGE 1 off: strict candidate geometry, voxels need L_hit * min_views"),
+        Ablation("FULL-candconf", "FULL", {"confidence.candidates.enabled": False}, group="component",
+                 desc="CHANGE 2 Part B off: candidates by view counts (= CHANGE 1)"),
+        Ablation("FULL-candconf-free", "FULL", {"confidence.candidates.free_votes": False}, group="component",
+                 desc="candidate log-odds without see-through votes"),
+        Ablation("FULL+classprior", "FULL", {"confidence.class_priors": True, "confidence.p_del": 0.2},
+                 group="component", desc="CHANGE 2 Part A off: learned class priors, p_del 0.2 (M7)"),
+        Ablation("FULL-priors", "FULL", {"confidence.class_priors": False, "confidence.prior_p": 0.9,
+                                         "confidence.p_del": 0.2}, group="component",
+                 desc="M7 row: flat prior p = 0.9, p_del 0.2 (same margin as the default l0 = 0, p_del 0.027)"),
+        Ablation("FULL-m7", "FULL", M7_OVERRIDES, group="component",
+                 desc="the M7 method (CHANGE 1 and 2 off) = outputs/m7_final"),
         Ablation("FULL-decorr", "FULL", {"decorrelation.enabled": False}, group="component",
                  desc="every vote counts (no viewpoint decorrelation)"),
         Ablation("B1-decorr", "B1", {"decorrelation.enabled": False}, group="component",

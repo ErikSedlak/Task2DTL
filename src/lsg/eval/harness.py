@@ -14,12 +14,12 @@ from __future__ import annotations
 import json
 import os
 import time
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 from typing import Any
 
-from lsg.change.baselines import METHODS
+from lsg.change.baselines import METHODS, emits_new
 from lsg.change.online import run_online
 from lsg.change.pipeline import prepare_pair, select_frames
 from lsg.change.update import POLICIES, update_graph
@@ -84,6 +84,11 @@ class _TeeSource:
         self.oracle.finish()
         return self.src.finish()
 
+    def live_candidates(self) -> list[dict[str, Any]]:
+        """The method source's current candidates (snapshot sidecar, CHANGE 2)."""
+        f = getattr(self.src, "live_candidates", None)
+        return f() if f is not None else []
+
 
 def make_labeler(cfg: dict[str, Any], vocab: Sequence[str], threads: int | None = None) -> CLIPLabeler:
     """CLIP labeller from `perception.clip` (model shared per process; cache in `cache/clip/`)."""
@@ -92,12 +97,18 @@ def make_labeler(cfg: dict[str, Any], vocab: Sequence[str], threads: int | None 
     return CLIPLabeler(vocab, cc["model"], cc["pretrained"], cc.get("device", "cuda"), cc["prompt"], cache, threads)
 
 
-def _candidate_rows(obs: Sequence[ObsInstance], truth: dict[str, tuple[int, str]]) -> list[dict[str, Any]]:
-    """Per-candidate summary for `outputs/<run>/candidates/` (inspection, overlays)."""
+def _candidate_rows(obs: Sequence[ObsInstance], truth: dict[str, tuple[int, str]],
+                    cfg: Mapping[str, Any] | None = None) -> list[dict[str, Any]]:  # fmt: skip
+    """Per-candidate summary for `outputs/<run>/candidates/` (inspection, overlays).
+
+    `confidence` = candidate confidence (CHANGE 2, None without it); `emits_new` = the candidate
+    passes `p_new_min` (it becomes a `new` node if it stays unmatched).
+    """
     return [{"token": o.token, "label": o.label, "label_topk": [[a, round(b, 4)] for a, b in o.label_topk],
              "centroid": [round(float(v), 4) for v in o.centroid],
              "aabb": [[round(float(v), 4) for v in o.aabb_min], [round(float(v), 4) for v in o.aabb_max]],
              "n_voxels": len(o.points), "n_frames": len(o.masks), "n_crops": len(o.crops), "kind": o.kind,
+             "confidence": o.confidence, "emits_new": emits_new(o, cfg),
              "gt": list(truth[o.token]) if o.token in truth else None}
             for o in obs]  # fmt: skip
 
@@ -217,7 +228,7 @@ def _eval_group(task: dict[str, Any]) -> list[dict[str, Any]]:
                 if mode == "perception" and task.get("run_dir"):
                     cp = Path(task["run_dir"]) / "candidates" / f"{ref}_{s}.json"
                     cp.parent.mkdir(parents=True, exist_ok=True)
-                    rows = {"ref": ref, "rescan": s, "stats": psrc.stats, "candidates": _candidate_rows(obs, truth),
+                    rows = {"ref": ref, "rescan": s, "stats": psrc.stats, "candidates": _candidate_rows(obs, truth, cfg),
                             "door_dropped": [{"centroid": [round(float(v), 4) for v in c.centroid],
                                               "n_voxels": len(c.voxels)} for c in psrc.dropped_door]}  # fmt: skip
                     cp.write_text(json.dumps(rows, indent=1), encoding="utf-8")

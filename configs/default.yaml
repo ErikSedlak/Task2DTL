@@ -162,14 +162,26 @@ classify:                  # DESIGN §6.10 ICP moved test (tune on dev only)
   max_points: 4000         # random subsample (seeded) of each cloud for speed
 
 confidence:                # DESIGN §6.11 log-odds confidence, FULL only (M6, Erik: rescaled; tune on dev only)
-  class_priors: true       # l0 = logit(p_persist(label)) from train metadata; false -> fallback_p (ablation)
-  fallback_p: 0.9          # prior without class priors / for unknown classes
+  class_priors: false      # CHANGE 2 Part A (Erik 2026-11-20): no dataset prior; true = l0 = logit(p_persist(label))
+                           # from train metadata (M7 FULL, ablation row FULL+classprior with p_del 0.2)
+  prior_p: 0.5             # l0 = logit(prior_p) without class priors: 0.5 = "no information" (l0 = 0)
   prior_kappa: 20          # Beta smoothing of per-class rates toward the parent (nyu40 -> global) rate
   L_hit: 2.5               # per counted seen vote (= L_miss; dev sweep 0.5 / 1 / 2.5 at M6: lowest false deletion)
   L_miss: 2.5              # per counted free vote: 2 votes delete a median-prior thing (M6, Erik)
   L_free_like: 2.5         # per counted appearance free-like vote
   clip: 8.0                # per-visit clip of the total log-odds change, [-clip, +clip]
-  p_del: 0.2               # removed needs p < p_del (plus the §3 free-evidence rule)
+  p_del: 0.027             # removed needs p < p_del (plus the §3 free-evidence rule); with l0 = 0 the margin is
+                           # -logit(0.027) = 3.6: 2 counted free votes delete, 1 cannot (= M7 FULL-priors: 0.9 / 0.2)
+  candidates:              # CHANGE 2 Part B (docs/CHANGE_confidence_unified.md): per-voxel log-odds of perception candidates
+    enabled: true          # false = CHANGE 1 view counts (ablation row FULL-candconf)
+    L_corr: 0.25           # correlated (same viewpoint region) hit / see-through vote; decorrelated ones use L_hit / L_miss
+    corr_cap: 1.0          # sum of correlated additions since the voxel's last decorrelated vote of that kind
+    free_votes: true       # see-through votes lower a voxel (false = ablation row FULL-candconf-free)
+    free_margin: 0.15      # [m] see-through: minimum depth of the window > z(voxel) + free_margin (= tau_free)
+    free_window: 1         # [px] half-size of the minimum-depth window (1 = 3x3); any invalid pixel in it = no info
+    l_keep_small: 2.5      # strict tier keeps voxels with lv >= this (2.5 = one decorrelated hit, Erik; 5.0 = CHANGE 1)
+    l_keep_large: 2.5      # lenient tier (clusters >= relaxed.large_min_voxels)
+    p_new_min: 0.92        # a candidate becomes a `new` node only with sigmoid(median lv) >= this (else dropped, Erik)
 
 appearance:                # DESIGN §3 / §6.6 appearance residual, FULL only (M6)
   enabled: true            # false = depth-only FULL (the brief's ablation)
@@ -213,6 +225,7 @@ m7:                        # `lsg m7` / `lsg ablate` (DESIGN §8, §9): every va
   tau_free_sweep: [0.05, 0.10, 0.20, 0.30]    # [m] the default 0.15 is the FULL row
   fracs: [0.5, 0.25, 0.1]                     # §7.3 observed fraction (100% = the FULL row)
   frac_seeds: [0, 1, 2]
+  p_new_sweep: [0.95, 0.99, 0.999]            # `lsg newcurve`: new P / R at these p_new_min (plus the default)
   relchange_rows: [B2, FULL, FULL+follow, FULL-keepparent]
   determinism_pair: 0                         # index into splits/dev_train.txt
 

@@ -8,6 +8,8 @@ Recording (timeline `frame` = rescan frame index):
 - per processed frame: the rescan camera at `T_align @ pose` (pinhole + trajectory so far),
   optionally its colour image (JPEG bytes as stored, rotated 90°);
 - per snapshot: node boxes grouped by tentative state (`world/nodes/<state>`), labels with confidence;
+  perception runs also have a sidecar `candidates_frame_XXXXXX.json` (CHANGE 2): the live candidates
+  as `world/candidates`, grey (p 0.5) -> green (p 1) by confidence, labelled "candidate <p>";
 - after the last frame (`frame` = last + 1): the final updated graph, moved nodes with an
   old→new arrow, new nodes, removed nodes.
 
@@ -66,6 +68,28 @@ def _log_nodes(rec, rr, base: str, G: Graph, moved_from: dict[str, Any] | None =
             rec.log(f"{base}/moves", rr.Arrows3D(origins=a, vectors=v, colors=[_rgb(STATE_COLOR["moved"])] * len(a)))
         else:
             rec.log(f"{base}/moves", rr.Clear(recursive=False))
+
+
+def confidence_color(p: float | None) -> tuple[int, int, int]:
+    """Grey (p 0.5 or unknown) -> green (p 1) ramp for live candidates."""
+    lo, hi = np.array([150, 150, 150], float), np.array(_rgb(STATE_COLOR["new"]), float)
+    if p is None:
+        return tuple(int(x) for x in lo)  # type: ignore[return-value]
+    t = float(np.clip((float(p) - 0.5) / 0.5, 0.0, 1.0))
+    return tuple(int(round(x)) for x in lo + t * (hi - lo))  # type: ignore[return-value]
+
+
+def _log_candidates(rec, rr, path: str, side: dict[str, Any]) -> None:
+    """Live perception candidates of one snapshot (CHANGE 2 sidecar): boxes coloured by confidence."""
+    rows = side.get("candidates", [])
+    if not rows:
+        rec.log(path, rr.Clear(recursive=False))
+        return
+    lo = np.array([r["min"] for r in rows], float)
+    hi = np.array([r["max"] for r in rows], float)
+    labels = ["candidate" + (f" {r['confidence']:.2f}" if r.get("confidence") is not None else "") for r in rows]
+    rec.log(path, rr.Boxes3D(mins=lo, sizes=hi - lo, colors=[confidence_color(r.get("confidence")) for r in rows],
+                             labels=labels, radii=0.008))  # fmt: skip
 
 
 def rerun_timeline(
@@ -132,9 +156,13 @@ def rerun_timeline(
                 rec.log("world/camera/image", rr.EncodedImage(contents=data, media_type="image/jpeg"))
             if int(idx) in by_frame:
                 _log_nodes(rec, rr, "world/nodes", Graph.load(by_frame[int(idx)]))
+                side = snap_dir / f"candidates_frame_{int(idx):06d}.json"
+                if side.is_file():
+                    _log_candidates(rec, rr, "world/candidates", json.loads(side.read_text(encoding="utf-8")))
     if graph_final is not None:
         last = max(int(i) for i in info["frame_ids"]) + 1
         rec.set_time("frame", sequence=last)
+        rec.log("world/candidates", rr.Clear(recursive=False))  # the final new / moved nodes replace them
         _log_nodes(rec, rr, "world/nodes", Graph.load(graph_final), moved_from=ref_centroid)
     rec.flush()
     rec.disconnect()

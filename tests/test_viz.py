@@ -80,11 +80,23 @@ def test_rerun_timeline_writes_recording(tmp_path):
     for k in (2, 5):
         g = Graph(dict(ref.meta, frame_idx=k, tentative=True), ref.nodes, ref.edges)
         g.save(snap / f"frame_{k:06d}.json")
+    # CHANGE 2 sidecar: one live candidate at frame 2, none left at frame 5
+    rows = [{"min": [0, 0, 0], "max": [0.3, 0.3, 0.3], "confidence": 0.95, "n_voxels": 50, "tier": "large"}]
+    (snap / "candidates_frame_000002.json").write_text(json.dumps({"frame_idx": 2, "candidates": rows}), encoding="utf-8")
+    (snap / "candidates_frame_000005.json").write_text(json.dumps({"frame_idx": 5, "candidates": []}), encoding="utf-8")
     gp = upd.save(tmp_path / "final.json")
     out = rerun_timeline(tmp_path, snap, tmp_path / "x.rrd", graph_final=gp, mesh=False)
     rec = rdf.load_recording(str(out))
     ents = {c.entity_path for c in rec.schema().component_columns()}
     assert {"/world/camera", "/world/trajectory", "/world/nodes/unchanged", "/world/nodes/moved",
-            "/world/nodes/moves"} <= ents
+            "/world/nodes/moves", "/world/candidates"} <= ents
     frames = rec.view(index="frame", contents="/world/nodes/**").select().read_all().column("frame").to_pylist()
     assert frames == [2, 5, 6]  # two snapshots + the final graph after the last frame
+
+
+def test_confidence_color_ramp():
+    from lsg.viz.rerun_timeline import confidence_color
+
+    assert confidence_color(None) == confidence_color(0.5) == confidence_color(0.1) == (150, 150, 150)
+    g = confidence_color(1.0)
+    assert g != (150, 150, 150) and confidence_color(0.75) not in (g, (150, 150, 150))

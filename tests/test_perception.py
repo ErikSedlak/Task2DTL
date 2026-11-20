@@ -64,28 +64,45 @@ def graph_of(R):
 
 @pytest.fixture
 def cfg():
-    """Default config with the relaxed candidate rules OFF: these tests cover the strict M4 path."""
+    """Relaxed candidate rules and candidate log-odds OFF: these tests cover the strict M4 path."""
     c = copy.deepcopy(load_config())
     c["perception"]["relaxed"]["enabled"] = False
+    c["confidence"]["candidates"]["enabled"] = False
     return c
 
 
 @pytest.fixture
 def rcfg():
-    """Default config (CHANGE 1: relaxed candidate rules ON)."""
+    """CHANGE 1 (relaxed candidate rules) ON, CHANGE 2 candidate log-odds OFF: view counts."""
     c = copy.deepcopy(load_config())
     assert c["perception"]["relaxed"]["enabled"] is True
+    c["confidence"]["candidates"]["enabled"] = False
     return c
 
 
-def run_perception(cfg, ref_parts, rescan_parts, poses, labeler=None, with_crops=False):
+@pytest.fixture
+def ccfg():
+    """The default config (CHANGE 1 and CHANGE 2 on)."""
+    c = copy.deepcopy(load_config())
+    assert c["perception"]["relaxed"]["enabled"] is True and c["confidence"]["candidates"]["enabled"] is True
+    return c
+
+
+def run_perception(cfg, ref_parts, rescan_parts, poses, labeler=None, with_crops=False, later_parts=None,
+                   n_first=None, snapshot_dir=None):  # fmt: skip
+    """Online walk; with `later_parts` the frames from index `n_first` on show that scene instead."""
     R = make_scan(ref_parts, "REF")
     S = make_scan(rescan_parts, "S", T=invert(T_ALIGN))
     seq = FakeSeq(S, poses)
+    if later_parts is not None:
+        late = FakeSeq(make_scan(later_parts, "S2", T=invert(T_ALIGN)), poses)
+        for i, f in enumerate(seq.frame_ids):
+            if i >= n_first:
+                seq._frames[f] = late._frames[f]
     ctx = RefContext("REF", R, graph_of(R), 0.0, {oid: inst.nyu40 for oid, inst in R.instances.items()})
     info = SeqInfo("S", Path("."), INTR, T_ALIGN, list(seq.frame_ids))
     src = PerceptionSource(labeler, {"box": 29}, cfg, with_crops=with_crops)
-    res = run_online(ctx, info, seq, src, cfg, obs_mode="perception")
+    res = run_online(ctx, info, seq, src, cfg, obs_mode="perception", snapshot_dir=snapshot_dir)
     return res, src
 
 
@@ -389,3 +406,140 @@ def test_merge_add_keeps_the_strict_cluster_and_link_knob(rcfg, cfg):
     c = {"perception": {"link_voxels": 2, "min_voxels": 1}}
     assert len(cluster(np.arange(3), pts, pts * 0.04, c)) == 1
     assert len(cluster(np.arange(3), pts, pts * 0.04, c, link=1)) == 3
+
+
+# ---- CHANGE 2: candidate confidence as per-voxel log-odds --------------------------------------
+
+ORBIT = orbit([0.5, 0.5, 0.15])
+
+
+def _same(a, b):
+    return [o.token for o in a] == [o.token for o in b] and all(np.array_equal(x.points, y.points) for x, y in zip(a, b))
+
+
+def test_candconf_with_neutral_values_equals_change1(ccfg, rcfg, cfg):
+    """L_corr 0, no see-through votes, l_keep 5.0 / 2.5 = CHANGE 1's 2 / 1 views (same tokens and points)."""
+    ccfg["confidence"]["candidates"].update(L_corr=0.0, free_votes=False, l_keep_small=5.0, l_keep_large=2.5)
+    for poses in (ORBIT, ONE_POSE, TWO_POSES):
+        a, _ = run_perception(rcfg, room(), room(WITH_BOX), poses)
+        b, _ = run_perception(ccfg, room(), room(WITH_BOX), poses)
+        assert _same(a.obs, b.obs), len(poses)
+    # without the relaxed rules the strict grid needs L_hit * min_views (M7's 3 views)
+    ccfg["perception"]["relaxed"]["enabled"] = False
+    for poses in (ORBIT, TWO_POSES):
+        a, _ = run_perception(cfg, room(), room(WITH_BOX), poses)
+        b, _ = run_perception(ccfg, room(), room(WITH_BOX), poses)
+        assert _same(a.obs, b.obs)
+
+
+def test_one_observation_is_enough_and_confidence_is_set(ccfg):
+    """Erik: a candidate is added after one decorrelated observation, small clusters too."""
+    ccfg["perception"]["relaxed"]["large_min_voxels"] = 10**6  # strict tier only
+    res, src = run_perception(ccfg, room(), room(WITH_BOX), ONE_POSE)
+    assert len(res.obs) == 1 and src.stats["free_votes"] == 0
+    p = res.obs[0].confidence
+    assert 0.92 <= p < 0.98  # one decorrelated hit (2.5) + capped correlated hits (<= 1.0)
+    res, src = run_perception(ccfg, room(), room(WITH_BOX), ORBIT)
+    assert len(res.obs) == 1 and res.obs[0].confidence > 0.999  # 12 views: clipped at +8
+    import json
+
+    json.dumps(src.stats)  # stats go into metrics.json: plain Python types only
+    assert type(res.obs[0].confidence) is float
+
+
+def test_transient_is_removed_by_see_through_votes(ccfg, rcfg):
+    """A box seen in the first frame only, then seen through from other viewpoints, gives no candidate."""
+    a, _ = run_perception(rcfg, room(), room(WITH_BOX), ORBIT, later_parts=room(), n_first=1)
+    assert len(a.obs) == 1  # CHANGE 1: one view is enough for a large cluster, nothing can lower it
+    b, src = run_perception(ccfg, room(), room(WITH_BOX), ORBIT, later_parts=room(), n_first=1)
+    assert b.obs == [] and src.stats["free_votes"] > 0 and src.stats["large_seen_through_voxels"] > 0
+    # the same walk without see-through votes keeps it (ablation FULL-candconf-free)
+    ccfg["confidence"]["candidates"]["free_votes"] = False
+    c, src = run_perception(ccfg, room(), room(WITH_BOX), ORBIT, later_parts=room(), n_first=1)
+    assert len(c.obs) == 1 and "free_votes" in src.stats and src.stats["free_votes"] == 0
+
+
+def test_object_that_stays_is_not_seen_through(ccfg):
+    res, src = run_perception(ccfg, room(), room(WITH_BOX), ORBIT)
+    assert len(res.obs) == 1 and src.stats["seen_through_voxels"] == 0
+    assert src.stats["large_seen_through_voxels"] == 0
+
+
+def test_candconf_is_deterministic(ccfg):
+    runs = [run_perception(ccfg, room(), room(WITH_BOX), ORBIT, later_parts=room(), n_first=4)[0].obs
+            for _ in range(2)]  # fmt: skip
+    assert _same(runs[0], runs[1]) and [o.confidence for o in runs[0]] == [o.confidence for o in runs[1]]
+
+
+def _one_voxel(**kw):
+    """A VoxelEvidence with one voxel at (0, 0, 2) hit once from the identity pose (camera at 0, +z)."""
+    ve = VoxelEvidence(0.04, 0.30, 20.0, L_corr=0.25, corr_cap=1.0, clip=8.0, **kw)
+    ve.add(np.array([[0.01, 0.01, 2.01]]), np.eye(4))
+    return ve
+
+
+def _moved(dx):
+    P = np.eye(4)
+    P[0, 3] = dx
+    return P
+
+
+def test_free_vote_rules_occlusion_invalid_out_of_view_and_window():
+    from lsg.perception.voxels import window_min_depth
+
+    bg = np.full((H, W), 5.0)
+    ve = _one_voxel()
+    assert ve.observe_free(window_min_depth(bg, 1), K, _moved(0.5)) == 1  # seen through
+    assert ve.logodds([0])[0] == pytest.approx(0.0)
+    for depth in (np.full((H, W), 1.0),  # something in front: occlusion
+                  np.zeros((H, W))):     # invalid depth  # fmt: skip
+        ve = _one_voxel()
+        assert ve.observe_free(window_min_depth(depth, 1), K, _moved(0.5)) == 0
+    ve = _one_voxel()
+    P = np.eye(4)
+    P[:3, :3] = np.diag([1.0, -1.0, -1.0])  # looking the other way: out of view (behind)
+    assert ve.observe_free(window_min_depth(bg, 1), K, P) == 0
+    assert ve.observe_free(window_min_depth(bg, 1), K, np.eye(4), skip=np.array([0])) == 0  # hit this frame
+    # silhouette: one neighbouring pixel at the voxel's depth blocks the 3x3 window, not a 1x1 one
+    ve = _one_voxel()
+    X = ve.mean_points([0])[0] - np.array([0.5, 0, 0])
+    u, v = int(round(K[0, 0] * X[0] / X[2] + K[0, 2])), int(round(K[1, 1] * X[1] / X[2] + K[1, 2]))
+    edge = bg.copy()
+    edge[v, u + 1] = 2.0
+    assert ve.observe_free(window_min_depth(edge, 1), K, _moved(0.5)) == 0
+    assert ve.observe_free(window_min_depth(edge, 0), K, _moved(0.5)) == 1
+    assert window_min_depth(bg, 1, max_depth=4.0).max() == 0.0  # beyond max_depth = invalid
+
+
+def test_correlated_votes_are_capped():
+    ve = _one_voxel()
+    for _ in range(30):  # the same viewpoint again and again
+        ve.add(np.array([[0.01, 0.01, 2.01]]), np.eye(4))
+    assert ve.views[0] == 1 and ve.logodds([0])[0] == pytest.approx(2.5 + 1.0)
+    ve.add(np.array([[0.01, 0.01, 2.01]]), _moved(0.5))  # decorrelated: full vote, cap resets
+    assert ve.logodds([0])[0] == pytest.approx(6.0)
+    for _ in range(10):
+        ve.add(np.array([[0.01, 0.01, 2.01]]), _moved(0.5))
+    assert ve.logodds([0])[0] == pytest.approx(7.0)
+    from lsg.perception.voxels import window_min_depth
+
+    dm = window_min_depth(np.full((H, W), 5.0), 1)
+    for _ in range(10):  # first see-through vote counts fully, the correlated ones are capped too
+        ve.observe_free(dm, K, _moved(0.5))
+    assert ve.logodds([0])[0] == pytest.approx(7.0 - 2.5 - 1.0)
+    assert ve.kept_by_logodds(3.5).tolist() == [0] and ve.kept_by_logodds(3.6).size == 0
+
+
+def test_live_candidates_go_to_the_snapshot_sidecar(ccfg, tmp_path):
+    import json
+
+    ccfg["online"]["snapshot_every"] = 1
+    res, src = run_perception(ccfg, room(), room(WITH_BOX), ORBIT, later_parts=room(), n_first=1,
+                              snapshot_dir=tmp_path)  # fmt: skip
+    side = sorted(tmp_path.glob("candidates_frame_*.json"))
+    assert len(side) == len(ORBIT) and len(sorted(tmp_path.glob("frame_*.json"))) == len(ORBIT)
+    first = json.loads(side[0].read_text(encoding="utf-8"))["candidates"]
+    last = json.loads(side[-1].read_text(encoding="utf-8"))["candidates"]
+    assert len(first) == 1 and first[0]["confidence"] > 0.9 and first[0]["tier"] == "large"
+    assert last == [] and res.obs == []
+    assert src.stats["frames"] == len(ORBIT)  # live calls do not touch the stats of the walk

@@ -424,9 +424,9 @@ def run_audit_sample(
 ) -> dict[str, Any]:
     """`lsg audit sample`: FULL with details (or reuse `from_run`), pools, sample, panels, CSVs.
 
-    By default the audited method is the M7 FULL with the strict candidate rules
-    (`perception.relaxed.enabled=False`, the ablation row FULL-relaxed): the run must reproduce
-    `m7_final/val/FULL`. `relaxed=True` audits the current default instead (pass `compare=None`).
+    By default the audited method is the M7 FULL (`ablations.M7_OVERRIDES`: CHANGE 1 and
+    CHANGE 2 off, the ablation row FULL-m7): the run must reproduce `m7_final/val/FULL`.
+    `relaxed=True` audits the current default instead (pass `compare=None`).
 
     Args:
         run_id: Output folder (`outputs/<run_id>/`; the FULL run goes to `<run_id>/val_FULL`).
@@ -436,16 +436,16 @@ def run_audit_sample(
         b2_run: Run dir with B2 graphs (`graphs/<mode>/`) for the veto set; None = no veto set.
         n_per_cat: Sample size per mode and category.
         max_pairs: Only the first N pairs (dry runs).
-        relaxed: Keep the config as given (CHANGE 1 candidate rules on) instead of forcing the strict rules.
+        relaxed: Keep the config as given (CHANGE 1 / 2 on) instead of forcing the M7 method.
     """
     from lsg.config import data_root, outputs_root
-    from lsg.eval.ablations import apply_overrides
+    from lsg.eval.ablations import M7_OVERRIDES, apply_overrides
     from lsg.eval.harness import run_eval, split_path
     from lsg.io.scan3r import read_pairs
     from lsg.runinfo import write_metrics
 
     if not relaxed:
-        cfg = apply_overrides(cfg, {"perception.relaxed.enabled": False})
+        cfg = apply_overrides(cfg, M7_OVERRIDES)
     out_root = outputs_root(cfg)
     out_dir = out_root / run_id
     resolve = lambda p: None if p is None else (Path(p) if Path(p).is_dir() else out_root / p)  # noqa: E731

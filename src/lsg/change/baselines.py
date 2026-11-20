@@ -44,7 +44,7 @@ import numpy as np
 
 from lsg.change.association import absorb_confirmed, associate
 from lsg.change.classify import Decision, classify
-from lsg.change.confidence import below_p_del, new_logodds, node_logodds, prior_logodds, probability
+from lsg.change.confidence import below_p_del, node_logodds, obs_logodds, prior_logodds, probability
 from lsg.change.visibility import NodeVotes, confirmed_in_place, has_free_evidence
 from lsg.classes import node_level
 from lsg.geom.transforms import apply
@@ -108,10 +108,26 @@ def new_node(k: int, o: ObsInstance, rescan_id: str | None) -> Node:
     )
 
 
-def add_new_nodes(G: Graph, obs: Sequence[ObsInstance], rescan_id: str | None) -> list[Node]:
-    """Append new nodes (+ room hierarchy edges) for `obs`, in token order."""
+def emits_new(o: ObsInstance, cfg: Mapping[str, Any] | None) -> bool:
+    """An unmatched observation becomes a `new` node unless its candidate confidence (CHANGE 2,
+    perception only; oracle instances carry None) is below `confidence.candidates.p_new_min`."""
+    if o.confidence is None or cfg is None:
+        return True
+    cc = (cfg.get("confidence", {}) or {}).get("candidates") or {}
+    if not cc.get("enabled", False):
+        return True
+    return float(o.confidence) >= float(cc.get("p_new_min", 0.0))
+
+
+def add_new_nodes(G: Graph, obs: Sequence[ObsInstance], rescan_id: str | None,
+                  cfg: Mapping[str, Any] | None = None) -> list[Node]:  # fmt: skip
+    """Append new nodes (+ room hierarchy edges) for `obs`, in token order.
+
+    With `cfg`, observations failing `emits_new` (low candidate confidence) are dropped.
+    """
     added = []
-    for k, o in enumerate(sorted(obs, key=lambda x: x.token)):
+    keep = [o for o in obs if emits_new(o, cfg)]
+    for k, o in enumerate(sorted(keep, key=lambda x: x.token)):
         n = new_node(k, o, rescan_id)
         G.nodes.append(n)
         G.edges.append(Edge(ROOM_ID, n.id, "hierarchy"))
@@ -188,7 +204,7 @@ def b0(
     for n in nodes:
         if n.id not in matched:
             n.state = "removed"
-    add_new_nodes(G, rest, rescan_id)
+    add_new_nodes(G, rest, rescan_id, cfg)
     return G
 
 
@@ -219,7 +235,7 @@ def b1(
         n.state = "removed" if has_free_evidence(v, cfg) else "unknown"
         if v is not None and v.raw_seen > 0:
             n.last_seen = rescan_id
-    add_new_nodes(G, rest, rescan_id)
+    add_new_nodes(G, rest, rescan_id, cfg)
     return G
 
 
@@ -312,7 +328,7 @@ def _b2_core(G_ref, obs, cfg, rescan_id, obs_mode, votes, ref_ctx, method):
             continue
         assert d.T_move is not None
         _apply_move(n, d.T_move, P.get(n.id))
-    add_new_nodes(G, unmatched_obs, rescan_id)
+    add_new_nodes(G, unmatched_obs, rescan_id, cfg)
     G.meta["assoc"] = {"confirmed": len(conf), "absorbed": len(ab.absorbed), "matched": len(pairs),
                        "icp_fallback": sum(bool(dec[n.id].info.get("fallback")) for n, _, _ in pairs)}  # fmt: skip
     if committed:
@@ -370,12 +386,14 @@ def full(
     G, matched, conf_ids, committed = _b2_core(G_ref, obs, cfg, rescan_id, obs_mode, votes, ref_ctx, "FULL")
     vs = votes or {}
     views = obs_views or {}
+    conf_of = {o.token: o.confidence for o in obs}
     n_veto = 0
     for n in G.nodes:
         if n.level not in SCORED_LEVELS:
             continue
         if n.state == "new":
-            n.confidence = probability(new_logodds(int(views.get(n.obs_token or "", 0)), cfg))
+            tok = n.obs_token or ""
+            n.confidence = probability(obs_logodds(conf_of.get(tok), int(views.get(tok, 0)), cfg))
             continue
         l0 = prior_logodds(n.label, n.nyu40, priors, cfg)
         is_m = n.id in matched

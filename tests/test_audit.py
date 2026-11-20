@@ -100,7 +100,7 @@ def test_compare_metrics():
 
 
 def test_audit_runs_the_strict_candidate_rules_unless_relaxed(monkeypatch):
-    """The audit must reproduce m7_final/val/FULL, i.e. FULL with the strict candidates (CHANGE 1)."""
+    """The audit must reproduce m7_final/val/FULL, i.e. the M7 method (CHANGE 1 and 2 off)."""
     import copy
 
     import lsg.eval.harness as harness
@@ -111,6 +111,9 @@ def test_audit_runs_the_strict_candidate_rules_unless_relaxed(monkeypatch):
 
     def fake_run_eval(cfg, *a, **k):
         seen.append(cfg["perception"]["relaxed"]["enabled"])
+        c = cfg["confidence"]
+        assert (c["candidates"]["enabled"], c["class_priors"], c["p_del"]) == ((True, False, 0.027) if seen[-1]
+                                                                              else (False, True, 0.2))  # fmt: skip
         raise RuntimeError("stop")
 
     monkeypatch.setattr(harness, "run_eval", fake_run_eval)

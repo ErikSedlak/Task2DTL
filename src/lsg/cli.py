@@ -224,6 +224,22 @@ def _cmd_viz_rerun(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_newcurve(args: argparse.Namespace) -> int:
+    """`lsg newcurve`: new P / R over the candidate-confidence threshold (CHANGE 2)."""
+    from pathlib import Path
+
+    from lsg.config import outputs_root
+    from lsg.eval.newcurve import format_curve, new_curve
+
+    cfg = load_config(args.config)
+    run = Path(args.run)
+    if not run.is_dir():
+        run = outputs_root(cfg) / args.run
+    ths = [float(t) for t in args.thresholds.split(",")] if args.thresholds else None
+    print(format_curve(new_curve(cfg, run, ths)))
+    return 0
+
+
 def _cmd_audit_sample(args: argparse.Namespace) -> int:
     """`lsg audit sample`: FULL on val with per-object details, FP pools, seeded sample, panels, CSVs (§7.4)."""
     from lsg.eval.audit import run_audit_sample
@@ -356,6 +372,12 @@ def main(argv: list[str] | None = None) -> int:
     ab.add_argument("--config", default=None)
     ab.set_defaults(func=_cmd_ablate)
 
+    nc = sub.add_parser("newcurve", help="new-object P / R over p_new_min from a run's saved perception graphs (CHANGE 2)")
+    nc.add_argument("--run", required=True, help="run directory (or id under outputs/) with graphs/perception/")
+    nc.add_argument("--thresholds", default=None, help="comma list (default: p_new_min + m7.p_new_sweep)")
+    nc.add_argument("--config", default=None)
+    nc.set_defaults(func=_cmd_newcurve)
+
     sp = sub.add_parser("splits", help="split-file helpers")
     sps = sp.add_subparsers(dest="splits_cmd", required=True)
     tx = sps.add_parser("textures", help="write splits/download_textures.txt")
@@ -386,7 +408,7 @@ def main(argv: list[str] | None = None) -> int:
     a1.add_argument("--compare", default="m7_final/val/FULL", help="run whose metrics FULL must reproduce")
     a1.add_argument("--no-compare", action="store_true")
     a1.add_argument("--relaxed", action="store_true",
-                    help="audit the current default (relaxed candidate rules) instead of the M7 strict FULL; use with --no-compare")
+                    help="audit the current default (CHANGE 1 / 2 on) instead of the M7 FULL; use with --no-compare")
     a1.add_argument("--b2-run", default="m7_final/val/B2", help="run with B2 graphs (veto set)")
     a1.add_argument("--n", type=int, default=10, help="sample size per mode and category")
     a1.add_argument("--seed", type=int, default=0)

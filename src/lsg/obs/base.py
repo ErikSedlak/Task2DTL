@@ -79,6 +79,7 @@ class ObsInstance:
     masks: Mapping[int, np.ndarray] = field(default_factory=dict)  # frame_idx -> bool[172, 224]
     crops: list[np.ndarray] = field(default_factory=list)  # upright RGB crops
     kind: str = "depth"  # perception: "depth" (residual voxels) or "appearance" (thin-object voxels, M6)
+    confidence: float | None = None  # perception depth candidates (CHANGE 2): sigmoid(median voxel log-odds)
 
     @property
     def centroid(self) -> np.ndarray:
