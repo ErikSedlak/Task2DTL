@@ -1,7 +1,7 @@
 """Log-odds node confidence (DESIGN §6.11; M6, values rescaled by Erik; CHANGE 2).
 
-l0 = logit(`prior_p`) with `class_priors: false` (default since CHANGE 2 Part A: `prior_p` 0.5,
-l0 = 0, no dataset prior; the deletion margin is set by `p_del` alone), or logit(p_persist(class))
+l0 = logit(`prior_p`) with `class_priors: false` (default since CHANGE 2 Part A: no dataset prior;
+CHANGE 3: a flat `prior_p` 0.9 with `p_del` 0.2, so an untouched reference node reports 0.9), or logit(p_persist(class))
 from train metadata (`train_meta.class_priors`; label -> nyu40 -> global back-off) with
 `class_priors: true` (M7 FULL, ablation row FULL+classprior).
 
@@ -18,8 +18,8 @@ Removal (FULL): unmatched, §3 free evidence, and p = sigmoid(l) < p_del.
 With the spec's L = 0.4 and clip ±3, train priors of 0.91-1.0 could never reach p_del = 0.2;
 L_miss = 2.5 makes 2 counted free votes delete a median-prior thing (chair: p = 0.17), while a
 bed (p_persist ~0.996) needs 3 and mixed seen / free evidence protects a node (DECISIONS M6).
-Without priors (CHANGE 2): l0 = 0 and p_del = 0.027 (margin 3.6) -> 2 net free votes delete any
-class, 1 cannot; the same decisions as M7 `FULL-priors` (0.9 / 0.2, margin 3.58).
+Without priors: flat 0.9 / p_del 0.2 (margin 3.58; CHANGE 3, = M7 `FULL-priors`) -> 2 net free votes
+delete any class, 1 cannot; CHANGE 2's l0 = 0 / p_del 0.027 (margin 3.6) made the same decisions.
 """
 
 from __future__ import annotations

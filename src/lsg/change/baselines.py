@@ -381,7 +381,7 @@ def full(
     node gets `confidence` (`change.confidence`): unmatched / confirmed nodes from their counted
     votes, matched nodes from their observation's decorrelated views (`obs_views`; free votes at
     the old place ignored), new nodes from their views alone. `priors` = `train_meta.PriorTable`
-    (None or `confidence.class_priors: false` -> `fallback_p`).
+    (None or `confidence.class_priors: false` -> the flat `prior_p`).
     """
     G, matched, conf_ids, committed = _b2_core(G_ref, obs, cfg, rescan_id, obs_mode, votes, ref_ctx, "FULL")
     vs = votes or {}

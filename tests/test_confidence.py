@@ -31,7 +31,7 @@ def cfg():
 
 @pytest.fixture
 def cfg_a():
-    """The default since CHANGE 2 Part A: no prior (l0 = 0), p_del 0.027."""
+    """The default: no class prior (CHANGE 2 Part A), flat 0.9 with p_del 0.2 (CHANGE 3)."""
     return copy.deepcopy(load_config())
 
 
@@ -105,25 +105,25 @@ def test_priors_off_uses_fallback(cfg):
 
 
 def test_part_a_default_has_no_prior_and_one_margin_for_every_class(cfg_a):
-    """CHANGE 2 Part A: l0 = 0 for chair and bed alike; 2 net free votes delete, 1 cannot, mixed protects."""
+    """No class prior: one l0 for chair and bed alike; 2 net free votes delete, 1 cannot, mixed protects."""
     cc = cfg_a["confidence"]
-    assert cc["class_priors"] is False and cc["prior_p"] == 0.5
+    assert cc["class_priors"] is False and cc["prior_p"] == 0.9 and cc["p_del"] == 0.2
     t = table(chair=(968, 32), bed=(996, 4))
     l_chair = prior_logodds("chair", 40, t, cfg_a)
     l_bed = prior_logodds("bed", 4, t, cfg_a)
-    assert l_chair == l_bed == pytest.approx(0.0)
+    assert l_chair == l_bed == pytest.approx(logit(0.9))
     for l0 in (l_chair, l_bed):
         assert below_p_del(node_logodds(l0, NodeVotes(free=2), cfg_a), cfg_a)
         assert not below_p_del(node_logodds(l0, NodeVotes(free=1), cfg_a), cfg_a)
         assert not below_p_del(node_logodds(l0, NodeVotes(free=2, seen=1), cfg_a), cfg_a)
         assert below_p_del(node_logodds(l0, NodeVotes(free=3, seen=1), cfg_a), cfg_a)
-    assert probability(node_logodds(0.0, None, cfg_a)) == 0.5  # no votes = no information
+    assert probability(node_logodds(l_chair, None, cfg_a)) == pytest.approx(0.9)  # no votes: the flat start value
 
 
-def test_part_a_decisions_equal_the_m7_flat_prior_row(cfg_a):
-    """Same deletion decisions as FULL-priors (prior 0.9, p_del 0.2) for every vote combination."""
+def test_default_decisions_equal_change2_no_prior(cfg_a):
+    """CHANGE 3's flat 0.9 / 0.2 deletes exactly where CHANGE 2's l0 = 0 / p_del 0.027 did (every vote combination)."""
     m7 = copy.deepcopy(cfg_a)
-    m7["confidence"].update(class_priors=False, prior_p=0.9, p_del=0.2)
+    m7["confidence"].update(class_priors=False, prior_p=0.5, p_del=0.027)
     l_a, l_m = prior_logodds("x", None, None, cfg_a), prior_logodds("x", None, None, m7)
     for seen in range(6):
         for free in range(6):

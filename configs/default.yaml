@@ -164,14 +164,15 @@ classify:                  # DESIGN §6.10 ICP moved test (tune on dev only)
 confidence:                # DESIGN §6.11 log-odds confidence, FULL only (M6, Erik: rescaled; tune on dev only)
   class_priors: false      # CHANGE 2 Part A (Erik 2026-11-20): no dataset prior; true = l0 = logit(p_persist(label))
                            # from train metadata (M7 FULL, ablation row FULL+classprior with p_del 0.2)
-  prior_p: 0.5             # l0 = logit(prior_p) without class priors: 0.5 = "no information" (l0 = 0)
+  prior_p: 0.9             # l0 = logit(prior_p) without class priors, flat for every reference node (CHANGE 3, Erik
+                           # 2026-11-20; CHANGE 2 had 0.5 / p_del 0.027: same decisions, untouched node reported 0.5)
   prior_kappa: 20          # Beta smoothing of per-class rates toward the parent (nyu40 -> global) rate
   L_hit: 2.5               # per counted seen vote (= L_miss; dev sweep 0.5 / 1 / 2.5 at M6: lowest false deletion)
   L_miss: 2.5              # per counted free vote: 2 votes delete a median-prior thing (M6, Erik)
   L_free_like: 2.5         # per counted appearance free-like vote
   clip: 8.0                # per-visit clip of the total log-odds change, [-clip, +clip]
-  p_del: 0.027             # removed needs p < p_del (plus the §3 free-evidence rule); with l0 = 0 the margin is
-                           # -logit(0.027) = 3.6: 2 counted free votes delete, 1 cannot (= M7 FULL-priors: 0.9 / 0.2)
+  p_del: 0.2               # removed needs p < p_del (plus the §3 free-evidence rule); margin logit(0.9) - logit(0.2)
+                           # = 3.58: 2 net counted free votes delete, 1 cannot, for every class (= M7 FULL-priors)
   candidates:              # CHANGE 2 Part B (docs/CHANGE_confidence_unified.md): per-voxel log-odds of perception candidates
     enabled: true          # false = CHANGE 1 view counts (ablation row FULL-candconf)
     L_corr: 0.25           # correlated (same viewpoint region) hit / see-through vote; decorrelated ones use L_hit / L_miss

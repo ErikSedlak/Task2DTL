@@ -95,7 +95,7 @@ def registry(cfg: Mapping[str, Any]) -> dict[str, Ablation]:
                  group="component", desc="CHANGE 2 Part A off: learned class priors, p_del 0.2 (M7)"),
         Ablation("FULL-priors", "FULL", {"confidence.class_priors": False, "confidence.prior_p": 0.9,
                                          "confidence.p_del": 0.2}, group="component",
-                 desc="M7 row: flat prior p = 0.9, p_del 0.2 (same margin as the default l0 = 0, p_del 0.027)"),
+                 desc="M7 row: flat prior p = 0.9, p_del 0.2 (= the default since CHANGE 3)"),
         Ablation("FULL-m7", "FULL", M7_OVERRIDES, group="component",
                  desc="the M7 method (CHANGE 1 and 2 off) = outputs/m7_final"),
         Ablation("FULL-decorr", "FULL", {"decorrelation.enabled": False}, group="component",
