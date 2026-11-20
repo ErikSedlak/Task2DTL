@@ -122,6 +122,18 @@ def test_part_a_default_has_no_prior_and_one_margin_for_every_class(cfg_a):
     assert probability(node_logodds(l_chair, None, cfg_a)) == pytest.approx(0.9)  # no votes: the flat start value
 
 
+def test_learned_default_worked_examples():
+    """CHANGE 3 Part C default: L_hit 0.63, L_miss 1.47, flat 0.9, p_del 0.4 (margin 2.60)."""
+    c = load_config()
+    cc = c["confidence"]
+    assert (cc["L_hit"], cc["L_miss"], cc["p_del"], cc["prior_p"]) == (0.63, 1.47, 0.4, 0.9)
+    l0 = prior_logodds("chair", None, None, c)
+    assert below_p_del(node_logodds(l0, NodeVotes(free=2), c), c)  # -2.94
+    assert not below_p_del(node_logodds(l0, NodeVotes(free=1), c), c)
+    assert not below_p_del(node_logodds(l0, NodeVotes(seen=1, free=2), c), c)  # -2.31: protected
+    assert below_p_del(node_logodds(l0, NodeVotes(seen=1, free=3), c), c)  # -3.78
+
+
 def test_default_decisions_equal_change2_no_prior(cfg_a):
     """CHANGE 3's flat 0.9 / 0.2 deletes exactly where CHANGE 2's l0 = 0 / p_del 0.027 did (every vote combination)."""
     m7 = copy.deepcopy(cfg_a)

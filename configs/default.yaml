@@ -192,8 +192,10 @@ confidence:                # DESIGN §6.11 log-odds confidence, FULL only (M6, E
   L_miss: 1.47             # per counted free vote: ln P(free|removed) / P(free|unchanged) on dev_tune [1.20, 1.86]
   L_free_like: 2.5         # per counted free-like vote: kept (fallback, 7 free-like votes of removed objects < 20)
   clip: 8.0                # per-visit clip of the total log-odds change, [-clip, +clip]
-  p_del: 0.2               # removed needs p < p_del (plus the §3 free-evidence rule); margin logit(0.9) - logit(0.2)
-                           # = 3.58: 2 net counted free votes delete, 1 cannot, for every class (= M7 FULL-priors)
+  p_del: 0.4               # removed needs p < p_del (plus the §3 free-evidence rule); margin logit(0.9) - logit(0.4)
+                           # = 2.60 at the learned weights: 2 free delete (-2.94), 1 seen + 2 free do not (-2.31),
+                           # 1 seen + 3 free do (-3.78). CHANGE 3 Part C sweep on dev_tune (`lsg chg3 pdel`, DECISIONS);
+                           # 0.2 with the equal weights 2.5 before Part C (= M7 FULL-priors)
   candidates:              # CHANGE 2 Part B (docs/CHANGE_confidence_unified.md): per-voxel log-odds of perception candidates
     enabled: true          # false = CHANGE 1 view counts (ablation row FULL-candconf)
     L_vox_hit: 2.5         # per decorrelated voxel hit (CHANGE 3: own key; was confidence.L_hit, the node weight)

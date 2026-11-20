@@ -112,7 +112,7 @@ def test_audit_runs_the_strict_candidate_rules_unless_relaxed(monkeypatch):
     def fake_run_eval(cfg, *a, **k):
         seen.append(cfg["perception"]["relaxed"]["enabled"])
         c = cfg["confidence"]
-        assert (c["candidates"]["enabled"], c["class_priors"], c["p_del"]) == ((True, False, 0.2) if seen[-1]
+        assert (c["candidates"]["enabled"], c["class_priors"], c["p_del"]) == ((True, False, 0.4) if seen[-1]
                                                                               else (False, True, 0.2))  # fmt: skip
         raise RuntimeError("stop")
 
