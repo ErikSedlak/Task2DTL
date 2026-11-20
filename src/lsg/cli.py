@@ -377,6 +377,24 @@ def _cmd_chg3_votestats(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_chg3_idstats(args: argparse.Namespace) -> int:
+    """`lsg chg3 idstats --run <dir>`: identity-check similarity of same / different pairs (CHANGE 3 Part N)."""
+    from pathlib import Path
+
+    from lsg.config import outputs_root
+    from lsg.eval.identitystats import format_stats, identity_stats
+    from lsg.runinfo import write_metrics
+
+    cfg = load_config(args.config)
+    run = Path(args.run)
+    if not run.is_dir():
+        run = outputs_root(cfg) / args.run
+    res = identity_stats(run, tuple(args.modes.split(",")))
+    print(format_stats(res))
+    print(f"metrics: {write_metrics(run / 'idstats', {'run': str(run), **res}, cfg)}")
+    return 0
+
+
 def _cmd_audit_sample(args: argparse.Namespace) -> int:
     """`lsg audit sample`: FULL on val with per-object details, FP pools, seeded sample, panels, CSVs (§7.4)."""
     from lsg.eval.audit import run_audit_sample
@@ -543,6 +561,12 @@ def main(argv: list[str] | None = None) -> int:
     smc.add_argument("--device", default="cuda")
     smc.add_argument("--config", default=None)
     smc.set_defaults(func=_cmd_sam_cache)
+
+    ids = c3s.add_parser("idstats", help="Part N: identity-check similarity of same / different pairs from details/")
+    ids.add_argument("--run", required=True, help="run directory (or id under outputs/) with details/<mode>/")
+    ids.add_argument("--modes", default="oracle,perception")
+    ids.add_argument("--config", default=None)
+    ids.set_defaults(func=_cmd_chg3_idstats)
 
     md = sub.add_parser("movediag", help="predicted moves by old-place evidence from a run's details/ (CHANGE 3)")
     md.add_argument("--run", required=True, help="run directory (or id under outputs/) with details/<mode>/")

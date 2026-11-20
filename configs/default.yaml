@@ -189,6 +189,17 @@ association:               # DESIGN §6.9, B2 (tune on dev only)
     unobserved_inside_only: true    # a node without counted votes may only match inside its own place too (Erik: a_u_c02)
     max_dist_unseen: null  # [m] or null: a node without counted votes only matches obs within this centroid distance
     tau_move_seen: 0.2     # [m] or null: a net-seen node needs ICP displacement > this (instead of classify.tau_move)
+  identity:                # CHANGE 3 Part N (N3, FULL only): a node with free evidence at its old place (free_ev / mixed) may
+                           # take an observation outside its place only if they look alike (perception/identity.py)
+    enabled: false
+    tau_id: 0.5            # min cosine of DINOv2 descriptors (node: reference texture, virtual views; obs: rescan crops)
+    inside_too: false      # also observations inside the node's own place (in-place replacements)
+    k_obs: 3               # observation frames with the largest masks
+    k_node: 2              # virtual reference views (of 8) with the largest node masks
+    min_patches: 4         # a crop needs this many 14 px patches >= half inside the mask
+    crop_margin: 0.15      # square crop around the mask, enlarged by this share per side
+    crop_px: 224           # crop side after resizing (multiple of 14)
+    view_px: 448           # virtual reference view side [px] (60° field of view)
   explain_ref:             # CHANGE 3 Part N (N2, FULL only): a leftover depth candidate with >= min_frac of its points within
                            # dist of the reference points of a standing node (not committed removed, old place not free_ev)
                            # is that node re-observed -> not emitted as new; no label condition; association unchanged

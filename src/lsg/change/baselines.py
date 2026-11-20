@@ -42,7 +42,8 @@ from typing import Any
 
 import numpy as np
 
-from lsg.change.association import absorb_confirmed, associate, explained_by_reference, old_place_gate
+from lsg.change.association import (absorb_confirmed, associate, both_gates, explained_by_reference, identity_gate,
+                                    old_place_gate)
 from lsg.change.classify import Decision, classify
 from lsg.change.confidence import below_p_del, node_logodds, obs_logodds, prior_logodds, probability
 from lsg.change.visibility import NodeVotes, confirmed_in_place, has_free_evidence
@@ -298,7 +299,7 @@ def _apply_move(n: Node, T_move: np.ndarray, pts: np.ndarray | None) -> None:
     n.T_move = np.asarray(T_move, float).tolist()
 
 
-def _b2_core(G_ref, obs, cfg, rescan_id, obs_mode, votes, ref_ctx, method):
+def _b2_core(G_ref, obs, cfg, rescan_id, obs_mode, votes, ref_ctx, method, identity=None):
     """B2's states; returns (G, ids of matched nodes, ids of confirmed nodes, ids committed removed)."""
     mode = obs_mode or "oracle"
     G = copy.deepcopy(G_ref)
@@ -314,6 +315,9 @@ def _b2_core(G_ref, obs, cfg, rescan_id, obs_mode, votes, ref_ctx, method):
     skip = conf_ids | committed
     # CHANGE 3 Part A (FULL only, like contrast at M7, so the B0-B2 rows stay as reported)
     gate = old_place_gate(vs, cfg) if method == "FULL" else None
+    # CHANGE 3 Part N (N3): identity check for nodes that may move (FULL only)
+    id_gate = identity_gate(vs, identity, cfg) if method == "FULL" else None
+    gate = both_gates(gate, id_gate)
     pairs, unmatched, unmatched_obs = associate([n for n in nodes if n.id not in skip], rest_obs, mode, cfg, gate=gate)
     P = ref_node_points(G, ref_ctx)
     dec = classify(pairs, unmatched, vs, conf, P, cfg, old_place=gate is not None)
@@ -340,6 +344,9 @@ def _b2_core(G_ref, obs, cfg, rescan_id, obs_mode, votes, ref_ctx, method):
                        "icp_fallback": sum(bool(dec[n.id].info.get("fallback")) for n, _, _ in pairs)}  # fmt: skip
     if expl:
         G.meta["assoc"]["explained_ref"] = len(expl)
+    if id_gate is not None:
+        tau = float(cfg["association"]["identity"]["tau_id"])
+        G.meta["identity"] = [[nid, tok, sim, sim is None or sim >= tau] for nid, tok, sim in identity.log]
     if committed:
         G.meta["assoc"]["committed_removed"] = len(committed)
     return G, {n.id for n, _, _ in pairs}, conf_ids, committed
@@ -382,6 +389,7 @@ def full(
     ref_ctx: RefContext | None = None,
     obs_views: Mapping[str, int] | None = None,
     priors: Any = None,
+    identity: Any = None,
 ) -> Graph:
     """FULL = B2 + log-odds confidence with class priors (DESIGN §8, §6.11).
 
@@ -392,7 +400,7 @@ def full(
     the old place ignored), new nodes from their views alone. `priors` = `train_meta.PriorTable`
     (None or `confidence.class_priors: false` -> the flat `prior_p`).
     """
-    G, matched, conf_ids, committed = _b2_core(G_ref, obs, cfg, rescan_id, obs_mode, votes, ref_ctx, "FULL")
+    G, matched, conf_ids, committed = _b2_core(G_ref, obs, cfg, rescan_id, obs_mode, votes, ref_ctx, "FULL", identity)
     vs = votes or {}
     views = obs_views or {}
     conf_of = {o.token: o.confidence for o in obs}

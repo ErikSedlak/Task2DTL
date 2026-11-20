@@ -191,6 +191,36 @@ def old_place_gate(votes: Mapping[str, NodeVotes] | None, cfg: Mapping[str, Any]
     return gate
 
 
+def identity_gate(votes: Mapping[str, NodeVotes] | None, scorer: Any, cfg: Mapping[str, Any]) -> Gate | None:
+    """CHANGE 3 Part N (N3) pair gate: a node whose old place has free evidence (`free_ev` / `mixed`) may take an
+    observation outside its own place only if `scorer.similarity(node, obs)` >= `identity.tau_id` (None -> allowed).
+    `inside_too`: also observations inside its place. None if `association.identity.enabled` is false or no scorer."""
+    ic = _acfg(cfg).get("identity") or {}
+    if scorer is None or not ic.get("enabled", False):
+        return None
+    vs = votes or {}
+    oc = _acfg(cfg).get("old_place") or {}
+    frac, margin = float(oc.get("inside_frac", 0.5)), float(oc.get("margin", 0.10))
+    tau, inside_too = float(ic["tau_id"]), bool(ic.get("inside_too", False))
+
+    def gate(n: Node, o: ObsInstance) -> bool:
+        if old_place_class(vs.get(n.id), cfg) not in ("free_ev", "mixed"):
+            return True
+        if not inside_too and inside_frac(n, o, margin) >= frac:
+            return True
+        s = scorer.similarity(n, o)
+        return s is None or s >= tau
+
+    return gate
+
+
+def both_gates(a: Gate | None, b: Gate | None) -> Gate | None:
+    """AND of two optional gates (Part A old place, N3 identity); the identity gate runs only if the first passes."""
+    if a is None or b is None:
+        return a or b
+    return lambda n, o: a(n, o) and b(n, o)
+
+
 def associate(
     nodes: Sequence[Node], obs: Sequence[ObsInstance], mode: str, cfg: Mapping[str, Any], gate: Gate | None = None
 ) -> tuple[list[tuple[Node, ObsInstance, float]], list[Node], list[ObsInstance]]:
@@ -209,7 +239,13 @@ def associate(
     tau = tau_assoc(mode, cfg)
     if not N or not O:
         return [], N, O
-    C = np.array([[pair_cost(n, o, mode, cfg) if gate is None or gate(n, o) else INF for o in O] for n in N], float)
+    # gates only for pairs below tau (equivalent: a pair at or above tau stays unmatched anyway); this keeps
+    # the identity gate (N3) from scoring hopeless pairs
+    C = np.array([[pair_cost(n, o, mode, cfg) for o in O] for n in N], float)
+    if gate is not None:
+        for i, j in zip(*np.nonzero(C < tau)):
+            if not gate(N[i], O[j]):
+                C[i, j] = INF
     rows, cols = linear_sum_assignment(np.minimum(C, tau))
     pairs = [(N[i], O[j], float(C[i, j])) for i, j in zip(rows, cols) if C[i, j] < tau]
     mn = {p[0].id for p in pairs}

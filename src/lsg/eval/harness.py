@@ -37,6 +37,7 @@ from lsg.io.scan3r import load_meta, load_scan, load_textured_mesh, open_sequenc
 from lsg.obs.base import ObsInstance
 from lsg.oracle.source import OracleSource
 from lsg.perception.appearance import AppearanceRunner, SimilarityCache, make_extractor
+from lsg.perception.identity import IdentityScorer
 from lsg.perception.labeler import CLIPLabeler
 from lsg.perception.source import PerceptionSource
 from lsg.runinfo import new_run_id, write_metrics
@@ -127,14 +128,25 @@ def contrast_on(cfg: dict[str, Any], method: str) -> bool:
     return method == "FULL" and bool(cfg["visibility"].get("seen_needs_contrast", False))
 
 
-def make_appearance(cfg: dict[str, Any], ref: str, tex: TextureRenderer) -> AppearanceRunner:
-    """Per-rescan runner: shared texture renderer + per-process feature extractor + disk cache."""
+def _extractor(cfg: dict[str, Any]) -> Any:
+    """Per-process feature extractor of `cfg["appearance"]` (shared by the appearance residual and N3)."""
     ac = cfg["appearance"]
     key = f"{ac.get('features')}|{ac.get('model')}|{ac.get('device')}"
     if key not in _EXTRACTORS:
         _EXTRACTORS[key] = make_extractor(cfg)
+    return _EXTRACTORS[key]
+
+
+def make_appearance(cfg: dict[str, Any], ref: str, tex: TextureRenderer) -> AppearanceRunner:
+    """Per-rescan runner: shared texture renderer + per-process feature extractor + disk cache."""
+    ac = cfg["appearance"]
     cache = SimilarityCache(cache_root(cfg) / "appearance" if ac.get("cache", True) else None)
-    return AppearanceRunner(tex, _EXTRACTORS[key], cfg, ref, cache)
+    return AppearanceRunner(tex, _extractor(cfg), cfg, ref, cache)
+
+
+def identity_on(cfg: dict[str, Any], method: str) -> bool:
+    """The N3 identity check runs for FULL with `association.identity.enabled` (CHANGE 3 Part N)."""
+    return method == "FULL" and bool((cfg["association"].get("identity") or {}).get("enabled", False))
 
 
 def _eval_group(task: dict[str, Any]) -> list[dict[str, Any]]:
@@ -202,14 +214,21 @@ def _eval_group(task: dict[str, Any]) -> list[dict[str, Any]]:
                     truth = {o.token: (tm[o.token], o.label) for o in obs}
                     score_kw = {}
                 t_obs = time.time() - t2
+                kw: dict[str, Any] = {}
+                if identity_on(cfg, task["method"]):
+                    if tex is None:
+                        tex = TextureRenderer(load_textured_mesh(root, ref))
+                    kw["identity"] = IdentityScorer(seq, info, tex, ref_renderer, _extractor(cfg), cfg)
                 G_states = method(G_ref, obs, cfg, rescan_id=s, obs_mode=mode, votes=online.votes, ref_ctx=ctx,
-                                  obs_views=online.obs_views, priors=priors)  # fmt: skip
+                                  obs_views=online.obs_views, priors=priors, **kw)  # fmt: skip
                 policies = list(POLICIES) if score_rel else [main_policy]
                 graphs = {p: update_graph(G_states, ctx, obs, cfg, p) for p in policies}
                 G_upd = graphs[main_policy]
                 sc = score_pair(G_upd, gt, mode, cfg, obs_truth=truth, votes=online.votes,
                                 details=bool(task.get("details")), **score_kw)  # fmt: skip
                 if task.get("details") and task.get("run_dir"):
+                    sc["token_truth"] = {t: [int(v[0]), str(v[1])] for t, v in truth.items()}  # eval only (N3 idstats)
+                    sc["identity"] = G_states.meta.get("identity", [])
                     _write_details(Path(task["run_dir"]) / "details" / mode / f"{ref}_{s}.json", ref, s, mode, info,
                                    sc)  # fmt: skip
                 if gs_S is not None:
@@ -253,7 +272,8 @@ def _write_details(path: Path, ref: str, rescan: str, mode: str, info: Any, sc: 
     blob = {"ref": ref, "rescan": rescan, "mode": mode, "T_align": [[float(v) for v in r] for r in info.T_align],
             "frame_ids": [int(i) for i in info.frame_ids], "objects": sc["objects"], "new": sc["new"],
             "gt_new_fn": [int(i) for i in sc["new_match"]["fn"]],
-            "candidates": sc.get("candidates", [])}  # fmt: skip
+            "candidates": sc.get("candidates", []), "token_truth": sc.get("token_truth", {}),
+            "identity": sc.get("identity", [])}  # fmt: skip
     path.write_text(json.dumps(blob, indent=1, default=float), encoding="utf-8")
 
 
