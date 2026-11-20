@@ -388,7 +388,7 @@ All items that were listed here are in the report: door swings out of scope; val
 ---
 
 ## Decisions needed from Erik
-- **CHANGE 2 (2026-11-20): class-agnostic prior + one confidence for new objects.** Proposed, not implemented; four open questions left in `docs/CHANGE_confidence_unified.md` section 7 (evidence for small clusters, drop or keep low-confidence candidates, default on/off, snapshot logging); answered: no prior value (l0 = 0, margin via `p_del` = 0.027), correlated views keep the small weight. Builds on CHANGE 1, whose val effect is not measured yet.
+- **CHANGE 2 (2026-11-20): class-agnostic prior + one confidence for new objects.** Proposed, not implemented; one open question left in `docs/CHANGE_confidence_unified.md` section 7 (drop or emit low-confidence candidates; proposal: drop); answered by Erik: no prior value (l0 = 0, margin via `p_del` = 0.027), correlated views keep the small weight, one observation is enough for every cluster, ON by default, confidence logged into the snapshots. Builds on CHANGE 1, whose val effect is not measured yet.
 - **Candidate detection change (2026-11-19):** relax `min_views` for large clusters (1) and small (2), relax `tau_new` for big objects. Decided, not implemented; four open questions in `docs/CHANGE_candidate_detection.md` section 6 (notably small = 2 or 3 views; the current value is 3).
 - **Doors / articulation:** decided 2026-11-18, the door diagnostic is skipped and stated as a limitation (DECISIONS M8). Closed.
 - **AI_USAGE.md:** "Erik: (fill in)" is still open for the M0–M8 rows (Erik sends the lines at the end of M8).
