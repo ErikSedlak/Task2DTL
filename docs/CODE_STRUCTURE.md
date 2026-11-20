@@ -58,6 +58,7 @@ Task2/
 │   │   ├── m7_checks.py     `lsg m7`: every row on dev / val / relchange, results.md, plots, determinism
 │   │   ├── audit.py         `lsg audit`: sample false positives, photo panels, CSV for manual verdicts (M8)
 │   │   ├── newcurve.py      `lsg newcurve`: new-object P / R over the candidate-confidence threshold (CHANGE 2)
+│   │   ├── devtune.py       `lsg splits devtune`: picks the tuning set dev_tune from train metadata (CHANGE 3)
 │   │   └── figures.py       the GT panel of the top-down figure (M8)
 │   ├── viz/                 PICTURES (M8; reads only method inputs / outputs)
 │   │   ├── topdown.py       before / after top-down PNG, nodes coloured by state
@@ -284,6 +285,11 @@ The rule: no imports from `oracle/` / `eval/`, and no rescan annotations. Inputs
 ### `eval/ablations.py` — the experiments (`uv run lsg ablate`, M7)
 - `registry(cfg)`: every row of the M7 tables, each a method plus a few config changes (e.g. `FULL-appearance` = FULL with `appearance.enabled: false`), and optionally a share of the frames. `lsg ablate --list` prints them.
 - `run_ablation(...)`: runs one row with `run_eval` into its own folder. If that folder already holds a result made with the same settings and the same committed code, it is reused (so a crashed multi-hour run can be restarted).
+
+### `eval/devtune.py` — the tuning set (`uv run lsg splits devtune`, CHANGE 3)
+- `pair_counts(meta, objects_of, exclude_refs)`: per train (reference, rescan) pair, how many things / anchors were removed, moved (`rigid`) and added, from 3RScan.json + 3DSSG `objects.json` only (no downloads). It reads train rescans' change lists, so it lives in `eval/`.
+- `select_dev_tune(...)`: the 20 rooms with the most changes (best rescan each) plus 10 random rooms (seeded); the CLI appends the 3 `dev_train` pairs and writes `splits/dev_tune.txt` and `splits/download_tier3.txt` (scans not yet downloaded).
+- Settings in `splits.dev_tune` of `configs/default.yaml`. All tuning happens on `dev_tune` (CLAUDE.md hard rule 4); `dev_train` stays the 3-pair regression set.
 
 ### `eval/m7_checks.py` — the M7 run (`uv run lsg m7`)
 - Dev rows first, compared with the stored M5 / M6 dev results (must be identical where nothing changed); then all val rows, the τ_free sweep, the observed-fraction runs (3 seeds each), the relation runs on the relchange set, and FULL twice on one pair (must be identical).

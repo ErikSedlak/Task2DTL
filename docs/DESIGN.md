@@ -4,7 +4,7 @@ Status: **v2 (2026-11-05)**.
 - v1 was written before M0; the M0 results are in §2.1 and §5.
 - v2 is a spec change: the headline is now **perception mode** (the method sees only reference data plus rescan RGB-D, poses and `T_align`). **Oracle mode** is kept as an upper bound behind the same interface (DECISIONS 2026-11-05, "Spec change v2").
 
-Numbers marked *(tune)* are starting values. They are fixed on `splits/dev_train.txt`, and every change is logged in DECISIONS.md.
+Numbers marked *(tune)* are starting values. They are fixed on the tuning set `splits/dev_tune.txt` (until CHANGE 3: `splits/dev_train.txt`), and every change is logged in DECISIONS.md.
 
 ---
 
@@ -89,15 +89,17 @@ Most-moved classes: chair 80, pillow 31, armchair 23, table 22, ottoman 20, coff
 
 | Split file | Content | Use |
 |---|---|---|
-| `dev_train.txt` | 3 train pairs (531cff08→19eda6f4, 531cff08→e2847ff7, 0ad2d39b→0ad2d3a1) | development + **all threshold tuning** |
+| `dev_train.txt` | 3 train pairs (531cff08→19eda6f4, 531cff08→e2847ff7, 0ad2d39b→0ad2d3a1) | development; smoke / bit-for-bit regression set; all threshold tuning until CHANGE 3 |
+| `dev_tune.txt` | 33 train pairs: 20 change-heavy + 10 random rooms (seed 0, one rescan each; `lsg splits devtune`) + the 3 `dev_train` pairs. Metadata counts of the 30 new pairs: 82 removed, 102 rigid (incl. < 10 cm), 212 new (things/anchors) | **all threshold tuning** from CHANGE 3 on (Erik, 2026-11-20) |
 | `eval_val.txt` | all 110 validation pairs (47 refs) with 3DSSG relations | main evaluation, change types: **final tables only** (M7, `--full-val`) |
 | `eval_val_small.txt` | 20 val pairs: 20 of the 47 references, one rescan each, seed 0 (`lsg splits subset`). GT support: 51 moved, 17 removed, 19 new, 229 unchanged, 148 absent-unlisted | per-milestone val report (M6, Erik); never tuned on |
 | `eval_relchange_train.txt` | 40 train pairs with the most parent-changed moved things (73 events) | relation-update evaluation only; never tuned on |
 | `download_tier1.txt` | 162 scan IDs (dev + val) | downloaded (M0) |
 | `download_tier2.txt` | 63 more scan IDs (relchange set) | downloaded 2026-11-06 (189 files, 4.0 GB) |
-| `download_textures.txt` | the **72 reference scans** of the three pair lists above (written by `lsg splits textures`, M1) | texture files for the appearance residual (§3, §6.6); downloaded at M1 (216 files, 1.1 GB) |
+| `download_tier3.txt` | 60 scan ids of `dev_tune` not in tier 1 / 2 (written by `lsg splits devtune`) | download for CHANGE 3 (≈ 2–3 GB) |
+| `download_textures.txt` | the **102 reference scans** of dev_train, eval_val, relchange and dev_tune (written by `lsg splits textures`; 72 until CHANGE 3) | texture files for the appearance residual (§3, §6.6); 72 downloaded at M1 (216 files, 1.1 GB), 30 more with tier 3 |
 
-**Class priors (§6.10)** and the **CLIP vocabulary (§6.6)** come from train-split metadata (3RScan.json + 3DSSG objects), **excluding** the references in `eval_relchange_train.txt` and `dev_train.txt`. This needs no downloads.
+**Class priors (§6.10)** and the **CLIP vocabulary (§6.6)** come from train-split metadata (3RScan.json + 3DSSG objects), **excluding** the references in `eval_relchange_train.txt`, `dev_train.txt` and (CHANGE 3) `dev_tune.txt`. This needs no downloads. Excluding `dev_tune` changes 3 of the top-100 vocabulary labels (in: coffee machine, flowers, toy; out: flower, rug, stuffed animal); `FULL-m7` keeps the M7 exclusions.
 
 **Download.** Scan data, three file types per scan (≈50 MB/scan → tier 1 ≈ 8 GB, tier 2 ≈ 3 GB):
 
@@ -158,7 +160,7 @@ while read id; do for t in mesh.refined.v2.obj mesh.refined.mtl mesh.refined_0.p
 - **Free evidence**: ≥ k_free = 2 *(tune)* counted free + free-like votes, where free-like votes alone (no counted depth free vote) need ≥ k_free_like = 3 (M6). Without appearance this is "≥ 2 counted free votes".
 - **Unknown**: a reference node that is not confirmed in place, has no matched instance, and has no free evidence (FULL: or its confidence is still ≥ p_del). It is **kept** and its state is `unknown`. Its confidence is the log-odds value of its counted votes (§6.11): with no counted votes this is the prior, i.e. unchanged (M6 wording).
 - **Moved** (prediction): matched, and the ICP-refined centroid displacement is > τ_move = 0.10 m *(tune at M1 from the GT displacement distribution)*. Final at the end of the sequence. Rotation-only moves are out of scope; recall is reported per displacement bucket.
-- **Removed** (prediction): unmatched, with free evidence, and (FULL) confidence p < p_del = 0.2 *(tune)*; 0.027 with l₀ = 0 since CHANGE 2 (§6.11). Final at the end of the sequence. B1 / B2 use the free-evidence part only.
+- **Removed** (prediction): unmatched, with free evidence, and (FULL) confidence p < p_del = 0.2 *(tune)*, flat l₀ = logit(0.9) (CHANGE 3; CHANGE 2 had l₀ = 0 with p_del 0.027, same decisions; §6.11). Final at the end of the sequence. B1 / B2 use the free-evidence part only.
 - **New**: an observed instance (oracle) or candidate (perception) not assigned to any reference node.
 
 ## 4. Graph JSON (shared format + the fields this project adds)
@@ -314,7 +316,7 @@ Per pair (ref R, rescan S). O_R and O_S are the objectIds in their semseg files.
     - From **counted** (decorrelated) votes: Δl = L_hit · n_seen − L_miss · n_free − L_free_like · n_free_like, clipped per visit to [−8, +8]. **Rescaled at M6 (Erik):** L_miss = L_free_like = 2.5 (2 free votes delete a median-prior thing: chair p 0.968 → 0.17; a bed, p ≈ 0.996, needs 3), L_hit *(tune on dev: 0.5 / 1 / 2.5)*. With the spec's 0.4 / ±3, priors of 0.91–1.0 could never reach p_del.
     - A matched node gets l₀ + L_hit per decorrelated viewpoint of its observation (`OnlineResult.obs_views`, "seen at the new location"); its free votes at the old location are **ignored** (applied at the end, because association is deferred). New nodes: L_hit · views from l = 0.
     - Delete rule: §3 `removed` (free evidence and p < p_del). Every node of FULL's graph carries `confidence`.
-    - **CHANGE 2 (Erik, 2026-11-20, `docs/CHANGE_confidence_unified.md`), default:** *Part A*, no dataset prior: `class_priors: false`, l₀ = logit(`prior_p` = 0.5) = 0 for every node, `p_del` = 0.027 (margin 3.6: 2 net counted free votes delete any class, 1 cannot; the same decisions as M7 `FULL-priors`). A node without counted votes reports p = 0.5 ("no evidence"). The learned prior is the ablation row `FULL+classprior` (with p_del 0.2). *Part B*, perception new nodes take the confidence of their candidate (§3 candidate step 4: sigmoid of the median voxel log-odds); candidates below `p_new_min` (0.92) do not become `new` nodes. Oracle new nodes keep L_hit · views.
+    - **CHANGE 2 (Erik, 2026-11-20, `docs/CHANGE_confidence_unified.md`), default:** *Part A*, no dataset prior: `class_priors: false`, l₀ = logit(`prior_p` = 0.5) = 0 for every node, `p_del` = 0.027 (margin 3.6: 2 net counted free votes delete any class, 1 cannot; the same decisions as M7 `FULL-priors`). A node without counted votes reports p = 0.5 ("no evidence"). **CHANGE 3 (Erik, 2026-11-20):** flat `prior_p` = 0.9 with `p_del` = 0.2 instead (margin 3.58, the same decisions; an untouched reference node reports 0.9). The learned prior is the ablation row `FULL+classprior` (with p_del 0.2). *Part B*, perception new nodes take the confidence of their candidate (§3 candidate step 4: sigmoid of the median voxel log-odds); candidates below `p_new_min` (0.92) do not become `new` nodes. Oracle new nodes keep L_hit · views.
     - FULL's seen votes are contrastive (§3, M7): a seen vote from a pixel whose background is within τ_free can no longer veto a deletion.
 12. `change.update` ✅ (M5)
     - `update_graph(G_states, ref_ctx, obs, cfg, policy) -> G_upd`. M5 split: the method (B2) moves nodes (T_move applied to the reference points → centroid and bbox), adds new nodes (with `label_topk`) and sets `state` / `last_seen`; `update_graph` handles the relations. `confidence` stays None until M6.
@@ -340,7 +342,7 @@ CLI:
 - `uv run lsg m7 [--run-id m7_final] [--dev-only] [--no-sweep] [--no-frac] [--no-relchange] [--no-determinism] [--no-resume] [--workers N]` ✅ (M7; all rows, tables, plots; a rerun with the same id resumes rows made from the same config + clean git commit);
 - `uv run lsg viz topdown --run <dir> --pair R S [--mode …] [--gt]` ✅, `uv run lsg viz rerun --run <dir> --pair R S [--images] [--spawn]` ✅ (M8); `lsg run --snapshot-every N` ✅;
 - `uv run lsg audit sample [--run-id m8_audit] [--from-run …] [--n 10]` ✅, `uv run lsg audit summarize` ✅ (M8, §7.4);
-- `uv run lsg splits textures` ✅;
+- `uv run lsg splits textures` ✅; `uv run lsg splits devtune [--dry-run]` ✅ (CHANGE 3: `splits/dev_tune.txt` + `download_tier3.txt`, `eval.devtune`);
 - `uv run lsg graph --scan R --mode gt|geometric [--out f.json]` ✅;
 - `uv run lsg m0` ✅, `uv run lsg m1` ✅, `uv run lsg m4 [--no-sweep]` ✅, `uv run lsg m5 [--no-sweep] [--no-val]` ✅, `uv run lsg m6 [--no-sweep] [--no-val] [--no-objply]` ✅;
 - `--method B0|B1|B2|FULL` ✅ (FULL: M6; appearance on / off via `appearance.enabled`).

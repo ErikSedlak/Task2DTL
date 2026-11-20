@@ -1,6 +1,6 @@
 # CHANGE 3 — tuning set, move evidence, incremental graph, confidence policy (proposal, 2026-11-20)
 
-**Status (2026-11-20): PROPOSAL, all questions answered (§8), nothing implemented.** Builds on CHANGE 1 + 2,
+**Status (2026-11-20): all questions answered (§8); Part 0 implemented, waiting for the tier-3 download.** Builds on CHANGE 1 + 2,
 which Erik fixed as the **final method** (2026-11-20). Comes from a logic review of the whole solution (chat,
 2026-11-20). Nothing here changes DESIGN.md before sign-off.
 
@@ -48,11 +48,12 @@ Removals are concentrated: only 158 of the 718 pairs have one.
 | selection (one rescan per room) | removed | rigid (incl. < 10 cm) | new |
 |---|---|---|---|
 | 30 random rooms (seed 0) | 9 | 100 | 24 |
-| **20 change-heavy + 10 random rooms (proposal)** | **85** | **106** | **212** |
+| **20 change-heavy + 10 random rooms (chosen; `lsg splits devtune`, numpy seed 0)** | **82** | **102** | **212** |
 | 30 change-heavy rooms | 104 | 130 | 261 |
 | val, for comparison (110 pairs, scored) | 73 | 235 (≥ 10 cm) | 171 |
 
-- **Proposal:** 20 rooms with the most changes (score 2 · removed + new + 0.5 · rigid, best rescan per room)
+- **Implemented 2026-11-20** (`splits/dev_tune.txt`; the planning estimate used Python's `random` for the random third: 85 / 106 / 212; the heavy part is identical, 81 / 78 / 204, the random part is 1 / 24 / 8).
+- **Rule:** 20 rooms with the most changes (score 2 · removed + new + 0.5 · rigid, best rescan per room)
   plus 10 random rooms (seed 0), plus the 3 `dev_train` pairs = **33 pairs**. That gives more removed and new
   objects than val. The random third keeps a realistic share of quiet rooms, so the false-deletion side is
   tuned on ordinary rescans, not only on change-heavy ones. Selection is by GT, which is allowed on train.
@@ -213,8 +214,9 @@ Original questions:
 ## 9. Work list
 
 - [x] answers to §8
-- [ ] Part 0: `lsg splits devtune`, split + download lists; **Erik:** download tier 3 + textures; CLAUDE.md
-      hard rule 4; baseline run of CHANGE 2 on `dev_tune` (≈ 1.5 min, Erik)
+- [x] Part 0: `lsg splits devtune`, split + download lists, vocabulary exclusion, CLAUDE.md hard rule 4, flat
+      0.9 / 0.2 start value (2026-11-20)
+- [ ] **Erik:** download tier 3 + textures; then the `dev_tune` baseline (≈ 1.5 min)
 - [ ] Part A: rule + variants, tests, dev_tune comparison
 - [ ] Part C: vote statistics on dev_tune, weights, candidate track confidence, `p_new_min`
 - [ ] Part B: `peek()`, candidate tracks, snapshot method runs, CLIP relabel rule, online alignment (per §8.4),
