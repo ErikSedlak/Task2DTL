@@ -26,6 +26,13 @@ def immediate(cfg=CFG):
     return c
 
 
+def no_old_place(cfg=CFG):
+    """CHANGE 3 Part A off (the M7 association)."""
+    c = copy.deepcopy(cfg)
+    c["association"]["old_place"]["enabled"] = False
+    return c
+
+
 def committed_votes():
     """r2's old place was seen empty mid-walk (committed), but r2 is observed 0.6 m away."""
     v = copy.deepcopy(VOTES)
@@ -41,12 +48,18 @@ def test_deferred_moves_what_immediate_commits_removed():
         D = method(G, O, CFG, "S", "oracle", votes=committed_votes(), ref_ctx=ctx)
         assert D.node("r2").state == "moved" and D.node("r4").state == "removed"
         assert not any(n.state == "new" for n in D.nodes)
-        I = method(G, O, immediate(), "S", "oracle", votes=committed_votes(), ref_ctx=ctx)
+        # FULL: with CHANGE 3 Part A off, the M7 behaviour; with it on (default), see below
+        imm = immediate(no_old_place()) if method is full else immediate()
+        I = method(G, O, imm, "S", "oracle", votes=committed_votes(), ref_ctx=ctx)
         assert I.node("r2").state == "removed" and I.node("r4").state == "removed"
         # its observation is mis-assigned: the unseen chair r5 "moves" 3 m to take it
         assert I.node("r2").obs_token is None
         assert I.node("r5").state == "moved" and I.node("r5").obs_token == "o1"
         assert I.meta["assoc"]["committed_removed"] == 2 and validate(I) == []
+        if method is full:  # Part A: r5 has no evidence at its old place, so it cannot move; o1 becomes `new`
+            P = full(G, O, immediate(), "S", "oracle", votes=committed_votes(), ref_ctx=ctx)
+            assert P.node("r5").state == "unknown"
+            assert [n.obs_token for n in P.nodes if n.state == "new"] == ["o1"]
         # without another chair to take it, it becomes a spurious new node
         J = method(G, O, immediate(), "S", "oracle", votes={**committed_votes(), "r5": NodeVotes(free=2,
                    commit_removed_frame=3)}, ref_ctx=ctx)  # fmt: skip
@@ -101,7 +114,8 @@ def test_online_records_first_tentative_removed_frame():
 
 def test_children_follow_moved_anchor():
     G, ctx = scene()
-    votes = {"r1": VOTES["r1"]}  # table r3 and cup r4: no counted votes
+    # table r3: its old place was seen empty (CHANGE 3 Part A: a move needs old-place evidence); cup r4: no votes
+    votes = {"r1": VOTES["r1"], "r3": NodeVotes(raw_free=3, free=2)}
     O = [oobs("o0", 1), oobs("o2", 3, (0, 0.6, 0))]  # the table moved +0.6 m in y, the cup was not seen
     U = full(G, O, CFG, votes=votes, ref_ctx=ctx)
     assert U.node("r3").state == "moved" and U.node("r4").state == "unknown"

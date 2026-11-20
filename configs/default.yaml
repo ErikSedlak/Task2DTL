@@ -164,13 +164,14 @@ association:               # DESIGN §6.9, B2 (tune on dev only)
   absorb:                  # stage 0 (M5, Erik): confirmed-in-place nodes claim their observations
     min_frac: 0.5          # share of obs points inside the node AABB + margin
     margin: 0.10           # [m]
-  old_place:               # CHANGE 3 Part A (FULL only): a move needs consistent evidence at the old place
+  old_place:               # CHANGE 3 Part A (FULL only): a move needs consistent evidence at the old place; values = the
+                           # dev_tune sweep row a_u_c02 (Erik 2026-11-20; no row passed the pre-written rule, DECISIONS)
     enabled: true          # false = ablation row FULL-moveev (association ignores votes, as before CHANGE 3)
     inside_frac: 0.5       # "inside its own place": share of obs points inside the node AABB + margin (= absorb)
     margin: 0.10           # [m]
-    unobserved_inside_only: false   # true: a node without counted votes may only match inside its own place too
+    unobserved_inside_only: true    # a node without counted votes may only match inside its own place too (Erik: a_u_c02)
     max_dist_unseen: null  # [m] or null: a node without counted votes only matches obs within this centroid distance
-    tau_move_seen: null    # [m] or null: a net-seen node needs ICP displacement > this (instead of classify.tau_move)
+    tau_move_seen: 0.2     # [m] or null: a net-seen node needs ICP displacement > this (instead of classify.tau_move)
 
 classify:                  # DESIGN §6.10 ICP moved test (tune on dev only)
   tau_move: 0.10           # [m] ICP-refined centroid displacement above this -> moved (§3)

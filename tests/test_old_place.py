@@ -64,19 +64,21 @@ def test_unobserved_node_distance_limit_and_inside_only():
     G, ctx = scene()
     votes = {**VOTES, "r2": NodeVotes(raw_seen=2, seen=2)}  # r2 gated; r5 has no votes
     O = [oobs("o5", 5, (0, 3.0, 0))]
-    assert states(full(G, O, CFG, "S", "oracle", votes=votes, ref_ctx=ctx))["r5"] == "moved"
-    for c in (cfg_with(max_dist_unseen=1.5), cfg_with(unobserved_inside_only=True)):
+    free_unseen = cfg_with(unobserved_inside_only=False)
+    assert states(full(G, O, free_unseen, "S", "oracle", votes=votes, ref_ctx=ctx))["r5"] == "moved"
+    for c in (cfg_with(unobserved_inside_only=False, max_dist_unseen=1.5), CFG):  # CFG default: inside-only
         st = states(full(G, O, c, "S", "oracle", votes=votes, ref_ctx=ctx))
         assert st["r5"] == "unknown" and st.get("n0") == "new"
     near = [oobs("o5", 5, (0, 1.0, 0))]
-    assert states(full(G, near, cfg_with(max_dist_unseen=1.5), "S", "oracle", votes=votes, ref_ctx=ctx))["r5"] == "moved"
+    assert states(full(G, near, cfg_with(unobserved_inside_only=False, max_dist_unseen=1.5), "S", "oracle", votes=votes,
+                       ref_ctx=ctx))["r5"] == "moved"  # fmt: skip
 
 
 def test_tau_move_seen_raises_the_move_threshold_for_net_seen_nodes():
     G, ctx = scene()
     votes = {**VOTES, "r2": NodeVotes(raw_seen=2, seen=2)}
     O = [oobs("o1", 2, (0, 0.15, 0))]
-    U = full(G, O, CFG, "S", "oracle", votes=votes, ref_ctx=ctx)
+    U = full(G, O, cfg_with(tau_move_seen=None), "S", "oracle", votes=votes, ref_ctx=ctx)
     assert states(U)["r2"] == "moved"
     np.testing.assert_allclose(U.node("r2").centroid, OBJ[2][0].mean(0) + [0, 0.15, 0], atol=0.02)
-    assert states(full(G, O, cfg_with(tau_move_seen=0.2), "S", "oracle", votes=votes, ref_ctx=ctx))["r2"] == "unchanged"
+    assert states(full(G, O, CFG, "S", "oracle", votes=votes, ref_ctx=ctx))["r2"] == "unchanged"  # default 0.2
