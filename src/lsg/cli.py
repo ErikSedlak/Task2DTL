@@ -317,6 +317,25 @@ def _cmd_chg3_parta(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_chg3_votestats(args: argparse.Namespace) -> int:
+    """`lsg chg3 votestats --run <dir>`: vote weights as likelihood ratios from a details run (CHANGE 3 Part C)."""
+    from pathlib import Path
+
+    from lsg.config import outputs_root
+    from lsg.eval.votestats import format_weights, node_vote_weights
+    from lsg.runinfo import write_metrics
+
+    cfg = load_config(args.config)
+    run = Path(args.run)
+    if not run.is_dir():
+        run = outputs_root(cfg) / args.run
+    res = {m: node_vote_weights(run, cfg, m) for m in args.modes.split(",")}
+    for r in res.values():
+        print(format_weights(r))
+    print(f"metrics: {write_metrics(run / 'votestats', {'run': str(run), 'nodes': res}, cfg)}")
+    return 0
+
+
 def _cmd_audit_sample(args: argparse.Namespace) -> int:
     """`lsg audit sample`: FULL on val with per-object details, FP pools, seeded sample, panels, CSVs (§7.4)."""
     from lsg.eval.audit import run_audit_sample
@@ -463,6 +482,11 @@ def main(argv: list[str] | None = None) -> int:
     pa.add_argument("--workers", type=int, default=None)
     pa.add_argument("--config", default=None)
     pa.set_defaults(func=_cmd_chg3_parta)
+    vs = c3s.add_parser("votestats", help="Part C: vote weights (likelihood ratios) from a run's details/")
+    vs.add_argument("--run", required=True, help="run directory (or id under outputs/) with details/<mode>/")
+    vs.add_argument("--modes", default="oracle,perception")
+    vs.add_argument("--config", default=None)
+    vs.set_defaults(func=_cmd_chg3_votestats)
 
     md = sub.add_parser("movediag", help="predicted moves by old-place evidence from a run's details/ (CHANGE 3)")
     md.add_argument("--run", required=True, help="run directory (or id under outputs/) with details/<mode>/")
