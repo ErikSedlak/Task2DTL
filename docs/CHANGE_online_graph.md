@@ -1,6 +1,6 @@
 # CHANGE 3 — tuning set, move evidence, incremental graph, confidence policy (proposal, 2026-11-20)
 
-**Status (2026-11-20): all questions answered (§8); Part 0 done (incl. download and the `dev_tune` baseline); next Part A.** Builds on CHANGE 1 + 2,
+**Status (2026-11-20): all questions answered (§8); Parts 0 and A done; next Part C.** Builds on CHANGE 1 + 2,
 which Erik fixed as the **final method** (2026-11-20). Comes from a logic review of the whole solution (chat,
 2026-11-20). Nothing here changes DESIGN.md before sign-off.
 
@@ -73,7 +73,9 @@ Removals are concentrated: only 158 of the 718 pairs have one.
 
 ## 3. Part A — a move needs consistent evidence at the old place
 
-**Rule (default on, `association.move_needs_old_place`).** Before association, a reference node is not
+**Implemented 2026-11-20** as `association.old_place` (FULL only). The chosen default is sweep row `a_u_c02`: rule (a) for net-seen **and** unobserved nodes, plus (c) with 0.2 m. No row passed the pre-written selection rule; Erik chose `a_u_c02`, which misses only the perception false-move bound by one object. Diagnostic, sweep table and the final dev_tune numbers: DECISIONS 2026-11-20 "CHANGE 3 Part A".
+
+**Rule as proposed (default on).** Before association, a reference node is not
 eligible to be matched to an observation outside its own footprint if its old place is net-seen:
 counted seen > counted free + free-like. Such a node keeps the state its votes give (`unchanged` if
 confirmed, else `unknown`). The rule mirrors the removal veto: you cannot say an object left a place where the
@@ -218,7 +220,8 @@ Original questions:
       0.9 / 0.2 start value (2026-11-20)
 - [x] download tier 3 + textures; regression `FULL-m7` = `m7_final` on dev_train; baseline
       `outputs/chg3_dev_baseline/FULL` (numbers in DECISIONS 2026-11-20)
-- [ ] Part A: rule + variants, tests, dev_tune comparison
+- [x] Part A: diagnostic (`lsg movediag`), rule + variants, tests, dev_tune sweep (`lsg chg3 parta`), default
+      `a_u_c02` (Erik), `FULL-moveev` row (2026-11-20)
 - [ ] Part C: vote statistics on dev_tune, weights, candidate track confidence, `p_new_min`
 - [ ] Part B: `peek()`, candidate tracks, snapshot method runs, CLIP relabel rule, online alignment (per §8.4),
       anytime curve, viz

@@ -160,6 +160,7 @@ while read id; do for t in mesh.refined.v2.obj mesh.refined.mtl mesh.refined_0.p
 - **Free evidence**: ≥ k_free = 2 *(tune)* counted free + free-like votes, where free-like votes alone (no counted depth free vote) need ≥ k_free_like = 3 (M6). Without appearance this is "≥ 2 counted free votes".
 - **Unknown**: a reference node that is not confirmed in place, has no matched instance, and has no free evidence (FULL: or its confidence is still ≥ p_del). It is **kept** and its state is `unknown`. Its confidence is the log-odds value of its counted votes (§6.11): with no counted votes this is the prior, i.e. unchanged (M6 wording).
 - **Moved** (prediction): matched, and the ICP-refined centroid displacement is > τ_move = 0.10 m *(tune at M1 from the GT displacement distribution)*. Final at the end of the sequence. Rotation-only moves are out of scope; recall is reported per displacement bucket.
+  - **CHANGE 3 Part A (FULL, Erik 2026-11-20): a move needs consistent evidence at the old place.** A node whose old place is *net-seen* (counted seen > free + free-like) or *unobserved* (no counted vote) may only be matched to an observation inside its own place (>= 50% of its points in the node's AABB + 10 cm, the absorption test), and a net-seen node needs an ICP displacement > `tau_move_seen` = 0.2 m. A distant observation is left to other nodes or becomes `new`. The mirror of the removal rule: an object is not moved away from a place where the sensor keeps seeing it, nor from a place never looked at. Config `association.old_place` (sweep row `a_u_c02` on dev_tune, DECISIONS 2026-11-20); `FULL-moveev` = off.
 - **Removed** (prediction): unmatched, with free evidence, and (FULL) confidence p < p_del = 0.2 *(tune)*, flat l₀ = logit(0.9) (CHANGE 3; CHANGE 2 had l₀ = 0 with p_del 0.027, same decisions; §6.11). Final at the end of the sequence. B1 / B2 use the free-evidence part only.
 - **New**: an observed instance (oracle) or candidate (perception) not assigned to any reference node.
 
@@ -302,6 +303,7 @@ Per pair (ref R, rescan S). O_R and O_S are the objectIds in their semseg files.
    - **Stage 0, absorption** (M5, Erik): `absorb_confirmed(confirmed, obs, mode, cfg)`. An observation is absorbed by a confirmed-in-place node if its label is compatible (oracle: same label or nyu40; perception: the node's label in `label_topk` with p ≥ p_min) and ≥ `absorb.min_frac` = 50% of its points lie inside the node's AABB + `absorb.margin` = 10 cm. Many-to-one: each observation goes to its best node (largest point share, then centroid distance, then id); the node's `obs_token` = its best absorbed observation. Absorbed observations are neither `new` nor matched.
    - `associate(ref_nodes, obs_instances, mode, cfg) -> (pairs, unmatched_ref, unmatched_obs)`.
    - Only reference nodes **not confirmed in place** and observations not absorbed take part.
+   - Old-place gate (CHANGE 3 Part A, FULL only): `old_place_gate(votes, cfg)` sets the cost of a pair to +inf when the node's old place is net-seen or unobserved (`change.visibility.old_place_class`) and the observation is not inside the node's place (§3 Moved).
    - Cost:
      - label term: oracle = hard gate (+∞ if labels differ; fallback same nyu40 + 0.3 penalty, **except** the catch-all classes 39 otherfurniture / 40 otherprop, M5 Erik); perception = soft, −log max(p(label_ref), p_min) from `label_topk` *(p_min tune)*;
      - plus w_g · size term (mean |log| ratio of sorted AABB extents, extents floored at 2 cm) + w_p · min(dist / 3 m, 1) (position, weak); w_g = w_p = 1 *(tune)*;
@@ -311,6 +313,7 @@ Per pair (ref R, rescan S). O_R and O_S are the objectIds in their semseg files.
     - `classify(pairs, unmatched_ref, votes, confirmed, ref_points, cfg) -> dict[node_id, Decision]`, run at the end of the sequence (M5: `ref_points` added, because ICP needs the reference node points).
     - ICP (point-to-point) of the **partial observed points onto the reference node points** gives T_move (as its inverse) and the moved/unchanged decision: ‖T_move·c_R − c_R‖ > τ_move. Schedule 0.20 / 0.10 / 0.05 m. Two inits (M5): the centroid offset and identity ("not moved"); the higher fitness wins, near ties (≤ 0.02) go to the lower RMSE. Below fitness 0.3 the centroid offset is used.
     - Unmatched reference node → `removed` if it has free evidence (§3), else `unknown`. Unmatched observation → `new`.
+    - CHANGE 3 Part A (FULL): a net-seen node needs displacement > `association.old_place.tau_move_seen` (0.2 m) instead of τ_move (`classify(..., old_place=True)`).
 11. `change.confidence` ✅ (M6)
     - Log-odds per node, starting at l₀ = logit(p_persist(class)) from train priors (`train_meta.class_priors`: per (reference object, train rescan) pair, present in the rescan's 3DSSG objects vs listed `removed`, absent-unlisted not counted; Beta-smoothed with κ = 20, label → nyu40 → global back-off; global 0.968). `confidence.class_priors: false` → fallback p = 0.9 (ablation).
     - From **counted** (decorrelated) votes: Δl = L_hit · n_seen − L_miss · n_free − L_free_like · n_free_like, clipped per visit to [−8, +8]. **Rescaled at M6 (Erik):** L_miss = L_free_like = 2.5 (2 free votes delete a median-prior thing: chair p 0.968 → 0.17; a bed, p ≈ 0.996, needs 3), L_hit *(tune on dev: 0.5 / 1 / 2.5)*. With the spec's 0.4 / ±3, priors of 0.91–1.0 could never reach p_del.
@@ -343,6 +346,7 @@ CLI:
 - `uv run lsg viz topdown --run <dir> --pair R S [--mode …] [--gt]` ✅, `uv run lsg viz rerun --run <dir> --pair R S [--images] [--spawn]` ✅ (M8); `lsg run --snapshot-every N` ✅;
 - `uv run lsg audit sample [--run-id m8_audit] [--from-run …] [--n 10]` ✅, `uv run lsg audit summarize` ✅ (M8, §7.4);
 - `uv run lsg splits textures` ✅; `uv run lsg splits devtune [--dry-run]` ✅ (CHANGE 3: `splits/dev_tune.txt` + `download_tier3.txt`, `eval.devtune`);
+- `uv run lsg movediag --run <dir> [--json]` ✅ (predicted moves by GT status × old-place evidence × own / other instance × distance, from a run's `details/`); `uv run lsg chg3 parta [--run-id …]` ✅ (CHANGE 3 Part A variants on dev_tune + the pre-written selection rule);
 - `uv run lsg graph --scan R --mode gt|geometric [--out f.json]` ✅;
 - `uv run lsg m0` ✅, `uv run lsg m1` ✅, `uv run lsg m4 [--no-sweep]` ✅, `uv run lsg m5 [--no-sweep] [--no-val]` ✅, `uv run lsg m6 [--no-sweep] [--no-val] [--no-objply]` ✅;
 - `--method B0|B1|B2|FULL` ✅ (FULL: M6; appearance on / off via `appearance.enabled`).
@@ -418,6 +422,7 @@ Ablations (M7: all ✅ as rows of `eval.ablations.registry`, run by `lsg m7`; ea
 - class priors on / off (`FULL-priors`, fallback p = 0.9); since CHANGE 2 the default has no prior, the learned one is `FULL+classprior`; candidate log-odds off (`FULL-candconf`), without see-through votes (`FULL-candconf-free`); the M7 method = `FULL-m7`;
 - "children follow parent" on / off (`FULL+follow`, §6.12);
 - keep-supported-parent off (`FULL-keepparent`, §6.12);
+- old-place gate off (`FULL-moveev`, CHANGE 3 Part A, §3 Moved);
 - τ_free sweep (0.05 / 0.10 / 0.20 / 0.30 m; 0.15 = FULL; `appearance.thin_max_extent` stays 0.15 m);
 - relations on the relchange set: B2, FULL, `FULL+follow`, `FULL-keepparent`;
 - *optional, not done:* + DINOv2 embedding term in association (old B3; cut-list item 1).

@@ -59,6 +59,8 @@ Task2/
 │   │   ├── audit.py         `lsg audit`: sample false positives, photo panels, CSV for manual verdicts (M8)
 │   │   ├── newcurve.py      `lsg newcurve`: new-object P / R over the candidate-confidence threshold (CHANGE 2)
 │   │   ├── devtune.py       `lsg splits devtune`: picks the tuning set dev_tune from train metadata (CHANGE 3)
+│   │   ├── movediag.py      `lsg movediag`: predicted moves split by old-place evidence (CHANGE 3 Part A)
+│   │   ├── chg3_checks.py   `lsg chg3 parta`: CHANGE 3 variant sweeps on dev_tune + selection rule
 │   │   └── figures.py       the GT panel of the top-down figure (M8)
 │   ├── viz/                 PICTURES (M8; reads only method inputs / outputs)
 │   │   ├── topdown.py       before / after top-down PNG, nodes coloured by state
@@ -290,6 +292,11 @@ The rule: no imports from `oracle/` / `eval/`, and no rescan annotations. Inputs
 - `pair_counts(meta, objects_of, exclude_refs)`: per train (reference, rescan) pair, how many things / anchors were removed, moved (`rigid`) and added, from 3RScan.json + 3DSSG `objects.json` only (no downloads). It reads train rescans' change lists, so it lives in `eval/`.
 - `select_dev_tune(...)`: the 20 rooms with the most changes (best rescan each) plus 10 random rooms (seeded); the CLI appends the 3 `dev_train` pairs and writes `splits/dev_tune.txt` and `splits/download_tier3.txt` (scans not yet downloaded).
 - Settings in `splits.dev_tune` of `configs/default.yaml`. All tuning happens on `dev_tune` (CLAUDE.md hard rule 4); `dev_train` stays the 3-pair regression set.
+
+### `eval/movediag.py` and `eval/chg3_checks.py` — CHANGE 3 Part A (`uv run lsg movediag`, `uv run lsg chg3 parta`)
+- `movediag`: reads a run's `details/` and counts every node predicted `moved` by its GT status, the evidence at its old place (`net_seen`, `free_ev`, `unobserved`, `mixed`; the same `old_place_class` the method uses), whether it took its own instance or another object's, and how far it moved.
+- `chg3_checks.run_part_a`: runs each variant of `chg3.part_a.variants` (FULL on dev_tune, both modes) and applies the selection rule written before the run (`select`).
+- The rule itself lives on the method side: `change.association.old_place_gate` (pair gate), `change.classify.classify(old_place=True)` (`tau_move_seen`), wired in `baselines._b2_core` for FULL only.
 
 ### `eval/m7_checks.py` — the M7 run (`uv run lsg m7`)
 - Dev rows first, compared with the stored M5 / M6 dev results (must be identical where nothing changed); then all val rows, the τ_free sweep, the observed-fraction runs (3 seeds each), the relation runs on the relchange set, and FULL twice on one pair (must be identical).
