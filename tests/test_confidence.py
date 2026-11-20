@@ -135,6 +135,21 @@ def test_learned_default_worked_examples():
     assert below_p_del(node_logodds(l0, NodeVotes(seen=1, free=3), c), c)  # -3.78
 
 
+def test_learned_candidate_threshold_needs_three_seen_votes():
+    """CHANGE 3 Part C default: p_new_min = sigmoid(3 * L_seen): 3 cluster seen votes emit, 2 or a see-through do not."""
+    from lsg.change.baselines import emits_new
+
+    c = load_config()
+    tc = c["confidence"]["candidates"]["track"]
+
+    def obs(s, f):
+        p = probability(float(tc["L_seen"]) * s - float(tc["L_free"]) * f)
+        return ObsInstance("c0", "box", [("box", 1.0)], 29, cube([6, 6, 0.2]), masks={}, confidence=p, cand_votes=(s, f))
+
+    assert emits_new(obs(3, 0), c) and emits_new(obs(12, 0), c)
+    assert not emits_new(obs(2, 0), c) and not emits_new(obs(12, 1), c)
+
+
 def test_default_decisions_equal_change2_no_prior(cfg_a):
     """CHANGE 3's flat 0.9 / 0.2 deletes exactly where CHANGE 2's l0 = 0 / p_del 0.027 did (every vote combination)."""
     m7 = copy.deepcopy(cfg_a)

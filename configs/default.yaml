@@ -207,8 +207,9 @@ confidence:                # DESIGN §6.11 log-odds confidence, FULL only (M6, E
     free_window: 1         # [px] half-size of the minimum-depth window (1 = 3x3); any invalid pixel in it = no info
     l_keep_small: 2.5      # strict tier keeps voxels with lv >= this (2.5 = one decorrelated hit, Erik; 5.0 = CHANGE 1)
     l_keep_large: 2.5      # lenient tier (clusters >= relaxed.large_min_voxels)
-    p_new_min: 0.0         # a candidate becomes a `new` node only with confidence >= this (else dropped, Erik); 0 until
-                           # the CHANGE 3 Part C curve picks it (was 0.92 = one decorrelated voxel hit)
+    p_new_min: 0.514996    # a candidate becomes a `new` node only with confidence >= this (else dropped, Erik). CHANGE 3
+                           # Part C: best perception new F1 on the dev_tune curve (`lsg newcurve`, DECISIONS) = sigmoid(3 *
+                           # L_seen): >= 3 decorrelated cluster seen votes and no see-through vote (was 0.92, CHANGE 2)
     track:                 # CHANGE 3 Part C: candidate confidence from cluster-level votes over the cluster's voxel history
       enabled: true        # false = CHANGE 2's sigmoid(median voxel lv) (ablation row FULL-candtrack)
       L_seen: 0.02         # per counted cluster seen vote: ln P(seen|explained) / P(seen|unexplained) on dev_tune
