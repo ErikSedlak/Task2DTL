@@ -28,6 +28,11 @@ view-count rules become thresholds: strict voxels need `lv >= l_keep_small` (rel
 new nodes (`change.baselines.emits_new`). `live_candidates()` gives the current candidates for
 the snapshot sidecars. Appearance candidates are unchanged (view counts, confidence None).
 
+Co-segmentation (CHANGE 3 Part N, `perception.segment`): with method `geometric` / `sam`
+every frame's residual pixels get image-segment ids (depth-edge components or cached SAM masks), and
+both depth tiers cluster their kept voxels with `segment.cosegment_cluster` (adjacent voxels link only
+if the frames seeing both mostly put them in one segment) instead of `cluster.cluster`.
+
 Thin-object candidates (M6, DESIGN §6.6 output ii; `appearance.thin_candidates`): when the
 online loop passes an `AppearanceMap` in `RefRender`, mismatching pixels whose depth agrees with
 the reference (|d_obs - d_exp| <= tau_near) and whose first hit is a support surface (a non-thin
@@ -55,6 +60,7 @@ from lsg.obs.base import ObsInstance, PackedMasks, RefContext, RefRender, SeqInf
 from lsg.perception.cluster import Candidate, cluster, door_regions, drop_door_clusters, is_large
 from lsg.perception.labeler import Labeler
 from lsg.perception.residual import SurfaceFilter, nearer_mask, nearer_points
+from lsg.perception.segment import SamSegments, cosegment_cluster, seg_method, segment_frame, voxel_segments
 from lsg.perception.voxels import VoxelEvidence, window_min_depth
 
 UNLABELLED = "object"  # label of a candidate without usable crops
@@ -119,6 +125,14 @@ class PerceptionSource:
         W, H = seq_info.intrinsics.depth_wh
         self._wh = (W, H)
         self._frames: list[tuple[int, np.ndarray, np.ndarray]] = []
+        # CHANGE 3 Part N: image segments of every frame's residual pixels (frame -> (sorted pix, seg id))
+        self.segm = seg_method(self.cfg)
+        self._segs: dict[int, tuple[np.ndarray, np.ndarray]] = {}
+        self._sam = None
+        if self.segm == "sam":
+            from lsg.perception.sam_cache import rescan_dir
+
+            self._sam = SamSegments(rescan_dir(self.cfg, seq_info.rescan_id))
         self.candidates, self.dropped_door = [], []
         self.stats = {"frames": 0, "nearer_px": 0, "residual_pts": 0, "voxels": 0, "kept_voxels": 0,
                       "clusters": 0, "door_dropped": 0, "doors": len(self.doors), "labelled": 0}  # fmt: skip
@@ -162,10 +176,12 @@ class PerceptionSource:
         vl = None
         if not self.relaxed:
             pts, pix = nearer_points(frame.depth, d_exp, K, pose, self.filt, self.cfg)
+            self._store_segments(frame, pix)
         else:
             # one pass at the lenient threshold; the strict tier gets exactly the pixels nearer than tau_new
             tau_low = min(tau, float(self.pc["relaxed"]["tau_new_large"]))
             pts, pix = nearer_points(frame.depth, d_exp, K, pose, self.filt, self.cfg, tau=tau_low)
+            self._store_segments(frame, pix)
             if len(pts) and self.vox_large is not None:
                 self.stats["large_pts"] += len(pts)
                 vl = self.vox_large.add(pts, pose)
@@ -179,6 +195,45 @@ class PerceptionSource:
             self._frames.append((int(frame.idx), pix.astype(np.int32), vidx.astype(np.int32)))
         if self.free_votes:
             self._observe_free(frame.depth, K, pose, vidx, vl, int(frame.idx))
+
+    def _store_segments(self, frame: Frame, pix: np.ndarray) -> None:
+        """CHANGE 3 Part N: segment ids of this frame's residual pixels (lenient pass = superset of both tiers)."""
+        if self.segm == "none" or not len(pix):
+            return
+        pix = np.sort(np.asarray(pix, np.int64))
+        if self.segm == "geometric":
+            seg = segment_frame(frame.depth, pix, self.cfg, K=self.info.intrinsics.K_depth)
+        else:
+            assert self._sam is not None
+            seg = self._sam.segment(int(frame.idx), pix)
+        self._segs[int(frame.idx)] = (pix, seg)
+
+    def _seg_of(self, fidx: int, pix: np.ndarray) -> np.ndarray:
+        """Segment id of each pixel of a stored frame entry (-1 if unknown)."""
+        sp = self._segs.get(int(fidx))
+        if sp is None or not len(sp[0]):
+            return np.full(len(pix), -1, np.int64)
+        P, S = sp
+        pix = np.asarray(pix, np.int64)
+        i = np.clip(np.searchsorted(P, pix), 0, len(P) - 1)
+        return np.where(P[i] == pix, S[i], -1)
+
+    def _cluster(self, vox: VoxelEvidence, kept: np.ndarray, frames, min_voxels: int | None = None,
+                 link: int | None = None, record: dict[str, Any] | None = None, prefix: str = "") -> list[Candidate]:  # fmt: skip
+        """Kept voxels -> clusters: `cluster.cluster`, or co-segmentation with `perception.segment` (Part N)."""
+        if self.segm == "none":
+            return cluster(kept, vox.coords(kept), vox.mean_points(kept), self.cfg, min_voxels=min_voxels, link=link)
+        mv = int(self.pc["min_voxels"] if min_voxels is None else min_voxels)
+        lk = int(self.pc.get("link_voxels", 1) if link is None else link)
+        fs = [voxel_segments(vidx, self._seg_of(f, pix)) for f, pix, vidx in frames]
+        sc = self.pc["segment"]
+        bu = sc.get("bridge_unseen")
+        cands, st = cosegment_cluster(kept, vox.coords(kept), vox.mean_points(kept), fs, len(vox), mv, lk,
+                                      cut_frac=float(sc.get("cut_frac", 0.5)), bridge_unseen=None if bu is None else int(bu))
+        if record is not None:
+            record[f"{prefix}seg_edges"] = st["edges"]
+            record[f"{prefix}seg_cut_edges"] = st["cut_edges"]
+        return cands
 
     def _observe_free(self, depth: np.ndarray, K: np.ndarray, pose: np.ndarray, vidx, vl, fidx: int) -> None:
         """CHANGE 2: see-through votes of this frame on both depth grids (voxels hit now are skipped)."""
@@ -352,10 +407,11 @@ class PerceptionSource:
             (candidates, grid of each (0 strict `vox` / 1 lenient `vox_large`), door-dropped clusters).
         """
         kept = self.vox.kept_by_logodds(self.l_keep_small) if self.candconf else self.vox.kept(self.min_views_small)
-        cands = cluster(kept, self.vox.coords(kept), self.vox.mean_points(kept), self.cfg)
+        seg_st: dict[str, Any] = {}
+        cands = self._cluster(self.vox, kept, self._frames, record=seg_st)
         cands, dropped = drop_door_clusters(cands, self.doors, float(self.pc["door_frac"]))
         st: dict[str, Any] = {"voxels": len(self.vox), "kept_voxels": len(kept), "clusters": len(cands),
-                              "door_dropped": len(dropped)}  # fmt: skip
+                              "door_dropped": len(dropped), **seg_st}  # fmt: skip
         grid = [0] * len(cands)
         if self.relaxed:
             cands, grid, big_dropped, st_large = self._merge_large(cands)
@@ -386,8 +442,9 @@ class PerceptionSource:
         rc = self.pc["relaxed"]
         vl = self.vox_large
         kept = vl.kept_by_logodds(self.l_keep_large) if self.candconf else vl.kept(int(rc["min_views_large"]))
-        big = cluster(kept, vl.coords(kept), vl.mean_points(kept), self.cfg, min_voxels=int(rc["large_min_voxels"]),
-                      link=int(rc["link_voxels_large"]))  # fmt: skip
+        seg_st: dict[str, Any] = {}
+        big = self._cluster(vl, kept, self._frames_large, min_voxels=int(rc["large_min_voxels"]),
+                            link=int(rc["link_voxels_large"]), record=seg_st, prefix="large_")  # fmt: skip
         big = [c for c in big if is_large(c, self.cfg)]
         big, big_dropped = drop_door_clusters(big, self.doors, float(self.pc["door_frac"]))
         replaced = np.zeros(len(strict), bool)
@@ -403,7 +460,7 @@ class PerceptionSource:
         entries = [(c, 0) for c, r in zip(strict, replaced) if not r] + [(b, 1) for b in big]
         entries.sort(key=lambda e: (-len(e[0].voxels), *np.round(e[0].centroid, 6).tolist()))
         st = {"large_voxels": len(vl), "large_clusters": len(big), "large_door_dropped": len(big_dropped),
-              "large_replaced": int(replaced.sum()), "clusters": len(entries)}  # fmt: skip
+              "large_replaced": int(replaced.sum()), "clusters": len(entries), **seg_st}  # fmt: skip
         return [e[0] for e in entries], [e[1] for e in entries], big_dropped, st
 
     def _tier_masks(self, cands: list[Candidate], grid: list[int]) -> list[PackedMasks]:

@@ -130,7 +130,24 @@ perception:                # PerceptionSource, DESIGN §3 candidate + §6.6 (tun
     large_min_extent: 0.0  # [m] ... and a longest AABB side of at least this (0 = no extent rule)
   link_voxels: 2          # voxels within this Chebyshev distance [voxels] are connected (1 = 26-conn.)
   min_voxels: 5            # drop clusters with fewer kept voxels (step 5)
-  door_filter: true        # drop clusters inside a reference door's swing region (M4, Erik)
+  segment:                 # CHANGE 3 Part N (N1): co-segmentation; adjacent voxels link only if the frames seeing both
+                           # mostly put them in one image segment (perception/segment.py)
+    method: none           # none (link by space only, as before) | geometric (depth-edge components) | sam (cached SAM)
+    depth_edge_abs: 0.03   # [m] geometric: neighbouring residual pixels are cut if |d1 - d2| > abs + rel * z
+    depth_edge_rel: 0.02
+    concave_deg: 30        # geometric: pixels on a concave crease (neighbour normals differ by more, surfaces meet
+                           # concavely: an object standing against another) leave the graph (null = depth jumps only)
+    normal_step: 2         # [px] baseline of the depth normals and of the crease test
+    cut_frac: 0.0          # an adjacent voxel pair seen together is cut if more than this share of those frames put them in
+                           # different segments (0 = any disagreement; 0.5 = majority)
+    bridge_unseen: 0       # pairs never seen in one frame link only up to this Chebyshev distance [voxels] (null = link_voxels)
+    sam:                   # `lsg sam cache` (SamAutomaticMaskGenerator on the upright colour frame)
+      model: vit_b
+      points_per_side: 16
+      pred_iou_thresh: 0.86
+      stability_score_thresh: 0.92
+      min_mask_region_area: 0
+  door_filter: true       # drop clusters inside a reference door's swing region (M4, Erik)
   door_frac: 0.5           # share of a cluster's voxels inside a swing region -> dropped
   door_margin: 0.10        # [m] added to the swing radius (door width)
   crop_k: 5                # colour crops per candidate (largest masks)
