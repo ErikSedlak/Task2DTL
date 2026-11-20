@@ -1,6 +1,6 @@
 # CHANGE 2 — one confidence for reference nodes and new objects (proposal, 2026-11-20)
 
-**Status: proposed by Erik, NOT implemented.** No code or config has changed. Part A needs no code (a config
+**Status: decided by Erik, all open questions answered (2026-11-20), NOT implemented.** No code or config has changed. Part A needs no code (a config
 flip). Part B is a design for review; the open questions in §7 must be answered first.
 Builds on CHANGE 1 (`docs/CHANGE_candidate_detection.md`, implemented 2026-11-19, val effect not measured yet).
 
@@ -36,7 +36,7 @@ Answered 2026-11-20 (Erik): **no prior value is needed** (Part A: l0 = 0, the de
 Also answered 2026-11-20 (Erik): **one decorrelated observation is enough for every cluster, small ones too**
 (`l_keep_small` = `l_keep_large` = 2.5); **ON by default**; **candidate confidence is logged into the snapshots**.
 
-Open (§7): only the handling of low-confidence candidates (drop or emit); the document proposes *drop*.
+Last answer (Erik, 2026-11-20): candidates below `p_new_min` are **dropped** from the graph (all stay in `candidates/<pair>.json`). **No open question is left; the design is ready to implement.**
 
 ## 3. Part A — no prior at all (no new code)
 
@@ -177,14 +177,14 @@ No new dependency (numpy / scipy).
 
 1. ~~Value of the class-agnostic prior~~: **answered**, no prior value needed (§3): `l0 = 0`, margin via `p_del` = 0.027.
 2. ~~Small clusters~~: **answered** (Erik): one observation is enough, `l_keep_small` = 2.5.
-3. **Low-confidence candidates** (the only open question): a candidate whose confidence has fallen below `p_new_min` (0.92 = one decorrelated hit), for example a person who was hit once and then seen through (2.5 − 2.5 = 0, p 0.5). Drop it from the graph, or emit it as a `new` node carrying p = 0.5? Proposal: **drop** (smaller graph; every candidate stays in `candidates/<pair>.json` with its confidence, and the curve over `p_new_min` is scored from those files). `p_new_min = 0` emits everything, so the choice is a config value, not a code change.
+3. ~~Low-confidence candidates~~: **answered** (Erik): **drop**. Background: a candidate whose confidence has fallen below `p_new_min` (0.92 = one decorrelated hit), for example a person who was hit once and then seen through (2.5 − 2.5 = 0, p 0.5). Drop it from the graph, or emit it as a `new` node carrying p = 0.5? Decision: **drop** (smaller graph; every candidate stays in `candidates/<pair>.json` with its confidence, and the curve over `p_new_min` is scored from those files). `p_new_min = 0` emits everything, so the choice is a config value, not a code change.
 4. ~~Default~~: **answered** (Erik): ON. Every perception number changes again after CHANGE 1; REPORT / README notes are updated when the val result is in.
 5. ~~Weight of correlated views~~: **answered** (Erik): they keep the small weight (`L_corr` 0.25, `corr_cap` 1.0).
 6. ~~Snapshots / visualisation~~: **answered** (Erik): yes. Snapshots get a candidates sidecar (box, label, confidence per candidate at that frame) and `lsg viz rerun` draws it as `world/candidates`, coloured by confidence, so candidates are seen appearing, being confirmed and being deleted.
 
 ## 8. Work list (not started)
 
-- [ ] answer question 3 of §7 with Erik (drop or emit; proposal: drop)
+- [x] all questions of §7 answered (the last: drop low-confidence candidates)
 - [ ] Part A: config flip (`class_priors: false`, `prior_p: 0.5`, `p_del: 0.027`), ablation row `FULL+classprior`, dev check that it reproduces `FULL-priors` and a margin between 1 and 2 votes
 - [ ] `perception/voxels.py`: per-voxel log-odds, correlated cap, `kept_by_logodds`; see-through update (`observe_free(depth, K, pose)`); `perception/source.py`: call it per frame, thresholds in `finish`, candidate confidence; `obs/base.py`: `ObsInstance.confidence`; `change/confidence.py`: new node from candidate confidence; emission threshold in the update step
 - [ ] config block `confidence.candidates` (`enabled: true`, `L_corr`, `corr_cap`, `free_margin`, `free_window`, `l_keep_small` 2.5, `l_keep_large` 2.5, `p_new_min`)
