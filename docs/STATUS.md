@@ -8,7 +8,8 @@ DESIGN.md (the spec) and DECISIONS.md (the dated log, with the reasons) stay the
 
 ## Current state (2026-11-20)
 - **CHANGE 2 (no class prior; candidate confidence with see-through votes) is implemented and ON by default** (`confidence`, `confidence.candidates`, docs/CHANGE_confidence_unified.md, DECISIONS 2026-11-20). `FULL-m7` (`ablations.M7_OVERRIDES`) is the M7 method and reproduces `m7_final` bit for bit on dev; REPORT, slides, the README headline table and `outputs/m7_final` describe it.
-  - Val: FULL (the new default) on `eval_val`; comparison rows `FULL-candconf`, `FULL-candconf-free`, `FULL+classprior`, `FULL-relaxed` (`lsg ablate`, > 1 min each); `lsg newcurve --run <FULL run>` for new P / R over `p_new_min`. Judge against the change document §6.4.
+  - **Val FULL measured** (`outputs/chg2_val/FULL`, DECISIONS 2026-11-20): new R 8.8 → 14.6%, moved F1 31.7 → 37.4, false deletion 7.7 → 6.9%, but unchanged kept 95.3 → 88.8% (outside the CI) and false move 1.6 → 6.4%, new P 2.0 → 1.0%. Erik decides whether the defaults stay.
+  - Still open on val: comparison rows `FULL-candconf`, `FULL-candconf-free`, `FULL+classprior`, `FULL-relaxed` (`lsg ablate`, > 1 min each); `lsg newcurve --run <FULL run>` for new P / R over `p_new_min`. Judge against the change document §6.4.
   - The M8 audit (step 1) forces `M7_OVERRIDES` by itself; the README expected result (step 3) is regenerated for the new default (perception: 11 `new` nodes).
 
 ## State of 2026-11-19
