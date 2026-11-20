@@ -44,3 +44,19 @@ def test_node_vote_weights_from_details(tmp_path):
     assert w["L_hit"]["value"] > 0 and w["L_miss"]["value"] > w["L_hit"]["value"]
     lo, hi = w["L_miss"]["ci"]
     assert lo <= w["L_miss"]["estimate"] <= hi
+
+
+def test_candidate_vote_weights_from_details(tmp_path):
+    """Explained candidates are mostly seen, unexplained ones are seen through: L_seen, L_free > 0."""
+    from lsg.eval.votestats import candidate_vote_weights
+
+    d = tmp_path / "details" / "perception"
+    d.mkdir(parents=True)
+    for k in range(3):
+        cands = [{"token": f"c{i}", "kind": "depth", "explained": True, "cand_votes": [8, 2]} for i in range(6)]
+        cands += [{"token": f"u{i}", "kind": "depth", "explained": False, "cand_votes": [2, 4]} for i in range(6)]
+        cands += [{"token": "a0", "kind": "appearance", "explained": False, "cand_votes": None}]  # ignored
+        (d / f"R{k}_S{k}.json").write_text(json.dumps({"objects": [], "candidates": cands}), encoding="utf-8")
+    w = candidate_vote_weights(tmp_path, CFG)
+    assert w["units"] == {"present": 18, "gone": 18}
+    assert w["L_seen"]["value"] > 0 and w["L_free"]["value"] > 0 and not w["L_free"]["fallback"]

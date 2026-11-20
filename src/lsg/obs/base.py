@@ -80,6 +80,7 @@ class ObsInstance:
     crops: list[np.ndarray] = field(default_factory=list)  # upright RGB crops
     kind: str = "depth"  # perception: "depth" (residual voxels) or "appearance" (thin-object voxels, M6)
     confidence: float | None = None  # perception depth candidates (CHANGE 2): sigmoid(median voxel log-odds)
+    cand_votes: tuple[int, int] | None = None  # CHANGE 3 Part C: counted (seen, free) cluster votes behind `confidence`
 
     @property
     def centroid(self) -> np.ndarray:

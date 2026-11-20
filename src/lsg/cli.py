@@ -332,7 +332,7 @@ def _cmd_chg3_votestats(args: argparse.Namespace) -> int:
     from pathlib import Path
 
     from lsg.config import outputs_root
-    from lsg.eval.votestats import format_weights, node_vote_weights
+    from lsg.eval.votestats import candidate_vote_weights, format_candidate_weights, format_weights, node_vote_weights
     from lsg.runinfo import write_metrics
 
     cfg = load_config(args.config)
@@ -342,7 +342,10 @@ def _cmd_chg3_votestats(args: argparse.Namespace) -> int:
     res = {m: node_vote_weights(run, cfg, m) for m in args.modes.split(",")}
     for r in res.values():
         print(format_weights(r))
-    print(f"metrics: {write_metrics(run / 'votestats', {'run': str(run), 'nodes': res}, cfg)}")
+    cand = candidate_vote_weights(run, cfg, "perception") if (run / "details" / "perception").is_dir() else None
+    if cand is not None and cand["units"]["present"] + cand["units"]["gone"]:
+        print(format_candidate_weights(cand))
+    print(f"metrics: {write_metrics(run / 'votestats', {'run': str(run), 'nodes': res, 'candidates': cand}, cfg)}")
     return 0
 
 

@@ -443,6 +443,22 @@ def test_node_weights_do_not_change_candidates(ccfg):
         assert sa.stats == sb.stats
 
 
+def test_cluster_votes_keep_the_see_through_signal(ccfg):
+    """CHANGE 3 Part C: a box seen in 6 of 12 views and then seen through gets 6 seen / 6 free cluster votes
+    (p 0.5, not emitted at p_new_min); CHANGE 2's median voxel log-odds still says 0.99."""
+    from lsg.change.baselines import emits_new
+
+    res, _ = run_perception(ccfg, room(), room(WITH_BOX), ORBIT)
+    assert [o.cand_votes for o in res.obs] == [(12, 0)] and res.obs[0].confidence > 0.999
+    on, _ = run_perception(ccfg, room(), room(WITH_BOX), ORBIT, later_parts=room(), n_first=6)
+    assert [o.cand_votes for o in on.obs] == [(6, 6)] and on.obs[0].confidence == 0.5
+    assert not emits_new(on.obs[0], ccfg)
+    off_cfg = copy.deepcopy(ccfg)
+    off_cfg["confidence"]["candidates"]["track"]["enabled"] = False
+    off, _ = run_perception(off_cfg, room(), room(WITH_BOX), ORBIT, later_parts=room(), n_first=6)
+    assert off.obs[0].cand_votes is None and off.obs[0].confidence > 0.99 and emits_new(off.obs[0], off_cfg)
+
+
 def test_one_observation_is_enough_and_confidence_is_set(ccfg):
     """Erik: a candidate is added after one decorrelated observation, small clusters too."""
     ccfg["perception"]["relaxed"]["large_min_voxels"] = 10**6  # strict tier only

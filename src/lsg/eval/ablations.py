@@ -40,6 +40,7 @@ M7_OVERRIDES: dict[str, Any] = {
     "train_meta.exclude_splits": ["splits/dev_train.txt", "splits/eval_relchange_train.txt"],
     "association.old_place.enabled": False,  # CHANGE 3 Part A off
     "confidence.L_hit": 2.5, "confidence.L_miss": 2.5, "confidence.L_free_like": 2.5,  # CHANGE 3 Part C off
+    "confidence.candidates.track.enabled": False,
 }
 
 
@@ -100,6 +101,8 @@ def registry(cfg: Mapping[str, Any]) -> dict[str, Ablation]:
         Ablation("FULL-priors", "FULL", {"confidence.class_priors": False, "confidence.prior_p": 0.9,
                                          "confidence.p_del": 0.2}, group="component",
                  desc="flat prior p = 0.9, p_del 0.2 at the current vote weights (the M7 row had 2.5 each)"),
+        Ablation("FULL-candtrack", "FULL", {"confidence.candidates.track.enabled": False}, group="component",
+                 desc="candidate confidence = CHANGE 2 median voxel log-odds (CHANGE 3 Part C cluster votes off)"),
         Ablation("FULL-learnedL", "FULL", {"confidence.L_hit": 2.5, "confidence.L_miss": 2.5,
                                            "confidence.L_free_like": 2.5, "confidence.p_del": 0.2}, group="component",
                  desc="CHANGE 3 Part C off: equal hand-set vote weights 2.5, p_del 0.2"),

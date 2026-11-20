@@ -107,6 +107,14 @@ class PerceptionSource:
             self.l_keep_small = float(cc["l_keep_small"]) if self.relaxed else L_hit * int(self.pc["min_views"])
             self.l_keep_large = float(cc["l_keep_large"])
         self.vox_large = VoxelEvidence.from_config(self.cfg, logodds=self.candconf) if self.relaxed else None
+        # CHANGE 3 Part C: candidate confidence from cluster-level votes over the cluster's voxel history
+        tc = cc.get("track") or {}
+        self.track = self.candconf and self.free_votes and bool(tc.get("enabled", False))
+        self._poses: dict[int, np.ndarray] = {}
+        self._hist_trees: dict[tuple[int, int], Any] = {}
+        for v in (self.vox, self.vox_large):
+            if v is not None:
+                v.log_free = self.track
         self._frames_large: list[tuple[int, np.ndarray, np.ndarray]] = []
         W, H = seq_info.intrinsics.depth_wh
         self._wh = (W, H)
@@ -145,6 +153,8 @@ class PerceptionSource:
         pose = np.asarray(self.info.T_align, float) @ frame.pose_c2w
         d_exp = ref_render.depth if ref_render is not None else self.filt.ref.render(K, invert(pose), W, H)[0]
         self.stats["frames"] += 1
+        if self.track:
+            self._poses[int(frame.idx)] = pose
         self.stats["nearer_px"] += int(nearer_mask(frame.depth, d_exp, self.cfg).sum())
         if self.wants_appearance and ref_render is not None and ref_render.appearance is not None:
             self._observe_appearance(frame, ref_render, K, pose)
@@ -168,16 +178,18 @@ class PerceptionSource:
             vidx = self.vox.add(pts, pose)
             self._frames.append((int(frame.idx), pix.astype(np.int32), vidx.astype(np.int32)))
         if self.free_votes:
-            self._observe_free(frame.depth, K, pose, vidx, vl)
+            self._observe_free(frame.depth, K, pose, vidx, vl, int(frame.idx))
 
-    def _observe_free(self, depth: np.ndarray, K: np.ndarray, pose: np.ndarray, vidx, vl) -> None:
+    def _observe_free(self, depth: np.ndarray, K: np.ndarray, pose: np.ndarray, vidx, vl, fidx: int) -> None:
         """CHANGE 2: see-through votes of this frame on both depth grids (voxels hit now are skipped)."""
         cc = self.cfg["confidence"]["candidates"]
         dmin = window_min_depth(depth, int(cc["free_window"]), float(self.pc["max_depth"]))
-        self.stats["free_votes"] += self.vox.observe_free(dmin, K, pose, None if vidx is None else np.unique(vidx))
+        self.stats["free_votes"] += self.vox.observe_free(dmin, K, pose, None if vidx is None else np.unique(vidx),
+                                                          frame_idx=fidx)  # fmt: skip
         if self.vox_large is not None:
             self.stats["large_free_votes"] += self.vox_large.observe_free(dmin, K, pose,
-                                                                          None if vl is None else np.unique(vl))  # fmt: skip
+                                                                          None if vl is None else np.unique(vl),
+                                                                          frame_idx=fidx)  # fmt: skip
 
     def _observe_appearance(self, frame: Frame, rr: RefRender, K: np.ndarray, pose: np.ndarray) -> None:
         """Output (ii): mismatching support-surface pixels -> the appearance voxel grid."""
@@ -211,7 +223,8 @@ class PerceptionSource:
     def finish(self) -> list[ObsInstance]:
         """Cluster kept voxels into candidates and turn them into `ObsInstance`s."""
         cands, grid, dropped = self._depth_clusters(record=True)
-        conf = [self._confidence(c, g) for c, g in zip(cands, grid)]
+        votes = [self.cluster_votes(c, g) if self.track else None for c, g in zip(cands, grid)]
+        conf = [self._confidence(c, g, v) for c, g, v in zip(cands, grid, votes)]
         if self.candconf:
             p_min = float(self.cfg["confidence"]["candidates"]["p_new_min"])
             self.stats["seen_through_voxels"] = self.vox.seen_through(self.l_keep_small)
@@ -230,14 +243,15 @@ class PerceptionSource:
         k_top = int(self.pc["clip"]["topk"])
         out = []
         conf += [None] * len(app)
-        for k, (c, pm, cr, kind, p) in enumerate(zip(all_c, masks, crops, kinds, conf)):
+        votes += [None] * len(app)
+        for k, (c, pm, cr, kind, p, cv) in enumerate(zip(all_c, masks, crops, kinds, conf, votes)):
             topk = self.labeler.topk(cr, k_top) if (self.labeler is not None and cr) else []
             self.stats["labelled"] += bool(topk)
             label = topk[0][0] if topk else UNLABELLED
             out.append(ObsInstance(
                 token=f"c{k}", label=label, label_topk=[(a, float(b)) for a, b in topk],
                 nyu40=self.label_nyu.get(label), points=c.points.copy(), masks=pm, crops=cr, kind=kind,
-                confidence=p,
+                confidence=p, cand_votes=cv,
             ))  # fmt: skip
         return out
 
@@ -255,13 +269,78 @@ class PerceptionSource:
                  "confidence": self._confidence(c, g), "n_voxels": int(len(c.voxels)),
                  "tier": "large" if g else "small"} for c, g in zip(cands, grid)]  # fmt: skip
 
-    def _confidence(self, c: Candidate, grid: int) -> float | None:
-        """sigmoid(median voxel log-odds) of a depth candidate (CHANGE 2), None when off."""
+    def _confidence(self, c: Candidate, grid: int, votes: tuple[int, int] | None = None) -> float | None:
+        """Confidence of a depth candidate, None when candidate log-odds are off.
+
+        CHANGE 3 Part C (`confidence.candidates.track`): sigmoid(clip(L_seen·seen − L_free·free)) of the
+        cluster votes (`cluster_votes`); otherwise CHANGE 2's sigmoid(median voxel log-odds).
+        """
         if not self.candconf:
             return None
-        vox = self.vox_large if grid else self.vox
-        m = float(np.median(vox.logodds(c.voxels)))
+        if self.track:
+            tc = self.cfg["confidence"]["candidates"]["track"]
+            s, f = votes if votes is not None else self.cluster_votes(c, grid)
+            clip = float(self.cfg["confidence"]["clip"])
+            m = max(-clip, min(clip, float(tc["L_seen"]) * s - float(tc["L_free"]) * f))
+        else:
+            vox = self.vox_large if grid else self.vox
+            m = float(np.median(vox.logodds(c.voxels)))
         return round(float(1.0 / (1.0 + np.exp(-m))), 6)
+
+    def _history(self, c: Candidate, grid: int) -> np.ndarray:
+        """Bool mask over the grid's voxels: the cluster's voxels plus every tracked voxel of that grid
+        within the linking distance of them (also those below `l_keep`, e.g. seen through)."""
+        from scipy.spatial import cKDTree
+
+        vox = self.vox_large if grid else self.vox
+        n = len(vox)
+        link = int(self.pc["relaxed"]["link_voxels_large"]) if grid else int(self.pc["link_voxels"])
+        key = (grid, n)
+        if key not in self._hist_trees:
+            self._hist_trees = {k: v for k, v in self._hist_trees.items() if k[0] != grid}
+            self._hist_trees[key] = cKDTree(vox.coords(np.arange(n)).astype(float))
+        tree = self._hist_trees[key]
+        near = tree.query_ball_point(vox.coords(c.voxels).astype(float), r=float(link) + 1e-9, p=np.inf)
+        mask = np.zeros(n, bool)
+        mask[np.asarray(c.voxels, np.int64)] = True
+        for lst in near:
+            mask[lst] = True
+        return mask
+
+    def cluster_votes(self, c: Candidate, grid: int) -> tuple[int, int]:
+        """Counted (decorrelated) seen / free votes of a depth cluster (CHANGE 3 Part C).
+
+        Per processed frame, h = history voxels hit and f = history voxels seen through. The frame votes
+        `seen` if h >= `min_vox` and h >= `vote_frac`·(h + f), `free` if f >= `min_vox` and
+        f >= `vote_frac`·(h + f): the node rule of DESIGN §3 applied to voxels. Votes count per kind
+        only from a new viewpoint (the `decorrelation` rule: moved >= d_dec or turned >= theta_dec).
+        """
+        tc = self.cfg["confidence"]["candidates"]["track"]
+        vox = self.vox_large if grid else self.vox
+        frames = self._frames_large if grid else self._frames
+        H = self._history(c, grid)
+        hf: dict[int, list[int]] = {}
+        for fidx, _pix, vidx in frames:
+            hf.setdefault(int(fidx), [0, 0])[0] += int(H[np.unique(vidx)].sum())
+        for fidx, fi in vox.free_log:
+            hf.setdefault(int(fidx), [0, 0])[1] += int(H[fi].sum())
+        dc = self.cfg["decorrelation"]
+        on, d_dec, cos_dec = bool(dc.get("enabled", True)), float(dc["d_dec"]), float(np.cos(np.radians(float(dc["theta_dec_deg"]))))
+        mv, frac = int(tc["min_vox"]), float(tc["vote_frac"])
+        last: dict[str, tuple[np.ndarray, np.ndarray]] = {}
+        counted = {"seen": 0, "free": 0}
+        for fidx in sorted(hf):
+            h, f = hf[fidx]
+            kind = "seen" if (h >= mv and h >= frac * (h + f)) else "free" if (f >= mv and f >= frac * (h + f)) else None
+            if kind is None or fidx not in self._poses:
+                continue
+            P = self._poses[fidx]
+            cpos, z = P[:3, 3], P[:3, 2] / (np.linalg.norm(P[:3, 2]) or 1.0)
+            prev = last.get(kind)
+            if (not on or prev is None or np.linalg.norm(prev[0] - cpos) >= d_dec or float(prev[1] @ z) <= cos_dec):
+                counted[kind] += 1
+                last[kind] = (cpos, z)
+        return counted["seen"], counted["free"]
 
     def _depth_clusters(self, record: bool = True) -> tuple[list[Candidate], list[int], list[Candidate]]:
         """Kept voxels -> clusters -> door filter (-> lenient tier merge with CHANGE 1).

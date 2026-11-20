@@ -97,6 +97,8 @@ class VoxelEvidence:
         self.free_margin = float(free_margin)
         self._index: dict[int, int] = {}
         self._n = 0
+        self.log_free = False  # CHANGE 3 Part C: keep (frame, voxels seen through) for cluster votes
+        self.free_log: list[tuple[int, np.ndarray]] = []
         cap = 1024
         self.keys = np.zeros(cap, np.int64)
         self.views = np.zeros(cap, np.int64)
@@ -214,7 +216,8 @@ class VoxelEvidence:
         return idx
 
     def observe_free(
-        self, dmin: np.ndarray, K: np.ndarray, cam_pose: np.ndarray, skip: np.ndarray | None = None
+        self, dmin: np.ndarray, K: np.ndarray, cam_pose: np.ndarray, skip: np.ndarray | None = None,
+        frame_idx: int | None = None,
     ) -> int:
         """See-through votes of one frame on every tracked voxel (module docstring).
 
@@ -223,6 +226,7 @@ class VoxelEvidence:
             K: 3x3 intrinsics of that image.
             cam_pose: 4x4 camera -> reference.
             skip: Voxel indices hit in this frame (they get no free vote).
+            frame_idx: With `log_free`, the raw see-through voxels are logged under this frame.
 
         Returns:
             Number of decorrelated free votes cast.
@@ -246,6 +250,8 @@ class VoxelEvidence:
         if skip is not None and len(skip):
             free[np.asarray(skip, np.int64)] = False
         fi = np.flatnonzero(free)
+        if self.log_free and frame_idx is not None and len(fi):
+            self.free_log.append((int(frame_idx), fi.astype(np.int32)))
         if len(fi) == 0:
             return 0
         c, z = self._axis(cam_pose)

@@ -445,12 +445,29 @@ def score_pair(
     out: dict[str, Any] = {"counts": {k: int(v) for k, v in c.items()}, "loc_errors": loc, "new_match": m}
     if details:
         out["objects"] = object_rows(G_upd, gt, truth, vts)
+        if candidates is not None:
+            out["candidates"] = candidate_detail_rows(candidates, gt, cfg)
         outcome = {**{i: "tp" for i in m["tp"]}, **{i: "fp" for i in m["fp"]}, **{i: "ignored" for i in m["ignored"]}}
         out["new"] = [{"id": n.id, "label": n.label, "outcome": outcome.get(n.id), "gt_id": m["tp"].get(n.id),
                        "confidence": n.confidence, "obs_token": n.obs_token,
                        "gt_token": list(truth[n.obs_token]) if n.obs_token in truth else None,
                        "bbox_3d": n.bbox_3d, "centroid": n.centroid} for n in pred_new]  # fmt: skip
     return out
+
+
+def candidate_detail_rows(obs: Sequence[Any], gt: GTLabels, cfg: Mapping[str, Any]) -> list[dict[str, Any]]:
+    """Per perception candidate: explained by any GT rescan instance (the `candidate_counts` gate), its
+    cluster votes and confidence (CHANGE 3 Part C, `lsg chg3 votestats`)."""
+    allb = gt_rescan_boxes(gt)
+    rows = []
+    for o in obs:
+        if not len(o.points):
+            continue
+        n = obs_node(o)
+        rows.append({"token": o.token, "kind": getattr(o, "kind", "depth"), "confidence": o.confidence,
+                     "cand_votes": None if getattr(o, "cand_votes", None) is None else [int(x) for x in o.cand_votes],
+                     "explained": bool(any(perception_compatible(n, b, cfg, None, use_label=False)[0] for b in allb))})  # fmt: skip
+    return rows
 
 
 def object_rows(G_upd: Graph, gt: GTLabels, truth: Mapping[str, tuple[int, str]],

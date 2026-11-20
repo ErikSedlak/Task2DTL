@@ -41,6 +41,8 @@ def test_registry_overrides_exist_and_sweeps_come_from_config():
     assert abl.M7_OVERRIDES["association.old_place.enabled"] is False
     assert all(abl.M7_OVERRIDES[f"confidence.{k}"] == 2.5 for k in ("L_hit", "L_miss", "L_free_like"))
     assert reg["FULL-learnedL"].overrides["confidence.L_hit"] == 2.5
+    assert reg["FULL-candtrack"].overrides == {"confidence.candidates.track.enabled": False}
+    assert abl.M7_OVERRIDES["confidence.candidates.track.enabled"] is False
     for a in reg.values():
         abl.apply_overrides(CFG, a.overrides)
     m7 = abl.apply_overrides(CFG, abl.M7_OVERRIDES)

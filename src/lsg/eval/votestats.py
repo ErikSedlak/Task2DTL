@@ -111,6 +111,49 @@ def node_vote_weights(run_dir: str | Path, cfg: Mapping[str, Any], mode: str = "
     return w
 
 
+def candidate_units(details_mode_dir: Path) -> dict[str, dict[str, list[dict[str, int]]]]:
+    """Per pair: depth candidates' cluster votes; `present` = explained by a GT instance, `gone` = not."""
+    out: dict[str, dict[str, list[dict[str, int]]]] = {}
+    for f in sorted(Path(details_mode_dir).glob("*.json")):
+        d = json.loads(f.read_text(encoding="utf-8"))
+        pr: dict[str, list[dict[str, int]]] = {"present": [], "gone": []}
+        for r in d.get("candidates") or []:
+            if r.get("kind", "depth") != "depth" or not r.get("cand_votes"):
+                continue
+            s, fr = (int(x) for x in r["cand_votes"])
+            pr["present" if r["explained"] else "gone"].append({"seen": s, "free": fr})
+        out[f.stem] = pr
+    return out
+
+
+def candidate_vote_weights(run_dir: str | Path, cfg: Mapping[str, Any], mode: str = "perception") -> dict[str, Any]:
+    """Candidate cluster-vote weights: L_seen (seen | explained vs unexplained) and L_free, with CIs."""
+    vc = cfg["chg3"]["part_c"]["votestats"]
+    per = candidate_units(Path(run_dir) / "details" / mode)
+    pres = [u for p in per.values() for u in p["present"]]
+    gone = [u for p in per.values() for u in p["gone"]]
+    w = weights_from_units(pres, gone, int(vc["min_votes"]), float(vc["fallback"]))
+    ci = bootstrap(per, int(vc["n_boot"]), int(vc["seed"]), int(vc["min_votes"]), float(vc["fallback"]))
+    out = {"rates": w["rates"], "votes": w["votes"], "units": w["units"], "n_pairs": len(per), "mode": mode}
+    for src, dst in (("L_hit", "L_seen"), ("L_miss", "L_free")):
+        out[dst] = {**w[src], "ci": ci[src]}
+    return out
+
+
+def format_candidate_weights(res: Mapping[str, Any]) -> str:
+    """Terminal summary of `candidate_vote_weights`."""
+    lines = [f"candidates ({res['mode']}), {res['n_pairs']} pairs; explained {res['units']['present']}, "
+             f"unexplained {res['units']['gone']}"]  # fmt: skip
+    for c, lab in (("present", "explained"), ("gone", "unexpl.")):
+        r, v = res["rates"][c], res["votes"][c]
+        lines.append(f"  {lab:<9} P(seen)={r['seen']:.3f} ({v['seen']} votes)  P(free)={r['free']:.3f} ({v['free']} votes)")
+    for n in ("L_seen", "L_free"):
+        w = res[n]
+        lines.append(f"  {n:<8} estimate {w['estimate']:+.2f} [{w['ci'][0]:+.2f}, {w['ci'][1]:+.2f}]  -> value "
+                     f"{w['value']:.2f}{'  (fallback: too few votes)' if w['fallback'] else ''}")  # fmt: skip
+    return "\n".join(lines)
+
+
 def format_weights(res: Mapping[str, Any]) -> str:
     """Terminal summary of `node_vote_weights`."""
     lines = [f"mode {res['mode']}, {res['n_pairs']} pairs; units present {res['units']['present']}, gone {res['units']['gone']}"]

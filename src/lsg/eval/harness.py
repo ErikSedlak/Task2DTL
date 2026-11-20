@@ -109,6 +109,7 @@ def _candidate_rows(obs: Sequence[ObsInstance], truth: dict[str, tuple[int, str]
              "aabb": [[round(float(v), 4) for v in o.aabb_min], [round(float(v), 4) for v in o.aabb_max]],
              "n_voxels": len(o.points), "n_frames": len(o.masks), "n_crops": len(o.crops), "kind": o.kind,
              "confidence": o.confidence, "emits_new": emits_new(o, cfg),
+             "cand_votes": None if o.cand_votes is None else [int(x) for x in o.cand_votes],
              "gt": list(truth[o.token]) if o.token in truth else None}
             for o in obs]  # fmt: skip
 
@@ -251,7 +252,8 @@ def _write_details(path: Path, ref: str, rescan: str, mode: str, info: Any, sc: 
     path.parent.mkdir(parents=True, exist_ok=True)
     blob = {"ref": ref, "rescan": rescan, "mode": mode, "T_align": [[float(v) for v in r] for r in info.T_align],
             "frame_ids": [int(i) for i in info.frame_ids], "objects": sc["objects"], "new": sc["new"],
-            "gt_new_fn": [int(i) for i in sc["new_match"]["fn"]]}  # fmt: skip
+            "gt_new_fn": [int(i) for i in sc["new_match"]["fn"]],
+            "candidates": sc.get("candidates", [])}  # fmt: skip
     path.write_text(json.dumps(blob, indent=1, default=float), encoding="utf-8")
 
 
