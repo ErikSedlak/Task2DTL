@@ -189,6 +189,13 @@ association:               # DESIGN §6.9, B2 (tune on dev only)
     unobserved_inside_only: true    # a node without counted votes may only match inside its own place too (Erik: a_u_c02)
     max_dist_unseen: null  # [m] or null: a node without counted votes only matches obs within this centroid distance
     tau_move_seen: 0.2     # [m] or null: a net-seen node needs ICP displacement > this (instead of classify.tau_move)
+  explain_ref:             # CHANGE 3 Part N (N2, FULL only): a leftover depth candidate with >= min_frac of its points within
+                           # dist of the reference points of a standing node (not committed removed, old place not free_ev)
+                           # is that node re-observed -> not emitted as new; no label condition; association unchanged
+    enabled: false
+    modes: [perception]
+    dist: 0.10             # [m]
+    min_frac: 0.5
 
 classify:                  # DESIGN §6.10 ICP moved test (tune on dev only)
   tau_move: 0.10           # [m] ICP-refined centroid displacement above this -> moved (§3)

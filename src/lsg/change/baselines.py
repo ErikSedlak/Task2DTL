@@ -42,7 +42,7 @@ from typing import Any
 
 import numpy as np
 
-from lsg.change.association import absorb_confirmed, associate, old_place_gate
+from lsg.change.association import absorb_confirmed, associate, explained_by_reference, old_place_gate
 from lsg.change.classify import Decision, classify
 from lsg.change.confidence import below_p_del, node_logodds, obs_logodds, prior_logodds, probability
 from lsg.change.visibility import NodeVotes, confirmed_in_place, has_free_evidence
@@ -330,9 +330,16 @@ def _b2_core(G_ref, obs, cfg, rescan_id, obs_mode, votes, ref_ctx, method):
             continue
         assert d.T_move is not None
         _apply_move(n, d.T_move, P.get(n.id))
-    add_new_nodes(G, unmatched_obs, rescan_id, cfg)
+    # CHANGE 3 Part N (N2): perception candidates a standing reference node explains are not new
+    ec = cfg["association"].get("explain_ref") or {}
+    expl: dict[str, str] = {}
+    if method == "FULL" and ec.get("enabled", False) and mode in list(ec.get("modes", ["perception"])):
+        expl = explained_by_reference(unmatched_obs, nodes, P, vs, committed, cfg)
+    add_new_nodes(G, [o for o in unmatched_obs if o.token not in expl], rescan_id, cfg)
     G.meta["assoc"] = {"confirmed": len(conf), "absorbed": len(ab.absorbed), "matched": len(pairs),
                        "icp_fallback": sum(bool(dec[n.id].info.get("fallback")) for n, _, _ in pairs)}  # fmt: skip
+    if expl:
+        G.meta["assoc"]["explained_ref"] = len(expl)
     if committed:
         G.meta["assoc"]["committed_removed"] = len(committed)
     return G, {n.id for n, _, _ in pairs}, conf_ids, committed
