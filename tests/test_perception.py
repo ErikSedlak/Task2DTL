@@ -82,9 +82,12 @@ def rcfg():
 
 @pytest.fixture
 def ccfg():
-    """The default config (CHANGE 1 and CHANGE 2 on)."""
+    """The default config (CHANGE 1 and CHANGE 2 on) with the start candidate weights 2.5 / 2.5 and p_new_min 0.92
+    (CHANGE 3 Part C mechanics; the learned dev_tune values make every confidence ~0.5)."""
     c = copy.deepcopy(load_config())
     assert c["perception"]["relaxed"]["enabled"] is True and c["confidence"]["candidates"]["enabled"] is True
+    c["confidence"]["candidates"]["p_new_min"] = 0.92
+    c["confidence"]["candidates"]["track"].update(L_seen=2.5, L_free=2.5)
     return c
 
 

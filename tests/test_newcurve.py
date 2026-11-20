@@ -9,8 +9,8 @@ from lsg.graph.model import Node
 
 def test_thresholds_include_the_default_sorted_unique():
     cfg = copy.deepcopy(load_config())
-    assert nc.thresholds_of(cfg) == sorted({0.92, 0.95, 0.99, 0.999})
-    assert nc.thresholds_of(cfg, [0.99, 0.92]) == [0.92, 0.99]
+    assert nc.thresholds_of(cfg) == sorted({float(cfg["confidence"]["candidates"]["p_new_min"]), 0.95, 0.99, 0.999})
+    assert nc.thresholds_of(cfg, [0.99, 0.92]) == sorted({float(cfg["confidence"]["candidates"]["p_new_min"]), 0.92, 0.99})
 
 
 def test_curve_filters_new_nodes_by_confidence(monkeypatch):

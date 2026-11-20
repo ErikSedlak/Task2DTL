@@ -34,6 +34,7 @@ def cfg_a():
     """No class prior (CHANGE 2 Part A), flat 0.9 with p_del 0.2 (CHANGE 3), equal vote weights 2.5 (before Part C)."""
     c = copy.deepcopy(load_config())
     c["confidence"].update(p_del=0.2, L_hit=2.5, L_miss=2.5, L_free_like=2.5)
+    c["confidence"]["candidates"]["p_new_min"] = 0.92  # CHANGE 2 value
     return c
 
 

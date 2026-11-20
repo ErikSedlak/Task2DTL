@@ -207,11 +207,13 @@ confidence:                # DESIGN §6.11 log-odds confidence, FULL only (M6, E
     free_window: 1         # [px] half-size of the minimum-depth window (1 = 3x3); any invalid pixel in it = no info
     l_keep_small: 2.5      # strict tier keeps voxels with lv >= this (2.5 = one decorrelated hit, Erik; 5.0 = CHANGE 1)
     l_keep_large: 2.5      # lenient tier (clusters >= relaxed.large_min_voxels)
-    p_new_min: 0.92        # a candidate becomes a `new` node only with confidence >= this (else dropped, Erik)
+    p_new_min: 0.0         # a candidate becomes a `new` node only with confidence >= this (else dropped, Erik); 0 until
+                           # the CHANGE 3 Part C curve picks it (was 0.92 = one decorrelated voxel hit)
     track:                 # CHANGE 3 Part C: candidate confidence from cluster-level votes over the cluster's voxel history
       enabled: true        # false = CHANGE 2's sigmoid(median voxel lv) (ablation row FULL-candtrack)
-      L_seen: 2.5          # per counted cluster seen vote (start value; estimated on dev_tune, `lsg chg3 votestats`)
-      L_free: 2.5          # per counted cluster see-through vote (start value)
+      L_seen: 0.02         # per counted cluster seen vote: ln P(seen|explained) / P(seen|unexplained) on dev_tune
+                           # [-0.00, 0.04] (`lsg chg3 votestats`, DECISIONS 2026-11-20; start value 2.5)
+      L_free: 0.50         # per counted cluster see-through vote [-0.01, 1.05] (start value 2.5)
       min_vox: 5           # a frame votes only with >= this many history voxels hit / seen through (= min_voxels)
       vote_frac: 0.5       # ... and >= this share of the informative history voxels (§3 vote_frac)
 
