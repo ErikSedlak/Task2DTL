@@ -1,6 +1,6 @@
 # CHANGE 3 — tuning set, move evidence, incremental graph, confidence policy (proposal, 2026-11-20)
 
-**Status (2026-11-20): all questions answered (§8); Parts 0 and A done; next Part C.** Builds on CHANGE 1 + 2,
+**Status (2026-11-20): all questions answered (§8); Parts 0, A and C done; next Part B.** Builds on CHANGE 1 + 2,
 which Erik fixed as the **final method** (2026-11-20). Comes from a logic review of the whole solution (chat,
 2026-11-20). Nothing here changes DESIGN.md before sign-off.
 
@@ -146,6 +146,8 @@ snapshots are tentative, and `removed` / `moved` are final only at the end (§3 
 
 ## 5. Part C — confidence policy
 
+**Implemented 2026-11-20** (DECISIONS "CHANGE 3 Part C (C1)" / "(C2)"). Measured on dev_tune: L_hit 0.63, L_miss 1.47 (L_free_like 2.5 by the fallback), `p_del` 0.4; candidate cluster votes L_seen 0.02, L_free 0.50, `p_new_min` 0.514996. Effect on dev_tune vs Part A: removed R +1 object per mode, false deletion oracle 2.6 → 3.1, false move up 2–2.6 points (weighted net-seen), moved F1 +0.9 / +2.0, perception new P 2.5 → 5.6 at new R 11.2 → 7.0 (966 → 267 new nodes). Findings that differ from the plan below: the seen-vote veto was not what kept removed recall low; and cluster votes barely separate real from false candidates (the false ones are static artefacts, not transients), so the gain comes from the emission threshold.
+
 **Definition (proposal):** `confidence` = the belief that the node is present at the position the graph gives
 it (reference position, or the new position for `moved` and `new`). One log-odds scale for all nodes:
 `l = l0 + Σ counted-vote weights`, deleted / not emitted below a threshold.
@@ -222,7 +224,8 @@ Original questions:
       `outputs/chg3_dev_baseline/FULL` (numbers in DECISIONS 2026-11-20)
 - [x] Part A: diagnostic (`lsg movediag`), rule + variants, tests, dev_tune sweep (`lsg chg3 parta`), default
       `a_u_c02` (Erik), `FULL-moveev` row (2026-11-20)
-- [ ] Part C: vote statistics on dev_tune, weights, candidate track confidence, `p_new_min`
+- [x] Part C: vote statistics (`lsg chg3 votestats`), learned weights, `p_del` sweep (`lsg chg3 pdel`), cluster-vote
+      candidate confidence, `p_new_min` from the curve, rows `FULL-learnedL` / `FULL-candtrack` (2026-11-20)
 - [ ] Part B: `peek()`, candidate tracks, snapshot method runs, CLIP relabel rule, online alignment (per §8.4),
       anytime curve, viz
 - [ ] Part D: class-agnostic new in the tables; audit on the final method

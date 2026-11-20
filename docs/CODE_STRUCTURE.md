@@ -60,7 +60,8 @@ Task2/
 │   │   ├── newcurve.py      `lsg newcurve`: new-object P / R over the candidate-confidence threshold (CHANGE 2)
 │   │   ├── devtune.py       `lsg splits devtune`: picks the tuning set dev_tune from train metadata (CHANGE 3)
 │   │   ├── movediag.py      `lsg movediag`: predicted moves split by old-place evidence (CHANGE 3 Part A)
-│   │   ├── chg3_checks.py   `lsg chg3 parta`: CHANGE 3 variant sweeps on dev_tune + selection rule
+│   │   ├── chg3_checks.py   `lsg chg3 parta` / `pdel`: CHANGE 3 variant sweeps on dev_tune + selection rules
+│   │   ├── votestats.py     `lsg chg3 votestats`: vote weights as likelihood ratios (CHANGE 3 Part C)
 │   │   └── figures.py       the GT panel of the top-down figure (M8)
 │   ├── viz/                 PICTURES (M8; reads only method inputs / outputs)
 │   │   ├── topdown.py       before / after top-down PNG, nodes coloured by state
@@ -292,6 +293,11 @@ The rule: no imports from `oracle/` / `eval/`, and no rescan annotations. Inputs
 - `pair_counts(meta, objects_of, exclude_refs)`: per train (reference, rescan) pair, how many things / anchors were removed, moved (`rigid`) and added, from 3RScan.json + 3DSSG `objects.json` only (no downloads). It reads train rescans' change lists, so it lives in `eval/`.
 - `select_dev_tune(...)`: the 20 rooms with the most changes (best rescan each) plus 10 random rooms (seeded); the CLI appends the 3 `dev_train` pairs and writes `splits/dev_tune.txt` and `splits/download_tier3.txt` (scans not yet downloaded).
 - Settings in `splits.dev_tune` of `configs/default.yaml`. All tuning happens on `dev_tune` (CLAUDE.md hard rule 4); `dev_train` stays the 3-pair regression set.
+
+### `eval/votestats.py` — CHANGE 3 Part C (`uv run lsg chg3 votestats`, `uv run lsg chg3 pdel`)
+- `node_vote_weights`: from a run's `details/`, the share of seen / free / free-like votes of every GT-unchanged and every GT-removed object (each object counts once), turned into the weights L_hit, L_miss, L_free_like as likelihood ratios, with bootstrap intervals; too few votes of a kind → the fallback 2.5.
+- `candidate_vote_weights`: the same for perception candidates' cluster votes, explained vs unexplained candidates.
+- The cluster votes themselves are computed in `perception/source.py` (`cluster_votes`, `_history`) from the logged voxel hits and see-through events (`VoxelEvidence.free_log`).
 
 ### `eval/movediag.py` and `eval/chg3_checks.py` — CHANGE 3 Part A (`uv run lsg movediag`, `uv run lsg chg3 parta`)
 - `movediag`: reads a run's `details/` and counts every node predicted `moved` by its GT status, the evidence at its old place (`net_seen`, `free_ev`, `unobserved`, `mixed`; the same `old_place_class` the method uses), whether it took its own instance or another object's, and how far it moved.
