@@ -115,3 +115,25 @@ def test_part_n_explain_rule():
     assert sel["verdict"]["d15"]["pass"] is False and sel["winner"] == "d10"
     rows["d10"] = row(0.485, 0.083)  # within 0.5 pt of off -> d10 first in the tie order
     assert select_explain(rows, crit, ["d10", "ref_off", "d15"])["winner"] == "d10"
+
+
+def test_part_n_noise_rule():
+    """CHANGE 3 Part N (N5): best curve F1 among variants passing the change-metric and hit guards."""
+    from lsg.eval.chg3_checks import select_noise
+
+    def row(mf1, rf1, fd, hn, hm):
+        return {"perception": {"moved_F1": mf1, "removed_F1": rf1, "false_deletion_rate": fd,
+                               "diag_cand_new_hit": hn, "diag_cand_moved_hit": hm}, "oracle": {}}  # fmt: skip
+
+    def curve(f1, t):
+        return {"best": {"f1": f1, "p_new_min": t}}
+
+    rows = {"base": row(0.47, 0.40, 0.04, 120, 58), "app": row(0.47, 0.40, 0.04, 120, 58),
+            "edge": row(0.47, 0.40, 0.04, 110, 58), "all": row(0.47, 0.38, 0.04, 119, 58)}  # fmt: skip
+    curves = {"base": curve(0.072, 0.5175), "app": curve(0.080, 0.5175), "edge": curve(0.09, 0.51),
+              "all": curve(0.10, 0.52)}  # fmt: skip
+    crit = {"f1_drop": 0.01, "fd_up": 0.01, "hits_drop": 5, "tie_f1": 0.005}
+    sel = select_noise(rows, curves, crit, ["base", "app", "edge", "all"])
+    assert not sel["verdict"]["edge"]["pass"]  # loses 10 hits
+    assert not sel["verdict"]["all"]["pass"]  # removed F1 -2 pt
+    assert sel["winner"] == "app" and sel["p_new_min"] == 0.5175

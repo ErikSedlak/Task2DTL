@@ -398,6 +398,16 @@ def _cmd_chg3_partn_ref(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_chg3_partn_noise(args: argparse.Namespace) -> int:
+    """`lsg chg3 partn-noise`: CHANGE 3 Part N (N5) noise-rejection variants + the pre-written selection."""
+    from lsg.eval.chg3_checks import format_part_n_noise, run_part_n_noise
+
+    res = run_part_n_noise(load_config(args.config), args.run_id, args.split, args.workers)
+    print(format_part_n_noise(res))
+    print(f"metrics: {res['metrics_path']}")
+    return 0
+
+
 def _cmd_chg3_idstats(args: argparse.Namespace) -> int:
     """`lsg chg3 idstats --run <dir>`: identity-check similarity of same / different pairs (CHANGE 3 Part N)."""
     from pathlib import Path
@@ -597,6 +607,12 @@ def main(argv: list[str] | None = None) -> int:
     pnr.add_argument("--workers", type=int, default=None)
     pnr.add_argument("--config", default=None)
     pnr.set_defaults(func=_cmd_chg3_partn_ref)
+    pnn = c3s.add_parser("partn-noise", help="Part N (N5): noise rejection / thin-object confidence variants + selection")
+    pnn.add_argument("--run-id", default="chg3_partN_noise")
+    pnn.add_argument("--split", default="dev_tune", help="tuning split only (hard rule 4)")
+    pnn.add_argument("--workers", type=int, default=None)
+    pnn.add_argument("--config", default=None)
+    pnn.set_defaults(func=_cmd_chg3_partn_noise)
     ids = c3s.add_parser("idstats", help="Part N: identity-check similarity of same / different pairs from details/")
     ids.add_argument("--run", required=True, help="run directory (or id under outputs/) with details/<mode>/")
     ids.add_argument("--modes", default="oracle,perception")

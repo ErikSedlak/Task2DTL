@@ -350,6 +350,17 @@ chg3:                      # CHANGE 3 dev_tune sweeps (`lsg chg3 parta`; docs/CH
         sam: {perception.segment.method: sam}
         sam_add: {perception.segment.method: sam, perception.relaxed.merge: add}
       criterion: {f1_drop: 0.01, tie_objects: 2}
+    noise:                 # N5 (`lsg chg3 partn-noise`): each variant at p_new_min 0, then its own best threshold
+      common: {confidence.candidates.p_new_min: 0.0}
+      variants:            # list order = simplicity order (ties)
+        base: {}
+        app: {confidence.candidates.track.appearance: true}
+        edge: {perception.noise.edge.enabled: true}
+        dscale: {perception.noise.dscale.enabled: true}
+        planes: {perception.noise.planes.enabled: true}
+        all: {confidence.candidates.track.appearance: true, perception.noise.edge.enabled: true,
+              perception.noise.dscale.enabled: true, perception.noise.planes.enabled: true}
+      criterion: {f1_drop: 0.01, fd_up: 0.01, hits_drop: 5, tie_f1: 0.005}
     explain_ref:           # N2 (`lsg chg3 partn-ref --seg <N1 winner>`), at p_new_min 0 like N1
       variants:
         ref_off: {association.explain_ref.enabled: false}

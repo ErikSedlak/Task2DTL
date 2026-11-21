@@ -270,3 +270,83 @@ def run_part_n_explain(cfg: dict[str, Any], seg: str, run_id: str = "chg3_partN_
            **sel, "metrics_paths": paths}  # fmt: skip
     path = write_metrics(outputs_root(cfg) / run_id / seg, res, cfg, extra={"wall_time_s": time.time() - t0})
     return {**res, "metrics_path": str(path)}
+
+
+# --------------------------------------------------------------------------------------------
+# CHANGE 3 Part N (N5): noise rejection + thin-object confidence, each variant at its best threshold
+# --------------------------------------------------------------------------------------------
+
+
+def best_threshold(cfg: dict[str, Any], run_dir) -> dict[str, Any]:
+    """Labelled perception new F1 over every distinct new-node confidence of a run (`p_new_min` 0, exact);
+    the best (ties -> lower threshold), as the Part C / N4 rule."""
+    import json
+    from pathlib import Path
+
+    from lsg.eval.newcurve import new_curve
+
+    vals = {0.0}
+    for f in Path(run_dir, "graphs", "perception").glob("*.json"):
+        for n in json.loads(f.read_text(encoding="utf-8"))["nodes"]:
+            if n.get("state") == "new" and n.get("confidence") is not None:
+                vals.add(round(float(n["confidence"]), 6))
+    rows = new_curve(cfg, run_dir, sorted(vals))["curve"]
+    for r in rows:
+        r["f1"] = 2 * r["tp"] / (2 * r["tp"] + r["fp"] + r["fn"]) if (2 * r["tp"] + r["fp"] + r["fn"]) else 0.0
+    best = max(rows, key=lambda r: (round(r["f1"], 9), -r["p_new_min"]))
+    return {"best": best, "n_thresholds": len(rows)}
+
+
+def select_noise(rows: Mapping[str, Mapping[str, Mapping[str, Any]]], curves: Mapping[str, Mapping[str, Any]],
+                 crit: Mapping[str, Any], order: list[str], base: str = "base") -> dict[str, Any]:  # fmt: skip
+    """Pre-written N5 rule (DECISIONS 2026-11-21): guards (perception) moved F1 and removed F1 >= base - `f1_drop`,
+    false deletion <= base + `fd_up`, class-agnostic candidate hits (new + moved) >= base - `hits_drop`; primary =
+    best labelled new F1 on the variant's own curve; ties within `tie_f1` -> earlier in `order`."""
+    b = rows[base]["perception"]
+    verdict: dict[str, Any] = {}
+    for name in order:
+        if name not in rows:
+            continue
+        p = rows[name]["perception"]
+        hits, bh = p["diag_cand_new_hit"] + p["diag_cand_moved_hit"], b["diag_cand_new_hit"] + b["diag_cand_moved_hit"]
+        ok = name == base or ((p["moved_F1"] or 0) >= (b["moved_F1"] or 0) - crit["f1_drop"] - 1e-12
+                              and (p["removed_F1"] or 0) >= (b["removed_F1"] or 0) - crit["f1_drop"] - 1e-12
+                              and (p["false_deletion_rate"] or 0) <= (b["false_deletion_rate"] or 0) + crit["fd_up"] + 1e-12
+                              and hits >= bh - crit["hits_drop"])  # fmt: skip
+        bt = curves[name]["best"]
+        verdict[name] = {"pass": bool(ok), "best_new_F1": bt["f1"], "p_new_min": bt["p_new_min"], "hits": int(hits)}
+    passing = [n for n in order if verdict.get(n, {}).get("pass")]
+    top = max(verdict[n]["best_new_F1"] for n in passing)
+    winner = next(n for n in passing if verdict[n]["best_new_F1"] >= top - crit["tie_f1"] - 1e-12)
+    return {"verdict": verdict, "winner": winner, "p_new_min": verdict[winner]["p_new_min"]}
+
+
+def run_part_n_noise(cfg: dict[str, Any], run_id: str = "chg3_partN_noise", split: str = "dev_tune",
+                     workers: int | None = None) -> dict[str, Any]:  # fmt: skip
+    """The N5 variants (`chg3.part_n.noise`) at `p_new_min` 0, each one's curve, + the selection (resumable)."""
+    t0 = time.time()
+    pc = cfg["chg3"]["part_n"]["noise"]
+    common = dict(pc.get("common") or {})
+    variants = {n: {**common, **(ov or {})} for n, ov in pc["variants"].items()}
+    rows, paths = run_variants(cfg, variants, run_id, split, workers, details=True, resume=True)
+    curves = {}
+    for n in rows:
+        c = apply_overrides(cfg, variants[n])
+        curves[n] = best_threshold(c, outputs_root(cfg) / run_id / n)
+    sel = select_noise(rows, curves, pc["criterion"], list(pc["variants"]))
+    res = {"split": split, "variants": variants, "rows": rows, "curves": curves, "criterion": dict(pc["criterion"]),
+           **sel, "metrics_paths": paths}  # fmt: skip
+    path = write_metrics(outputs_root(cfg) / run_id, res, cfg, extra={"wall_time_s": time.time() - t0})
+    return {**res, "metrics_path": str(path)}
+
+
+def format_part_n_noise(res: Mapping[str, Any]) -> str:
+    """Variant table (perception at p_new_min 0) + each variant's best threshold, verdicts, winner."""
+    lines = [format_part_n_segment({"rows": res["rows"], "verdict": {}, "winner": None})]
+    lines[0] = "\n".join(lines[0].split("\n")[:-1])
+    for n, v in res["verdict"].items():
+        b = res["curves"][n]["best"]
+        lines.append(f"{n:<8} pass={v['pass']}  hits {v['hits']}  best p_new_min {b['p_new_min']:.6f}: new P / R "
+                     f"{100 * (b['precision'] or 0):.1f} / {100 * (b['recall'] or 0):.1f}, F1 {100 * b['f1']:.2f} ({b['n_new']} nodes)")  # fmt: skip
+    lines.append(f"winner: {res['winner']} at p_new_min {res['p_new_min']}")
+    return "\n".join(lines)
