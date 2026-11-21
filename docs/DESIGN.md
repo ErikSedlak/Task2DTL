@@ -196,6 +196,7 @@ while read id; do for t in mesh.refined.v2.obj mesh.refined.mtl mesh.refined_0.p
   - oracle mode: the shuffled oracle instance id, written only for evaluation mapping and never read by the method;
   - perception mode: the candidate id `c<k>`.
 - **Snapshots** are written every N processed frames *(config `online.snapshot_every`)* and after the last frame, to `outputs/<run_id>/snapshots/<mode>/<ref>_<rescan>/frame_XXXXXX.json` (M3). They use the same schema with `meta.frame_idx` set and `meta.tentative: true`. Tentative states are vote-only (`removed` with ≥ k_free counted free votes, `unchanged` if confirmed in place, else `unknown`), because association is deferred to the end.
+- **CHANGE 3 Part B (2026-11-21), default: the graph is maintained during the walk.** With snapshots on (`lsg run`, `lsg anytime`) the method itself (association, ICP moved test, states, relations, confidence) runs at every snapshot on the current state: `ObsSource.peek()` returns the instances observed so far without ending the walk (oracle: stable seeded tokens; perception: track ids `t<k>` that keep a cluster's identity by voxel IoU ≥ 0.3, a merge keeps the older id; CLIP labels reused per track unless it grew by > 25 %). States in snapshots stay tentative; the final graph is the end-of-walk run and is written as the last snapshot (`reference.json` holds the start). **Online alignment** (`alignment.online`): `T_align` is one cumulative ICP estimate from the frames seen so far (every 20 processed frames, reference structure as target, ≥ 3 cloud frames, rejection 20 cm / 5°, degeneracy check); the raw 3RScan transform is used until the first accepted estimate, so no future frame is used. Erik chose it as default although it costs perception (dev_tune moved F1 46.9 → 43.0, false deletion 4.1 → 5.6, new F1 7.7 → 3.3); the offline pre-pass is row `FULL-offlinealign`.
 
 ## 5. Ground truth (only in `src/lsg/eval/`)
 
@@ -348,7 +349,7 @@ CLI:
 - `uv run lsg viz topdown --run <dir> --pair R S [--mode …] [--gt]` ✅, `uv run lsg viz rerun --run <dir> --pair R S [--images] [--spawn]` ✅ (M8); `lsg run --snapshot-every N` ✅;
 - `uv run lsg audit sample [--run-id m8_audit] [--from-run …] [--n 10]` ✅, `uv run lsg audit summarize` ✅ (M8, §7.4);
 - `uv run lsg splits textures` ✅; `uv run lsg splits devtune [--dry-run]` ✅ (CHANGE 3: `splits/dev_tune.txt` + `download_tier3.txt`, `eval.devtune`);
-- `uv run lsg movediag --run <dir> [--json]` ✅ (predicted moves by GT status × old-place evidence × own / other instance × distance, from a run's `details/`); `uv run lsg chg3 parta [--run-id …]` ✅ (CHANGE 3 Part A variants on dev_tune + the pre-written selection rule); `uv run lsg chg3 votestats --run <details run>` ✅ (vote weights as likelihood ratios, nodes and candidates); `uv run lsg chg3 pdel` ✅ (p_del sweep + selection); `uv run lsg sam cache --split <split>` ✅ (SAM label maps per processed frame, CHANGE 3 Part N); `uv run lsg chg3 partn-seg [--only …]` ✅ / `partn-ref --seg <variant>` ✅ / `idstats --run <details run>` ✅ (Part N variants + pre-written selections, identity statistics);
+- `uv run lsg movediag --run <dir> [--json]` ✅ (predicted moves by GT status × old-place evidence × own / other instance × distance, from a run's `details/`); `uv run lsg chg3 parta [--run-id …]` ✅ (CHANGE 3 Part A variants on dev_tune + the pre-written selection rule); `uv run lsg chg3 votestats --run <details run>` ✅ (vote weights as likelihood ratios, nodes and candidates); `uv run lsg chg3 pdel` ✅ (p_del sweep + selection); `uv run lsg sam cache --split <split>` ✅ (SAM label maps per processed frame, CHANGE 3 Part N); `uv run lsg anytime --split <split>` ✅ (method runs at every snapshot, anytime curve + stability, CHANGE 3 Part B); `uv run lsg chg3 partb-align` ✅ (offline vs online alignment variants + rule); `uv run lsg chg3 partn-noise` ✅ (N5); `uv run lsg chg3 partn-seg [--only …]` ✅ / `partn-ref --seg <variant>` ✅ / `idstats --run <details run>` ✅ (Part N variants + pre-written selections, identity statistics);
 - `uv run lsg graph --scan R --mode gt|geometric [--out f.json]` ✅;
 - `uv run lsg m0` ✅, `uv run lsg m1` ✅, `uv run lsg m4 [--no-sweep]` ✅, `uv run lsg m5 [--no-sweep] [--no-val]` ✅, `uv run lsg m6 [--no-sweep] [--no-val] [--no-objply]` ✅;
 - `--method B0|B1|B2|FULL` ✅ (FULL: M6; appearance on / off via `appearance.enabled`).
@@ -392,6 +393,9 @@ Every table reports **two rows per method**, `oracle` (upper bound) and `percept
 - 100 / 50 / 25 / 10% of frames as **one contiguous chunk** with a random start (3 seeds), mean ± sd. A prefix is the special case start = 0.
 - Both modes see only the chunk: the oracle sees only instances visible in the chunk and only their visible points; perception accumulates residuals only from the chunk. The ICP alignment pre-pass also uses only the chunk's frames.
 
+### 7.3b Anytime evaluation (CHANGE 3 Part B)
+`lsg anytime` scores every snapshot graph against the pair's GT. Curve: for walk fractions 0, 0.1, …, 1 each pair contributes its latest snapshot at or before the fraction (fraction 0 = the reference graph, all `unknown`), micro-averaged with bootstrap CIs like §7.1. Stability: state flips per reference node across snapshots and the settling fraction (earliest fraction after which the state equals the final one), per GT status. Output `outputs/<run>/anytime/` (metrics.json, anytime.png).
+
 ### 7.4 Ground-truth audit
 
 - Manually inspect 30 false positives (moved, removed and new) on val, in both modes, using the crops from `audit_sample`.
@@ -427,6 +431,7 @@ Ablations (M7: all ✅ as rows of `eval.ablations.registry`, run by `lsg m7`; ea
 - old-place gate off (`FULL-moveev`, CHANGE 3 Part A, §3 Moved);
 - equal hand-set vote weights (`FULL-learnedL`, CHANGE 3 Part C) and the CHANGE 2 candidate confidence (`FULL-candtrack`);
 - candidate voxels linked by space only (`FULL-segment`, CHANGE 3 Part N co-segmentation off);
+- thin-object candidates without confidence (`FULL-appconf`, CHANGE 3 Part N5); the offline alignment pre-pass (`FULL-offlinealign`, CHANGE 3 Part B);
 - τ_free sweep (0.05 / 0.10 / 0.20 / 0.30 m; 0.15 = FULL; `appearance.thin_max_extent` stays 0.15 m);
 - relations on the relchange set: B2, FULL, `FULL+follow`, `FULL-keepparent`;
 - *optional, not done:* + DINOv2 embedding term in association (old B3; cut-list item 1).

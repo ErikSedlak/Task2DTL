@@ -62,6 +62,7 @@ Task2/
 │   │   ├── movediag.py      `lsg movediag`: predicted moves split by old-place evidence (CHANGE 3 Part A)
 │   │   ├── chg3_checks.py   `lsg chg3 parta` / `pdel`: CHANGE 3 variant sweeps on dev_tune + selection rules
 │   │   ├── votestats.py     `lsg chg3 votestats`: vote weights as likelihood ratios (CHANGE 3 Part C)
+│   │   ├── anytime.py       `lsg anytime`: metrics over the walk from snapshot graphs, state flips (CHANGE 3 Part B)
 │   │   ├── identitystats.py `lsg chg3 idstats`: same / different pair similarities (CHANGE 3 Part N)
 │   │   └── figures.py       the GT panel of the top-down figure (M8)
 │   ├── viz/                 PICTURES (M8; reads only method inputs / outputs)
@@ -250,6 +251,7 @@ The rule: no imports from `oracle/` / `eval/`, and no rescan annotations. Inputs
 - `thin_votes(...)` (M6): for thin objects (thinner than 15 cm), depth agrees whether they are there or not, so their vote comes from the appearance check instead: photo still matches the texture → `seen`, clearly different → `free_like`.
 
 ### `change/online.py` — the online loop
+- CHANGE 3 Part B: with `on_snapshot` (given by the eval harness) the loop calls back every `online.snapshot_every` frames with `source.peek()`, a copy of the votes and the views so far; the harness runs the method on that state, saves and scores the snapshot. With `alignment.online` the loop feeds `geom.align.OnlineAligner` and swaps in its accepted `T_align` estimates (sources read `seq_info.T_align` every frame).
 - `run_online(...)`: walks the processed frames in time order. Per frame it renders the reference, casts and counts votes, and hands the frame plus the reference render to the observation source. At the end it collects the observations. Returns an `OnlineResult` (observations, votes, snapshot files, timings).
 - Snapshots (`tentative_graph`) are graph JSONs written every 20 processed frames with *tentative* states: `removed` once there is enough free evidence, `unchanged` once confirmed in place, else `unknown`. The real decision is only made at the end (deferred commitment).
 

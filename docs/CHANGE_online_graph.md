@@ -1,6 +1,6 @@
 # CHANGE 3 — tuning set, move evidence, incremental graph, confidence policy (proposal, 2026-11-20)
 
-**Status (2026-11-20): all questions answered (§8); Parts 0, A, C and N done; next Part B.** Builds on CHANGE 1 + 2,
+**Status (2026-11-20): all questions answered (§8); Parts 0, A, B, C and N done; next Part D.** Builds on CHANGE 1 + 2,
 which Erik fixed as the **final method** (2026-11-20). Comes from a logic review of the whole solution (chat,
 2026-11-20). Nothing here changes DESIGN.md before sign-off.
 
@@ -101,6 +101,8 @@ votes at the old place can no longer exist for a moved node, because the rule ab
 old place was seen. Report moved R by displacement bucket to show that.
 
 ## 4. Part B — incremental graph during the walk
+
+**Implemented 2026-11-21** (DECISIONS "CHANGE 3 Part B"). The method runs at every snapshot on the current state (`peek()`, track ids, cached CLIP labels); the final graph is unchanged by the snapshots (dev_tune: 0 differences; wall time 95 → 221 s with snapshots). Anytime curve on dev_tune at the final default (online alignment), walk fraction 0.3 / 0.5 / 1.0: oracle moved F1 31 / 51 / 57, removed R 6 / 12 / 27, new R 16 / 39 / 59; perception moved F1 14 / 28 / 43, removed R 10 / 17 / 34. 70 % (oracle) / 57 % (perception) of reference nodes change their tentative state at least once; median settling fraction: removed 0.28 / 0.36, moved 0.37 / 0.49, unchanged 0.43 / 0.33. Online alignment (`online_struct`, the per-frame variant dropped by Erik) won the pre-written rule but exceeded the stop limit in perception (moved F1 −3.9 pt, false deletion +1.5 pt; 7 of 33 pairs never get an accepted estimate); Erik made it the default anyway. `lsg viz rerun` shows moves and new nodes mid-walk.
 
 **Idea.** Every `online.snapshot_every` processed frames (20 now; ≈ 10–20 per pair) the method runs on the
 *current* state and writes a full tentative graph: association, ICP, states including `moved` and `new`,
@@ -239,7 +241,7 @@ Original questions:
 - [x] Part C: vote statistics (`lsg chg3 votestats`), learned weights, `p_del` sweep (`lsg chg3 pdel`), cluster-vote
       candidate confidence, `p_new_min` from the curve, rows `FULL-learnedL` / `FULL-candtrack` (2026-11-20)
 - [x] Part N (new objects): diagnosis + identity audit, class-agnostic new P / R, co-segmentation (geometric default, SAM variant), explain-away (off), identity check (dropped), `p_new_min` 0.517493, row `FULL-segment` (2026-11-21)
-- [ ] Part B: `peek()`, candidate tracks, snapshot method runs, CLIP relabel rule, online alignment (per §8.4),
+- [x] Part B (2026-11-21): `peek()`, candidate tracks, snapshot method runs, CLIP relabel rule, anytime curve + stability (`lsg anytime`), online alignment (`online_struct`, Erik), rows `FULL-offlinealign`, viz; was:
       anytime curve, viz
 - [ ] Part D: class-agnostic new in the tables; audit on the final method
 - [ ] DECISIONS, DESIGN (§3, §6.4, §6.7, §6.9, §6.11, §7), CODE_STRUCTURE, STATUS, after sign-off
