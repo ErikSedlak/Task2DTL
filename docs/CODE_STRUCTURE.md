@@ -64,6 +64,7 @@ Task2/
 │   │   ├── votestats.py     `lsg chg3 votestats`: vote weights as likelihood ratios (CHANGE 3 Part C)
 │   │   ├── anytime.py       `lsg anytime`: metrics over the walk from snapshot graphs, state flips (CHANGE 3 Part B)
 │   │   ├── identitystats.py `lsg chg3 idstats`: same / different pair similarities (CHANGE 3 Part N)
+│   │   ├── newfunnel.py     `lsg newfunnel`: where GT new objects are lost in perception (CHANGE 3 Part E)
 │   │   └── figures.py       the GT panel of the top-down figure (M8)
 │   ├── viz/                 PICTURES (M8; reads only method inputs / outputs)
 │   │   ├── topdown.py       before / after top-down PNG, nodes coloured by state
@@ -76,6 +77,8 @@ Task2/
 │       ├── cluster.py       groups kept voxels into candidates; door swing-region filter
 │       ├── segment.py       per-frame image segments + co-segmentation clustering (CHANGE 3 Part N)
 │       ├── sam_cache.py     `lsg sam cache`: SAM label maps per frame (Part N variant)
+│       ├── detect_cache.py  `lsg detect cache`: Grounding DINO + SAM 2 detections per frame (CHANGE 3 Part E)
+│       ├── detector.py      detections -> 3D tracks with a newness score (Part E, row FULL+detector)
 │       ├── identity.py      appearance similarity of node vs observation (Part N, disabled)
 │       ├── labeler.py       CLIP zero-shot labels from colour crops (cached)
 │       ├── appearance.py    rendered texture vs photo, DINOv2 patch features (cached) (M6)
@@ -304,6 +307,11 @@ The rule: no imports from `oracle/` / `eval/`, and no rescan annotations. Inputs
 - `segment_frame`: one frame's residual pixels form a graph of neighbouring pixels; it is cut where the depth jumps and on concave creases (`normals_from_depth`, `concave_band`), and its connected parts are the frame's segments.
 - `cosegment_cluster`: kept voxels next to each other are joined only if no frame that sees both puts them in different segments; voxels never seen in one frame are not joined across gaps. Used by both candidate tiers in `source.py` when `perception.segment.method` is `geometric` or `sam` (`SamSegments` reads the `lsg sam cache` label maps).
 - `change/association.py`: `explained_by_reference` (N2) and `identity_gate` (N3, with `perception/identity.py`) are implemented but disabled by default.
+
+### `perception/detect_cache.py`, `perception/detector.py` — CHANGE 3 Part E (detector, off by default)
+- `DetectorRunner.detect`: Grounding DINO on the upright colour frame with the vocabulary as one prompt (`fit_prompts`, `ordered_prompts`: reference labels first), a score per label from the token logits (`label_scores`), NMS, then SAM 2 masks from the boxes at depth resolution; `cache_rescan` writes one `.npz` per frame and `done.json`.
+- `DetectorTracks`: per frame, each detection's mask becomes points (erosion, depth outliers, structure filter), 4 cm voxels; detections join the track that holds most of their voxels, tracks that overlap are merged; `instances()` gives points, masks, views, summed label scores and `newness`.
+- `PerceptionSource` with `perception.detector.enabled` uses them (`mode: replace | union`); `change.baselines.emits_new` gates detector instances by newness. `eval/chg3_checks.run_part_e` is the dev_tune sweep (`lsg chg3 parte`).
 
 ### `eval/votestats.py` — CHANGE 3 Part C (`uv run lsg chg3 votestats`, `uv run lsg chg3 pdel`)
 - `node_vote_weights`: from a run's `details/`, the share of seen / free / free-like votes of every GT-unchanged and every GT-removed object (each object counts once), turned into the weights L_hit, L_miss, L_free_like as likelihood ratios, with bootstrap intervals; too few votes of a kind → the fallback 2.5.

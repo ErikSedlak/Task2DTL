@@ -1,6 +1,6 @@
 # CHANGE 3 — tuning set, move evidence, incremental graph, confidence policy (proposal, 2026-11-20)
 
-**Status (2026-11-20): all questions answered (§8); Parts 0, A, B, C and N done; next Part D.** Builds on CHANGE 1 + 2,
+**Status (2026-11-20): all questions answered (§8); Parts 0, A, B, C, N and E done; next Part D.** Builds on CHANGE 1 + 2,
 which Erik fixed as the **final method** (2026-11-20). Comes from a logic review of the whole solution (chat,
 2026-11-20). Nothing here changes DESIGN.md before sign-off.
 
@@ -185,6 +185,14 @@ it (reference position, or the new position for `moved` and `new`). One log-odds
 
 dev_tune, Part C → Part N, perception: new P / R / F1 5.6 / 7.0 / 6.2 → **12.2 / 5.6 / 7.7** (class-agnostic 18.4 / 8.4 / 11.5), removed P / R 48.8 / 24.1 → 50.0 / **33.7**, false deletion 3.6 → 4.1, moved F1 and false move unchanged; oracle unchanged. The candidate ceiling is far higher (new R 26.5 at `p_new_min` 0), but no available confidence signal separates real from false candidates: the next lever is rejecting residual noise (77 % of false candidates).
 
+## 5c. Part E — open-vocabulary detector (stretch goal; added 2026-11-21 at Erik's request)
+
+**Implemented 2026-11-21** (DECISIONS "CHANGE 3 Part E"), **off by its pre-written rule**; ablation row `FULL+detector`.
+
+- *Why:* the stopped val run (FULL, `outputs/chg3_final_predetector`) found 6 of 171 GT new objects in perception; its funnel (`lsg newfunnel`) showed 62 residual candidates per pair, 29 % explained by any GT instance, and no signal separating real from false ones. Prompted by val, decided on dev_tune only (REPORT §8).
+- *What:* `lsg detect cache` runs Grounding DINO tiny (one pass, the pair's vocabulary as prompts) and SAM 2.1 small (masks from the boxes) on every 2nd processed frame; `perception/detector.py` fuses the detections into 3D tracks (voxel overlap, decorrelated views, summed label scores). A track becomes an observation `d<k>`; it becomes a `new` node only if its **newness** (share of voxels off the reference mesh) is >= 0.5. Unchanged objects are handled by absorption / association, as in oracle mode.
+- *dev_tune result (FULL, perception):* new P / R / F1 5.7 / 2.3 / 3.3 → **13.7 / 18.1 / 15.6** (39 instead of 5 correct new objects; agnostic R 5.1 → 25.1), moved F1 43.0 → 46.0, false deletion 5.6 → 4.1, but **removed F1 40.9 → 32.5** (28 → 20 GT-removed objects found; guard 2 pt). The rule keeps the residual candidates (Erik: the rule decides). Detector instances near an emptied place are associated to the removed node.
+
 ## 6. Part D — reporting
 
 - New P / R are reported twice: **labelled** (§5 rule, as now) and **class-agnostic** (geometry only), so the
@@ -243,6 +251,7 @@ Original questions:
 - [x] Part N (new objects): diagnosis + identity audit, class-agnostic new P / R, co-segmentation (geometric default, SAM variant), explain-away (off), identity check (dropped), `p_new_min` 0.517493, row `FULL-segment` (2026-11-21)
 - [x] Part B (2026-11-21): `peek()`, candidate tracks, snapshot method runs, CLIP relabel rule, anytime curve + stability (`lsg anytime`), online alignment (`online_struct`, Erik), rows `FULL-offlinealign`, viz; was:
       anytime curve, viz
-- [ ] Part D: class-agnostic new in the tables; audit on the final method
+- [x] Part E (2026-11-21): Grounding DINO + SAM 2 detection cache, detector tracks, newness gate, `lsg chg3 parte` (rule: residual stays), row `FULL+detector`, `lsg newfunnel`
+- [ ] Part D: class-agnostic new in the tables (code done, c4bd661); audit on the final method
 - [ ] DECISIONS, DESIGN (§3, §6.4, §6.7, §6.9, §6.11, §7), CODE_STRUCTURE, STATUS, after sign-off
 - [ ] **Erik:** final `lsg m7` on val; then REPORT / README / slides / audit refresh
