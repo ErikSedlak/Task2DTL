@@ -230,7 +230,8 @@ def format_part_n_segment(res: Mapping[str, Any]) -> str:
                 cells.append(f"{'-' if x is None else (f'{100 * x:.1f}' if pct else str(int(x))):>9}")
             lines.append(f"{name:<14} {m:<11}" + "".join(cells))
     for n, v in res.get("verdict", {}).items():
-        lines.append(f"{n:<14} pass={v['pass']}  hits(new+moved) {v['hits']}")
+        score = f"hits(new+moved) {v['hits']}" if "hits" in v else f"agnostic new F1 {100 * v['new_ag_F1']:.1f}"
+        lines.append(f"{n:<14} pass={v['pass']}  {score}")
     lines.append(f"winner: {res.get('winner')}" + (f"  (missing: {res['missing']})" if res.get("missing") else ""))
     return "\n".join(lines)
 
