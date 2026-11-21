@@ -116,6 +116,7 @@ class PerceptionSource:
         # CHANGE 3 Part C: candidate confidence from cluster-level votes over the cluster's voxel history
         tc = cc.get("track") or {}
         self.track = self.candconf and self.free_votes and bool(tc.get("enabled", False))
+        self.app_conf = bool(tc.get("appearance", False))  # CHANGE 3 Part N: cluster votes for thin-object candidates
         self._poses: dict[int, np.ndarray] = {}
         self._hist_trees: dict[tuple[int, int], Any] = {}
         for v in (self.vox, self.vox_large):
@@ -297,8 +298,13 @@ class PerceptionSource:
         crops = self._crops(masks) if self.with_crops else [[] for _ in all_c]
         k_top = int(self.pc["clip"]["topk"])
         out = []
-        conf += [None] * len(app)
-        votes += [None] * len(app)
+        if self.track and self.app_conf:  # CHANGE 3 Part N: thin-object candidates face the same threshold
+            app_votes = [self.cluster_votes(c, 2) for c in app]
+            conf += [self._confidence(c, 2, v) for c, v in zip(app, app_votes)]
+            votes += app_votes
+        else:
+            conf += [None] * len(app)
+            votes += [None] * len(app)
         for k, (c, pm, cr, kind, p, cv) in enumerate(zip(all_c, masks, crops, kinds, conf, votes)):
             topk = self.labeler.topk(cr, k_top) if (self.labeler is not None and cr) else []
             self.stats["labelled"] += bool(topk)
@@ -332,6 +338,8 @@ class PerceptionSource:
         """
         if not self.candconf:
             return None
+        if grid == 2 and votes is None:
+            return None
         if self.track:
             tc = self.cfg["confidence"]["candidates"]["track"]
             s, f = votes if votes is not None else self.cluster_votes(c, grid)
@@ -342,14 +350,18 @@ class PerceptionSource:
             m = float(np.median(vox.logodds(c.voxels)))
         return round(float(1.0 / (1.0 + np.exp(-m))), 6)
 
+    def _grid_vox(self, grid: int) -> VoxelEvidence:
+        """Voxel grid by index: 0 strict depth, 1 lenient depth, 2 appearance (thin objects, CHANGE 3 Part N)."""
+        return (self.vox, self.vox_large, self.vox_app)[grid]
+
     def _history(self, c: Candidate, grid: int) -> np.ndarray:
         """Bool mask over the grid's voxels: the cluster's voxels plus every tracked voxel of that grid
         within the linking distance of them (also those below `l_keep`, e.g. seen through)."""
         from scipy.spatial import cKDTree
 
-        vox = self.vox_large if grid else self.vox
+        vox = self._grid_vox(grid)
         n = len(vox)
-        link = int(self.pc["relaxed"]["link_voxels_large"]) if grid else int(self.pc["link_voxels"])
+        link = int(self.pc["relaxed"]["link_voxels_large"]) if grid == 1 else int(self.pc["link_voxels"])
         key = (grid, n)
         if key not in self._hist_trees:
             self._hist_trees = {k: v for k, v in self._hist_trees.items() if k[0] != grid}
@@ -371,8 +383,8 @@ class PerceptionSource:
         only from a new viewpoint (the `decorrelation` rule: moved >= d_dec or turned >= theta_dec).
         """
         tc = self.cfg["confidence"]["candidates"]["track"]
-        vox = self.vox_large if grid else self.vox
-        frames = self._frames_large if grid else self._frames
+        vox = self._grid_vox(grid)
+        frames = (self._frames, self._frames_large, self._frames_app)[grid]
         H = self._history(c, grid)
         hf: dict[int, list[int]] = {}
         for fidx, _pix, vidx in frames:

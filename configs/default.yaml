@@ -130,6 +130,12 @@ perception:                # PerceptionSource, DESIGN §3 candidate + §6.6 (tun
     large_min_extent: 0.0  # [m] ... and a longest AABB side of at least this (0 = no extent rule)
   link_voxels: 2          # voxels within this Chebyshev distance [voxels] are connected (1 = 26-conn.)
   min_voxels: 5            # drop clusters with fewer kept voxels (step 5)
+  noise:                   # CHANGE 3 Part N (N5): residual noise rejection (perception/residual.py); values fixed before the
+                           # dev_tune sweep, switches set by its pre-written rule (DECISIONS 2026-11-21)
+    edge: {enabled: false, abs: 0.05, rel: 0.03}     # drop residual pixels next to a depth jump > abs + rel * z (flying pixels)
+    dscale: {enabled: false, surf_rel: 0.015}        # surf_dist grows by surf_rel [m per m of depth] (3 m: 5 -> 9.5 cm)
+    planes: {enabled: false, margin: 0.30, max_rms: 0.03, min_vertices: 200}   # walls / ceiling / doors (struct_dist) and
+                           # floor (surf_dist) as fitted planes over their extent + margin [m] (mesh holes); planar if rms <= max_rms
   segment:                 # CHANGE 3 Part N (N1): co-segmentation; adjacent voxels link only if the frames seeing both
                            # mostly put them in one image segment (perception/segment.py)
     method: geometric      # none (link by space only, as before; M7 / CHANGE 3 Part C) | geometric (depth-edge + crease
@@ -255,6 +261,9 @@ confidence:                # DESIGN §6.11 log-odds confidence, FULL only (M6, E
       L_free: 0.52         # per counted cluster see-through vote [0.10, 1.01] (Part N; Part C 0.50; start value 2.5)
       min_vox: 5           # a frame votes only with >= this many history voxels hit / seen through (= min_voxels)
       vote_frac: 0.5       # ... and >= this share of the informative history voxels (§3 vote_frac)
+      appearance: false    # CHANGE 3 Part N (N5): thin-object (appearance) candidates get the same cluster-vote
+                           # confidence (seen votes on their own grid; no see-through votes) and face p_new_min
+                           # (false = confidence None, always emitted, as before)
 
 appearance:                # DESIGN §3 / §6.6 appearance residual, FULL only (M6)
   enabled: true            # false = depth-only FULL (the brief's ablation)
