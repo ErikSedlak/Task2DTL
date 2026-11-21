@@ -261,7 +261,7 @@ confidence:                # DESIGN §6.11 log-odds confidence, FULL only (M6, E
       L_free: 0.52         # per counted cluster see-through vote [0.10, 1.01] (Part N; Part C 0.50; start value 2.5)
       min_vox: 5           # a frame votes only with >= this many history voxels hit / seen through (= min_voxels)
       vote_frac: 0.5       # ... and >= this share of the informative history voxels (§3 vote_frac)
-      appearance: false    # CHANGE 3 Part N (N5): thin-object (appearance) candidates get the same cluster-vote
+      appearance: true     # CHANGE 3 Part N (N5, winner of the dev_tune rule): thin-object (appearance) candidates get the same cluster-vote
                            # confidence (seen votes on their own grid; no see-through votes) and face p_new_min
                            # (false = confidence None, always emitted, as before)
 
