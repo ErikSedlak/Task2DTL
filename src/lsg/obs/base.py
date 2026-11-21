@@ -172,3 +172,7 @@ class ObsSource(Protocol):
 
     def finish(self) -> list[ObsInstance]:
         """Called once after the last frame; returns the observed instances."""
+
+    def peek(self) -> list[ObsInstance]:
+        """The instances observed so far, without ending the walk or changing what `finish` returns
+        (CHANGE 3 Part B snapshot method runs). Tokens persist across calls."""

@@ -313,6 +313,19 @@ def _cmd_sam_cache(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_anytime(args: argparse.Namespace) -> int:
+    """`lsg anytime`: FULL with snapshot method runs; anytime curve + stability (CHANGE 3 Part B)."""
+    from lsg.eval.anytime import format_anytime
+    from lsg.eval.harness import run_split
+
+    cfg = load_config(args.config)
+    res = run_split(cfg, args.split, obs_modes=args.modes.split(","), method=args.method, run_id=args.run_id,
+                    workers=args.workers, snapshots=True)  # fmt: skip
+    print(format_anytime(res["anytime"]))
+    print(f"metrics: {res['metrics_path']}")
+    return 0
+
+
 def _cmd_movediag(args: argparse.Namespace) -> int:
     """`lsg movediag --run <dir>`: predicted moves by old-place evidence (CHANGE 3 Part A)."""
     import json
@@ -618,6 +631,15 @@ def main(argv: list[str] | None = None) -> int:
     ids.add_argument("--modes", default="oracle,perception")
     ids.add_argument("--config", default=None)
     ids.set_defaults(func=_cmd_chg3_idstats)
+
+    at = sub.add_parser("anytime", help="method runs on every snapshot during the walk; anytime curve (CHANGE 3 Part B)")
+    at.add_argument("--split", default="dev_tune")
+    at.add_argument("--modes", default="oracle,perception")
+    at.add_argument("--method", default="FULL")
+    at.add_argument("--run-id", default=None)
+    at.add_argument("--workers", type=int, default=None)
+    at.add_argument("--config", default=None)
+    at.set_defaults(func=_cmd_anytime)
 
     md = sub.add_parser("movediag", help="predicted moves by old-place evidence from a run's details/ (CHANGE 3)")
     md.add_argument("--run", required=True, help="run directory (or id under outputs/) with details/<mode>/")

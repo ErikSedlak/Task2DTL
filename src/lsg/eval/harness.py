@@ -20,16 +20,17 @@ from pathlib import Path
 from typing import Any
 
 from lsg.change.baselines import METHODS, emits_new
-from lsg.change.online import run_online
+from lsg.change.online import run_online, tentative_graph
 from lsg.change.pipeline import prepare_pair, select_frames
 from lsg.change.update import POLICIES, update_graph
 from lsg.config import REPO_ROOT, cache_root, data_root, outputs_root
 from lsg.eval.gt import gt_changes, gt_parent_changes
+from lsg.eval.anytime import anytime_summary, plot_anytime, snapshot_row
 from lsg.eval.metrics import aggregate, bucket_names, perception_obs_truth, score_pair
 from lsg.eval.relations import REL_POLICIES, REL_SUBSET_NAMES, score_relations
 from lsg.geom.render import Renderer
 from lsg.graph.build import build_reference_graph
-from lsg.graph.model import validate
+from lsg.graph.model import ref_node_id, validate
 from lsg.graph.relations import gt_support
 from lsg.io.dssg import label_to_nyu40, load_objects, load_relations
 from lsg.geom.render import TextureRenderer
@@ -84,6 +85,11 @@ class _TeeSource:
     def finish(self) -> list[ObsInstance]:
         self.oracle.finish()
         return self.src.finish()
+
+    def peek(self) -> list[ObsInstance]:
+        """Snapshot instances of the method's source; the oracle's peek refreshes the visibility set."""
+        self.oracle.peek()
+        return self.src.peek()
 
     def live_candidates(self) -> list[dict[str, Any]]:
         """The method source's current candidates (snapshot sidecar, CHANGE 2)."""
@@ -198,9 +204,33 @@ def _eval_group(task: dict[str, Any]) -> list[dict[str, Any]]:
                 snap = (Path(task["run_dir"]) / "snapshots" / mode / f"{ref}_{s}"
                         if task.get("snapshots") and task.get("run_dir") else None)  # fmt: skip
                 app = make_appearance(cfg, ref, tex) if tex is not None else None
+                anytime: list[dict[str, Any]] = []
+                on_snap = None
+                if task.get("snapshots"):  # CHANGE 3 Part B: the method on every snapshot, scored (eval side)
+                    n_fr = max(len(fids), 1)
+                    anytime.append(snapshot_row(0.0, None, score_pair(tentative_graph(G_ref, {}, 0, cfg), gt, mode, cfg,
+                                                                      obs_truth={}, visible=set())["counts"],
+                                                tentative_graph(G_ref, {}, 0, cfg)))  # fmt: skip
+
+                    def on_snap(o_now, v_now, views_now, fidx, k, _mode=mode, _snap=snap):
+                        G_s = method(G_ref, o_now, cfg, rescan_id=s, obs_mode=_mode, votes=v_now, ref_ctx=ctx,
+                                     obs_views=views_now, priors=priors)  # fmt: skip
+                        G_su = update_graph(G_s, ctx, o_now, cfg, main_policy)
+                        G_su.meta.update(tentative=True, frame_idx=int(fidx), walk_frac=round(k / n_fr, 6))
+                        ptm = oracle.peek_token_map()
+                        if _mode == "perception":
+                            tr = perception_obs_truth(o_now, gt, cfg, label_nyu)
+                            kw_s = {"visible": set(ptm.values()), "label_nyu": label_nyu, "candidates": o_now}
+                        else:
+                            tr = {o.token: (ptm[o.token], o.label) for o in o_now if o.token in ptm}
+                            kw_s = {}
+                        sc_s = score_pair(G_su, gt, _mode, cfg, obs_truth=tr, votes=v_now, **kw_s)
+                        anytime.append(snapshot_row(k / n_fr, fidx, sc_s["counts"], G_su))
+                        return G_su.save(_snap / f"frame_{int(fidx):06d}.json") if _snap is not None else None
+
                 online = run_online(ctx, info, seq, src, cfg, snapshot_dir=snap, obs_mode=mode,
                                     renderer=ref_renderer, appearance=app, priors=priors,
-                                    contrast=contrast_on(cfg, task["method"]))  # fmt: skip
+                                    contrast=contrast_on(cfg, task["method"]), on_snapshot=on_snap)  # fmt: skip
                 obs = online.obs
                 tm = oracle.token_map()
                 extra_run: dict[str, Any] = {}
@@ -245,6 +275,11 @@ def _eval_group(task: dict[str, Any]) -> list[dict[str, Any]]:
                     extra_run["online"] = online.stats
                 if cfg["eval"].get("save_graphs", True) and task.get("run_dir"):
                     G_upd.save(Path(task["run_dir"]) / "graphs" / mode / f"{ref}_{s}.json")
+                if task.get("snapshots"):  # the last snapshot is the final graph itself (Part B)
+                    last = int(fids[-1]) if fids else None
+                    anytime.append(snapshot_row(1.0, last, sc["counts"], G_upd))
+                    if snap is not None and last is not None:
+                        G_upd.save(snap / f"frame_{last:06d}.json")
                 if mode == "perception" and task.get("run_dir"):
                     cp = Path(task["run_dir"]) / "candidates" / f"{ref}_{s}.json"
                     cp.parent.mkdir(parents=True, exist_ok=True)
@@ -256,6 +291,7 @@ def _eval_group(task: dict[str, Any]) -> list[dict[str, Any]]:
                     "ref": ref, "rescan": s, "mode": mode,
                     "counts": sc["counts"], "loc_errors": sc["loc_errors"],
                     "n_frames": len(fids), "n_obs": len(obs),
+                    "anytime": anytime, "gt_status": {ref_node_id(i): o.status for i, o in gt.objects.items()},
                     "run": {"align": ainfo, **extra_run,
                             "n_snapshots": len(online.snapshots),
                             "time_s": {"load_gt": t_load, "align": t_align, "online": t_obs,
@@ -355,6 +391,14 @@ def run_eval(
         "workers": n_workers,
         "per_pair": [{"ref": x["ref"], "rescan": x["rescan"], "mode": x["mode"], **x["run"]} for x in results],
     }
+    if snapshots:  # CHANGE 3 Part B: anytime curve + stability (outputs/<run>/anytime/)
+        summ = anytime_summary(results, cfg, list(obs_modes))
+        write_metrics(run_dir / "anytime", {"split": split_name, "method": method, "modes": summ,
+                                            "snapshot_every": int(cfg.get("online", {}).get("snapshot_every", 0)),
+                                            "per_pair": [{k: x[k] for k in ("ref", "rescan", "mode", "anytime")}
+                                                         for x in results]}, cfg)  # fmt: skip
+        plot_anytime(summ, run_dir / "anytime" / "anytime.png")
+        metrics["anytime"] = summ
     path = write_metrics(run_dir, metrics, cfg, extra=extra)
     return {**metrics, "metrics_path": str(path), "wall_time_s": wall}
 

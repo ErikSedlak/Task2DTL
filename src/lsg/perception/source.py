@@ -135,6 +135,10 @@ class PerceptionSource:
 
             self._sam = SamSegments(rescan_dir(self.cfg, seq_info.rescan_id))
         self.candidates, self.dropped_door = [], []
+        # CHANGE 3 Part B: snapshot tracks (`peek`)
+        self._tracks: dict[str, tuple[int, np.ndarray]] = {}
+        self._track_label: dict[str, tuple[int, list]] = {}
+        self._next_track = 0
         self.stats = {"frames": 0, "nearer_px": 0, "residual_pts": 0, "voxels": 0, "kept_voxels": 0,
                       "clusters": 0, "door_dropped": 0, "doors": len(self.doors), "labelled": 0}  # fmt: skip
         if self.relaxed:  # extra keys only with the relaxed rules, so the strict path keeps its stats
@@ -278,10 +282,20 @@ class PerceptionSource:
 
     def finish(self) -> list[ObsInstance]:
         """Cluster kept voxels into candidates and turn them into `ObsInstance`s."""
-        cands, grid, dropped = self._depth_clusters(record=True)
+        return self._build(record=True)
+
+    def peek(self) -> list[ObsInstance]:
+        """The current candidates without ending the walk (CHANGE 3 Part B snapshots); no state the final
+        result depends on changes. Tokens are track ids `t<k>` that persist across snapshots (`_track_ids`);
+        CLIP labels are reused per track unless it grew by more than `snapshots.relabel_growth`."""
+        return self._build(record=False)
+
+    def _build(self, record: bool) -> list[ObsInstance]:
+        """`finish` (record: stats, `candidates`, tokens `c<k>` by size) or `peek` (tracks, cached labels)."""
+        cands, grid, dropped = self._depth_clusters(record=record)
         votes = [self.cluster_votes(c, g) if self.track else None for c, g in zip(cands, grid)]
         conf = [self._confidence(c, g, v) for c, g, v in zip(cands, grid, votes)]
-        if self.candconf:
+        if self.candconf and record:
             p_min = float(self.cfg["confidence"]["candidates"]["p_new_min"])
             self.stats["seen_through_voxels"] = self.vox.seen_through(self.l_keep_small)
             if self.vox_large is not None:
@@ -294,10 +308,9 @@ class PerceptionSource:
             masks += self._masks(app, self._frames_app, len(self.vox_app))
             kinds += ["appearance"] * len(app)
         all_c = cands + app
-        self.candidates, self.dropped_door = all_c, dropped
-        crops = self._crops(masks) if self.with_crops else [[] for _ in all_c]
-        k_top = int(self.pc["clip"]["topk"])
-        out = []
+        grids = list(grid) + [2] * len(app)
+        if record:
+            self.candidates, self.dropped_door = all_c, dropped
         if self.track and self.app_conf:  # CHANGE 3 Part N: thin-object candidates face the same threshold
             app_votes = [self.cluster_votes(c, 2) for c in app]
             conf += [self._confidence(c, 2, v) for c, v in zip(app, app_votes)]
@@ -305,16 +318,63 @@ class PerceptionSource:
         else:
             conf += [None] * len(app)
             votes += [None] * len(app)
-        for k, (c, pm, cr, kind, p, cv) in enumerate(zip(all_c, masks, crops, kinds, conf, votes)):
-            topk = self.labeler.topk(cr, k_top) if (self.labeler is not None and cr) else []
-            self.stats["labelled"] += bool(topk)
+        k_top = int(self.pc["clip"]["topk"])
+        if record:
+            tokens = [f"c{k}" for k in range(len(all_c))]
+            crops = self._crops(masks) if self.with_crops else [[] for _ in all_c]
+            topks = []
+            for cr in crops:
+                topk = self.labeler.topk(cr, k_top) if (self.labeler is not None and cr) else []
+                self.stats["labelled"] += bool(topk)
+                topks.append(topk)
+        else:
+            tokens = self._track_ids(all_c, grids)
+            grow = float((self.cfg.get("online") or {}).get("relabel_growth", 0.25))
+            need = [i for i, (t, c) in enumerate(zip(tokens, all_c))
+                    if t not in self._track_label or len(c.voxels) > (1.0 + grow) * self._track_label[t][0]]  # fmt: skip
+            crops = [[] for _ in all_c]
+            if self.with_crops and need:
+                for i, cr in zip(need, self._crops([masks[i] for i in need])):
+                    crops[i] = cr
+            for i in need:
+                topk = self.labeler.topk(crops[i], k_top) if (self.labeler is not None and crops[i]) else []
+                self._track_label[tokens[i]] = (len(all_c[i].voxels), topk)
+            topks = [self._track_label[t][1] for t in tokens]
+        out = []
+        for tok, c, pm, cr, kind, p, cv, topk in zip(tokens, all_c, masks, crops, kinds, conf, votes, topks):
             label = topk[0][0] if topk else UNLABELLED
             out.append(ObsInstance(
-                token=f"c{k}", label=label, label_topk=[(a, float(b)) for a, b in topk],
+                token=tok, label=label, label_topk=[(a, float(b)) for a, b in topk],
                 nyu40=self.label_nyu.get(label), points=c.points.copy(), masks=pm, crops=cr, kind=kind,
                 confidence=p, cand_votes=cv,
             ))  # fmt: skip
-        return out
+        return out if record else sorted(out, key=lambda o: int(o.token[1:]))
+
+    def _track_ids(self, cands: list[Candidate], grids: list[int]) -> list[str]:
+        """Stable ids across snapshots: the previous snapshot's tracks, oldest first, each take the unassigned
+        cluster of the same grid with the highest voxel IoU >= `online.track_iou` (a merge keeps the older id,
+        a split gives the smaller part a new id); unmatched clusters get new ids `t<k>`."""
+        thr = float((self.cfg.get("online") or {}).get("track_iou", 0.3))
+        ids: list[str | None] = [None] * len(cands)
+        vsets = [np.asarray(c.voxels, np.int64) for c in cands]
+        for tid in sorted(self._tracks, key=lambda t: int(t[1:])):
+            g0, v0 = self._tracks[tid]
+            best, best_iou = None, thr
+            for i, (c, g) in enumerate(zip(vsets, grids)):
+                if ids[i] is not None or g != g0:
+                    continue
+                inter = len(np.intersect1d(v0, c, assume_unique=True))
+                iou = inter / (len(v0) + len(c) - inter) if inter else 0.0
+                if iou >= best_iou and (best is None or iou > best_iou):
+                    best, best_iou = i, iou
+            if best is not None:
+                ids[best] = tid
+        for i in range(len(cands)):
+            if ids[i] is None:
+                ids[i] = f"t{self._next_track}"
+                self._next_track += 1
+        self._tracks = {t: (g, v) for t, g, v in zip(ids, grids, vsets)}  # type: ignore[misc]
+        return ids  # type: ignore[return-value]
 
     def live_candidates(self) -> list[dict[str, Any]]:
         """Depth candidates as they stand now (mid-walk; snapshot sidecar, CHANGE 2): no labels, no masks.

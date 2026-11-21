@@ -64,6 +64,8 @@ class OracleSource:
         self._face_seen = np.zeros(len(self.S.faces), dtype=bool)
         self._masks: dict[int, PackedMasks] = {}
         self._token_of = {}
+        self._peek_token_of: dict[int, str] | None = None
+        self._peek_seen: set[str] = set()
 
     def observe(self, frame: Frame, ref_render: RefRender | None = None) -> None:
         """Render the rescan mesh at this frame; record per-instance masks and hit faces."""
@@ -82,8 +84,8 @@ class OracleSource:
                 pm = self._masks[int(oid)] = PackedMasks((H, W))
             pm.add(frame.idx, lab == oid)
 
-    def finish(self) -> list[ObsInstance]:
-        """Instances with >= `min_points` observed vertices, tokens shuffled, sorted by token."""
+    def _kept(self) -> dict[int, np.ndarray]:
+        """Instances with >= `min_points` observed vertices so far: {objectId: vertex indices}."""
         min_pts = int(self.ocfg["min_points"])
         seen_faces = self.S.faces[self._face_seen]
         seen_labels = self.S.face_labels[self._face_seen]
@@ -92,12 +94,11 @@ class OracleSource:
             vidx = np.unique(seen_faces[seen_labels == oid].ravel())
             if len(vidx) >= min_pts:
                 kept[oid] = vidx
-        ids = sorted(kept)
-        perm = np.random.default_rng(shuffle_seed(self.seed, self.info.rescan_id)).permutation(len(ids))
-        self._token_of = {oid: f"o{int(k)}" for oid, k in zip(ids, perm)}
+        return kept
 
+    def _instances(self, kept: Mapping[int, np.ndarray], token_of: Mapping[int, str]) -> list[ObsInstance]:
         out = []
-        for oid in ids:
+        for oid in sorted(kept):
             label = self.S.semseg_labels.get(oid) or (self.S.instances[oid].label if oid in self.S.instances else "")
             label = label or str(self.objects.get(oid, {}).get("label", ""))
             o = self.objects.get(oid)
@@ -107,7 +108,7 @@ class OracleSource:
                 nyu = int(self.S.instances[oid].nyu40) if oid in self.S.instances else None
             out.append(
                 ObsInstance(
-                    token=self._token_of[oid],
+                    token=token_of[oid],
                     label=label,
                     label_topk=[(label, 1.0)],
                     nyu40=nyu,
@@ -115,8 +116,32 @@ class OracleSource:
                     masks=self._masks[oid],
                 )
             )
+        return out
+
+    def finish(self) -> list[ObsInstance]:
+        """Instances with >= `min_points` observed vertices, tokens shuffled, sorted by token."""
+        kept = self._kept()
+        ids = sorted(kept)
+        perm = np.random.default_rng(shuffle_seed(self.seed, self.info.rescan_id)).permutation(len(ids))
+        self._token_of = {oid: f"o{int(k)}" for oid, k in zip(ids, perm)}
+        out = self._instances(kept, self._token_of)
         if self.ocfg.get("crops"):
             self._add_crops(out, int(self.ocfg.get("crop_k", 5)))
+        return sorted(out, key=lambda x: x.token)
+
+    def peek(self) -> list[ObsInstance]:
+        """The instances observed so far, without ending the walk (CHANGE 3 Part B snapshots).
+
+        Tokens `p<k>` come from a seeded permutation over *all* rescan instance ids, fixed per
+        sequence, so a token keeps its object across snapshots (`finish` keeps its own `o<k>`).
+        No crops.
+        """
+        if self._peek_token_of is None:
+            ids = sorted({int(i) for i in self.S.instances} | {int(i) for i in np.unique(self.S.face_labels) if i > 0})
+            perm = np.random.default_rng([*shuffle_seed(self.seed, self.info.rescan_id), 1]).permutation(len(ids))
+            self._peek_token_of = {oid: f"p{int(k)}" for oid, k in zip(ids, perm)}
+        out = self._instances(self._kept(), self._peek_token_of)
+        self._peek_seen = {o.token for o in out}
         return sorted(out, key=lambda x: x.token)
 
     # ---- eval only -------------------------------------------------------------------------
@@ -124,6 +149,11 @@ class OracleSource:
     def token_map(self) -> dict[str, int]:
         """`{token: rescan objectId}`. For `lsg.eval` only; never give it to the method."""
         return {t: oid for oid, t in self._token_of.items()}
+
+    def peek_token_map(self) -> dict[str, int]:
+        """`{peek token: rescan objectId}` of the last `peek()`. For `lsg.eval` only."""
+        seen = getattr(self, "_peek_seen", set())
+        return {t: oid for oid, t in (self._peek_token_of or {}).items() if t in seen}
 
     # ---- helpers ---------------------------------------------------------------------------
 

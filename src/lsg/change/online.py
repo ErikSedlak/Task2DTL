@@ -139,6 +139,7 @@ def run_online(
     appearance: Any = None,
     priors: Any = None,
     contrast: bool = False,
+    on_snapshot: Any = None,
 ) -> OnlineResult:
     """Process the rescan's frames in time order (DESIGN §6.7).
 
@@ -158,6 +159,10 @@ def run_online(
         priors: Class prior table (`train_meta.PriorTable`); snapshots then carry confidence, and
             the immediate-commitment frame also needs tentative p < p_del.
         contrast: Seen votes need contrast (FULL with `visibility.seen_needs_contrast`, M7).
+        on_snapshot: CHANGE 3 Part B: called every `online.snapshot_every` processed frames as
+            `on_snapshot(obs=obs_source.peek(), votes=copy, obs_views, frame_idx, k)` (the caller runs the
+            method on the current state, writes and scores the snapshot); replaces the vote-only
+            snapshots, and the caller writes the final graph as the last snapshot. Opaque here.
 
     Returns:
         `OnlineResult` with the observations, per-node vote tallies and snapshot paths.
@@ -235,9 +240,17 @@ def run_online(
         t_render += t2 - t1
         k += 1
         last_idx = frame.idx
-        if snap_dir is not None and every > 0 and k % every == 0:
-            snaps.append(_snapshot(G_ref, votes, frame.idx, cfg, seq_info, obs_mode, snap_dir, priors, obs_source))
-    last_snap = snap_dir is not None and last_idx is not None and (every <= 0 or k % every != 0)
+        if every > 0 and k % every == 0:
+            if on_snapshot is not None:  # CHANGE 3 Part B: the method on the current state (eval-side callback)
+                o_now = obs_source.peek()
+                r_snap = on_snapshot(o_now, copy.deepcopy(votes), observation_views(o_now, poses, cfg), int(frame.idx), k)
+                if r_snap is not None:
+                    snaps.append(r_snap)
+            elif snap_dir is not None:
+                snaps.append(_snapshot(G_ref, votes, frame.idx, cfg, seq_info, obs_mode, snap_dir, priors, obs_source))
+    # the last snapshot: vote-only here; with `on_snapshot` the caller writes the final graph itself
+    last_snap = (on_snapshot is None and snap_dir is not None and last_idx is not None
+                 and (every <= 0 or k % every != 0))  # fmt: skip
     if last_snap:  # before `finish`, so the sidecar shows the candidates of the walk
         snaps.append(_snapshot(G_ref, votes, last_idx, cfg, seq_info, obs_mode, snap_dir, priors, obs_source))
     t3 = time.time()
