@@ -77,7 +77,7 @@ def test_sam_label_map_rotation_and_sampling(tmp_path):
 
 def test_seg_method_and_cache_key():
     c = copy.deepcopy(CFG)
-    assert seg_method(c) == "none"
+    assert seg_method(c) == "geometric"  # CHANGE 3 Part N default (N1 winner)
     c["perception"]["segment"]["method"] = "kmeans"
     with pytest.raises(ValueError):
         seg_method(c)

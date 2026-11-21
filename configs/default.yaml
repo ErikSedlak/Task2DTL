@@ -132,7 +132,8 @@ perception:                # PerceptionSource, DESIGN §3 candidate + §6.6 (tun
   min_voxels: 5            # drop clusters with fewer kept voxels (step 5)
   segment:                 # CHANGE 3 Part N (N1): co-segmentation; adjacent voxels link only if the frames seeing both
                            # mostly put them in one image segment (perception/segment.py)
-    method: none           # none (link by space only, as before) | geometric (depth-edge components) | sam (cached SAM)
+    method: geometric      # none (link by space only, as before; M7 / CHANGE 3 Part C) | geometric (depth-edge + crease
+                           # components; N1 winner on dev_tune, DECISIONS 2026-11-21) | sam (cached SAM; N1 variant)
     depth_edge_abs: 0.03   # [m] geometric: neighbouring residual pixels are cut if |d1 - d2| > abs + rel * z
     depth_edge_rel: 0.02
     concave_deg: 30        # geometric: pixels on a concave crease (neighbour normals differ by more, surfaces meet
@@ -247,9 +248,10 @@ confidence:                # DESIGN §6.11 log-odds confidence, FULL only (M6, E
                            # L_seen): >= 3 decorrelated cluster seen votes and no see-through vote (was 0.92, CHANGE 2)
     track:                 # CHANGE 3 Part C: candidate confidence from cluster-level votes over the cluster's voxel history
       enabled: true        # false = CHANGE 2's sigmoid(median voxel lv) (ablation row FULL-candtrack)
-      L_seen: 0.02         # per counted cluster seen vote: ln P(seen|explained) / P(seen|unexplained) on dev_tune
-                           # [-0.00, 0.04] (`lsg chg3 votestats`, DECISIONS 2026-11-20; start value 2.5)
-      L_free: 0.50         # per counted cluster see-through vote [-0.01, 1.05] (start value 2.5)
+      L_seen: 0.01         # per counted cluster seen vote: ln P(seen|explained) / P(seen|unexplained) on dev_tune,
+                           # re-estimated on the geometric candidates [0.00, 0.03] (CHANGE 3 Part N, Erik; Part C: 0.02 on
+                           # the unsplit candidates; `lsg chg3 votestats`; start value 2.5)
+      L_free: 0.52         # per counted cluster see-through vote [0.10, 1.01] (Part N; Part C 0.50; start value 2.5)
       min_vox: 5           # a frame votes only with >= this many history voxels hit / seen through (= min_voxels)
       vote_frac: 0.5       # ... and >= this share of the informative history voxels (§3 vote_frac)
 

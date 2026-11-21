@@ -136,11 +136,14 @@ def test_learned_default_worked_examples():
 
 
 def test_learned_candidate_threshold_needs_three_seen_votes():
-    """CHANGE 3 Part C default: p_new_min = sigmoid(3 * L_seen): 3 cluster seen votes emit, 2 or a see-through do not."""
+    """CHANGE 3 Part C values (pinned; Part N re-estimated the weights): p_new_min = sigmoid(3 * L_seen): 3 cluster
+    seen votes emit, 2 or a see-through do not."""
     from lsg.change.baselines import emits_new
 
-    c = load_config()
+    c = copy.deepcopy(load_config())
     tc = c["confidence"]["candidates"]["track"]
+    tc.update(L_seen=0.02, L_free=0.50)
+    c["confidence"]["candidates"]["p_new_min"] = 0.514996
 
     def obs(s, f):
         p = probability(float(tc["L_seen"]) * s - float(tc["L_free"]) * f)

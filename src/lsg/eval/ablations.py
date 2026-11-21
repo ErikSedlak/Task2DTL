@@ -41,6 +41,7 @@ M7_OVERRIDES: dict[str, Any] = {
     "association.old_place.enabled": False,  # CHANGE 3 Part A off
     "confidence.L_hit": 2.5, "confidence.L_miss": 2.5, "confidence.L_free_like": 2.5,  # CHANGE 3 Part C off
     "confidence.candidates.track.enabled": False,
+    "perception.segment.method": "none",  # CHANGE 3 Part N off
 }
 
 
@@ -106,6 +107,8 @@ def registry(cfg: Mapping[str, Any]) -> dict[str, Ablation]:
         Ablation("FULL-learnedL", "FULL", {"confidence.L_hit": 2.5, "confidence.L_miss": 2.5,
                                            "confidence.L_free_like": 2.5, "confidence.p_del": 0.2}, group="component",
                  desc="CHANGE 3 Part C off: equal hand-set vote weights 2.5, p_del 0.2"),
+        Ablation("FULL-segment", "FULL", {"perception.segment.method": "none"}, group="component",
+                 desc="candidate voxels linked by space only (CHANGE 3 Part N co-segmentation off)"),
         Ablation("FULL-moveev", "FULL", {"association.old_place.enabled": False}, group="component",
                  desc="a move needs no old-place evidence (CHANGE 3 Part A off)"),
         Ablation("FULL-m7", "FULL", M7_OVERRIDES, group="component",

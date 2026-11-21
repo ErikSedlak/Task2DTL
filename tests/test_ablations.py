@@ -43,6 +43,8 @@ def test_registry_overrides_exist_and_sweeps_come_from_config():
     assert reg["FULL-learnedL"].overrides["confidence.L_hit"] == 2.5
     assert reg["FULL-candtrack"].overrides == {"confidence.candidates.track.enabled": False}
     assert abl.M7_OVERRIDES["confidence.candidates.track.enabled"] is False
+    assert reg["FULL-segment"].overrides == {"perception.segment.method": "none"}  # CHANGE 3 Part N
+    assert abl.M7_OVERRIDES["perception.segment.method"] == "none"
     for a in reg.values():
         abl.apply_overrides(CFG, a.overrides)
     m7 = abl.apply_overrides(CFG, abl.M7_OVERRIDES)
