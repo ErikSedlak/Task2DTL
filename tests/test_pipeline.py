@@ -34,6 +34,7 @@ def test_alignment_cache(tmp_path, monkeypatch):
     monkeypatch.setattr(pl, "refine_from_sequence", fake_refine)
     cfg = copy.deepcopy(load_config())
     cfg["cache_root"] = str(tmp_path)
+    cfg["alignment"]["online"]["enabled"] = False  # the offline pre-pass (CHANGE 3 Part B: online is the default)
     ref = SimpleNamespace(scan_id="R", vertices=np.zeros((3, 3)), faces=np.zeros((1, 3), int))
     T0 = np.eye(4)
     T1, i1 = pl.refined_alignment(None, ref, "S", T0, cfg, [0, 3, 6])

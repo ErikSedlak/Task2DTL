@@ -104,7 +104,10 @@ def test_run_online_updates_t_align_only_when_enabled():
             assert _err(info.T_align, T_ALIGN)[0] < 0.01 and res.stats["align_online"][-1]["status"] == "accepted"
         else:
             assert np.array_equal(info.T_align, raw) and "align_online" not in res.stats
-    assert online_aligner(ctx, info, CFG) is None  # default config: off until the dev_tune rule decides
+    assert online_aligner(ctx, info, CFG) is not None  # default: online (Erik 2026-11-21)
+    off = copy.deepcopy(CFG)
+    off["alignment"]["online"]["enabled"] = False
+    assert online_aligner(ctx, info, off) is None
 
 
 def test_structure_target_and_pipeline_skip():
