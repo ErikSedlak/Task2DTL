@@ -50,3 +50,14 @@ def test_alignment_cache(tmp_path, monkeypatch):
     T, info = pl.refined_alignment(None, ref, "S", T0, cfg, [0, 3, 6])
     np.testing.assert_array_equal(T, T0) and info["disabled"]
     assert len(calls) == 3
+
+
+def test_alignment_cache_key_ignores_the_online_block():
+    """CHANGE 3 Part B: the online settings do not change the pre-pass result, so they are not in its key."""
+    acfg = copy.deepcopy(load_config())["alignment"]
+    k1 = pl._align_key("R", "S", np.eye(4), acfg, [0, 3])
+    acfg["online"]["every"] = 7
+    acfg["online"]["enabled"] = not acfg["online"]["enabled"]
+    assert pl._align_key("R", "S", np.eye(4), acfg, [0, 3]) == k1
+    acfg["voxel"] = 0.05
+    assert pl._align_key("R", "S", np.eye(4), acfg, [0, 3]) != k1

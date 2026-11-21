@@ -49,10 +49,11 @@ def select_frames(frame_ids: list[int], stride: int, frac: float = 1.0, seed: in
 
 
 def _align_key(ref_id: str, rescan_id: str, T_raw: np.ndarray, acfg: Mapping[str, Any], frame_ids: Iterable[int]) -> str:
-    """Cache key of a refined alignment: inputs that change the ICP result."""
+    """Cache key of a refined alignment: inputs that change the ICP result (the `online` block does not: it is the
+    CHANGE 3 Part B alternative to the pre-pass, so it stays out of the key and old cache entries stay valid)."""
     blob = json.dumps(
         {"ref": ref_id, "rescan": rescan_id, "T": np.round(np.asarray(T_raw), 9).tolist(),
-         "cfg": dict(acfg), "frames": list(map(int, frame_ids))},
+         "cfg": {k: v for k, v in dict(acfg).items() if k != "online"}, "frames": list(map(int, frame_ids))},
         sort_keys=True, default=str,
     )  # fmt: skip
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()[:12]
