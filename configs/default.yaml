@@ -306,12 +306,10 @@ update:                    # DESIGN §6.12 graph update
 m7:                        # `lsg m7` / `lsg ablate` (DESIGN §8, §9): every val row reported once, nothing tuned
   val_split: splits/eval_val.txt              # final tables: all 110 pairs (CLAUDE.md)
   relchange_split: splits/eval_relchange_train.txt
-  dev_rows: [B0, B1, B2, FULL, FULL-contrast]
+  dev_rows: [B0, B1, B2, FULL, FULL-m7]
   regression_refs:                            # dev runs whose metrics must be unchanged (thin keys excluded)
-    B0: outputs/m5_final2/dev_B0
-    B1: outputs/m5_final2/dev_B1
-    B2: outputs/m6_final/dev_B2
-    FULL-contrast: outputs/m6_final/dev_FULL  # M6 FULL = FULL without seen-needs-contrast
+    FULL-m7: outputs/m7_final/dev/FULL        # CHANGE 3: the M7 method still = m7_final (the M5 / M6 refs held at M7)
+  details_rows: [FULL]                        # val rows that also write per-object details (§7.4 audit input)
   tau_free_sweep: [0.05, 0.10, 0.20, 0.30]    # [m] the default 0.15 is the FULL row
   fracs: [0.5, 0.25, 0.1]                     # §7.3 observed fraction (100% = the FULL row)
   frac_seeds: [0, 1, 2]

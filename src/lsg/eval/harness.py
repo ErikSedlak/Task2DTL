@@ -438,6 +438,7 @@ def format_summary(res: dict[str, Any]) -> str:
         ("moved   P / R / F1", ["moved_P", "moved_R", "moved_F1"]),
         ("removed P / R / F1", ["removed_P", "removed_R", "removed_F1"]),
         ("new     P / R / F1", ["new_P", "new_R", "new_F1"]),
+        ("new class-agnostic P / R / F1", ["new_ag_P", "new_ag_R", "new_ag_F1"]),
         ("unchanged acc / kept", ["unchanged_acc", "unchanged_kept"]),
         ("false-deletion / false-move", ["false_deletion_rate", "false_move_rate"]),
         ("unknown rate", ["unknown_rate"]),

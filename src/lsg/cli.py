@@ -453,10 +453,11 @@ def _cmd_audit_sample(args: argparse.Namespace) -> int:
     """`lsg audit sample`: FULL on val with per-object details, FP pools, seeded sample, panels, CSVs (§7.4)."""
     from lsg.eval.audit import run_audit_sample
 
-    res = run_audit_sample(load_config(args.config), args.run_id, split=args.split, from_run=args.from_run,
+    from_run = None if str(args.from_run).lower() == "none" else args.from_run
+    res = run_audit_sample(load_config(args.config), args.run_id, split=args.split, from_run=from_run,
                            compare=None if args.no_compare else args.compare, b2_run=args.b2_run,
                            n_per_cat=args.n, seed=args.seed, workers=args.workers, max_pairs=args.max_pairs,
-                           relaxed=args.relaxed)  # fmt: skip
+                           m7_method=args.m7_method)  # fmt: skip
     for k, v in res["pool_sizes"].items():
         print(f"  pool {k:22s} {v}")
     c = res["consistency"]
@@ -692,14 +693,15 @@ def main(argv: list[str] | None = None) -> int:
     au = sub.add_parser("audit", help="§7.4 GT audit: sample false positives, summarise verdicts (M8)")
     aus = au.add_subparsers(dest="audit_cmd", required=True)
     a1 = aus.add_parser("sample", help="FULL on val with details, FP pools, sample, panels, CSVs")
-    a1.add_argument("--run-id", default="m8_audit")
+    a1.add_argument("--run-id", default="chg3_audit")
     a1.add_argument("--split", default="eval_val")
-    a1.add_argument("--from-run", default=None, help="reuse a run with details/ instead of running FULL")
-    a1.add_argument("--compare", default="m7_final/val/FULL", help="run whose metrics FULL must reproduce")
+    a1.add_argument("--from-run", default="chg3_final/val/FULL",
+                    help="run with details/ to sample from (the final `lsg m7` FULL row); 'none' = run FULL here")
+    a1.add_argument("--compare", default=None, help="run whose metrics a fresh FULL run must reproduce")
     a1.add_argument("--no-compare", action="store_true")
-    a1.add_argument("--relaxed", action="store_true",
-                    help="audit the current default (CHANGE 1 / 2 on) instead of the M7 FULL; use with --no-compare")
-    a1.add_argument("--b2-run", default="m7_final/val/B2", help="run with B2 graphs (veto set)")
+    a1.add_argument("--m7-method", action="store_true",
+                    help="audit the M7 FULL (CHANGE 1-3 off; use --from-run none --compare m7_final/val/FULL)")
+    a1.add_argument("--b2-run", default="chg3_final/val/B2", help="run with B2 graphs (veto set)")
     a1.add_argument("--n", type=int, default=10, help="sample size per mode and category")
     a1.add_argument("--seed", type=int, default=0)
     a1.add_argument("--workers", type=int, default=None)
@@ -707,7 +709,7 @@ def main(argv: list[str] | None = None) -> int:
     a1.add_argument("--config", default=None)
     a1.set_defaults(func=_cmd_audit_sample)
     a2 = aus.add_parser("summarize", help="verdict shares from the labelled audit.csv / audit_veto.csv")
-    a2.add_argument("--run-id", default="m8_audit")
+    a2.add_argument("--run-id", default="chg3_audit")
     a2.add_argument("--config", default=None)
     a2.set_defaults(func=_cmd_audit_summarize)
 

@@ -48,6 +48,7 @@ def test_registry_overrides_exist_and_sweeps_come_from_config():
     assert reg["FULL-appconf"].overrides == {"confidence.candidates.track.appearance": False}
     assert reg["FULL-offlinealign"].overrides == {"alignment.online.enabled": False}  # CHANGE 3 Part B
     assert abl.M7_OVERRIDES["alignment.online.enabled"] is False
+    assert reg["FULL-chg2"].overrides == abl.CHG2_OVERRIDES
     for a in reg.values():
         abl.apply_overrides(CFG, a.overrides)
     m7 = abl.apply_overrides(CFG, abl.M7_OVERRIDES)
@@ -56,8 +57,31 @@ def test_registry_overrides_exist_and_sweeps_come_from_config():
     # CHANGE 3: the default vocabulary also excludes dev_tune's rooms; FULL-m7 keeps the M7 exclusions
     assert "splits/dev_tune.txt" in CFG["train_meta"]["exclude_splits"]
     assert m7["train_meta"]["exclude_splits"] == ["splits/dev_train.txt", "splits/eval_relchange_train.txt"]
-    for name in (*mc["dev_rows"], *mc["relchange_rows"], *mc["regression_refs"]):
+    for name in (*mc["dev_rows"], *mc["relchange_rows"], *mc["regression_refs"], *mc["details_rows"]):
         assert name in reg
+
+
+def test_chg2_row_is_the_chg3_baseline_config():
+    """FULL-chg2 = the config of outputs/chg3_dev_baseline/FULL (CHANGE 1 + 2 + Part 0) on every shared key."""
+    import json
+    from pathlib import Path
+
+    p = Path(__file__).parents[1] / "outputs" / "chg3_dev_baseline" / "FULL" / "metrics.json"
+    if not p.is_file():
+        pytest.skip("baseline run not present")
+    old = json.loads(p.read_text(encoding="utf-8"))["config"]
+    new = abl.apply_overrides(CFG, abl.CHG2_OVERRIDES)
+    diffs = []
+
+    def walk(a, b, path):
+        if isinstance(a, dict) and isinstance(b, dict):
+            for k in set(a) & set(b):
+                walk(a[k], b[k], f"{path}.{k}")
+        elif a != b:
+            diffs.append(path)
+
+    walk({k: v for k, v in old.items() if k not in ("m7", "chg3")}, new, "")
+    assert diffs == []
 
 
 def test_select_by_name_group_and_all():

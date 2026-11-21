@@ -99,8 +99,8 @@ def test_compare_metrics():
     assert compare_metrics(m, m2) == ["per_pair ('R', 'S', 'oracle') differs"]
 
 
-def test_audit_runs_the_strict_candidate_rules_unless_relaxed(monkeypatch):
-    """The audit must reproduce m7_final/val/FULL, i.e. the M7 method (CHANGE 1 and 2 off)."""
+def test_audit_runs_the_default_method_unless_m7(monkeypatch):
+    """Since CHANGE 3 Part D the audit runs the final method; `m7_method` forces the M7 one."""
     import copy
 
     import lsg.eval.harness as harness
@@ -119,7 +119,11 @@ def test_audit_runs_the_strict_candidate_rules_unless_relaxed(monkeypatch):
     monkeypatch.setattr(harness, "run_eval", fake_run_eval)
     cfg = copy.deepcopy(load_config())
     assert cfg["perception"]["relaxed"]["enabled"] is True  # the default method is relaxed
-    for relaxed in (False, True):
+    for m7 in (True, False):
         with pytest.raises(RuntimeError):
-            run_audit_sample(cfg, "x", relaxed=relaxed, max_pairs=1)
+            run_audit_sample(cfg, "x", m7_method=m7, max_pairs=1)
     assert seen == [False, True]
+    from pathlib import Path
+
+    with pytest.raises(FileNotFoundError):  # sampling from a run needs its details/
+        run_audit_sample(cfg, "x", from_run=Path(__file__).parent)

@@ -2,8 +2,9 @@
 
 Flow (`lsg audit sample`, then `lsg audit summarize`):
 1. A val FULL run with `details=True` (both modes) writes per-object outcomes to
-   `details/<mode>/<pair>.json`. Its `metrics` must equal the M7 FULL row (`--compare`),
-   so the audited predictions are exactly the reported ones.
+   `details/<mode>/<pair>.json`. Since CHANGE 3 (Part D) this is the final run's own FULL row
+   (`lsg m7` writes details for `m7.details_rows`), passed as `from_run`, so the audited
+   predictions are exactly the reported ones. A fresh FULL run must reproduce `compare`.
 2. **Pools** per mode (DECISIONS M8):
    - `moved`: predicted moved, GT unchanged / removed / absent-unlisted (false move);
    - `removed`: predicted removed, GT unchanged / moved / absent-unlisted (false deletion);
@@ -414,19 +415,18 @@ def run_audit_sample(
     run_id: str,
     split: str = "eval_val",
     from_run: str | Path | None = None,
-    compare: str | Path | None = "m7_final/val/FULL",
-    b2_run: str | Path | None = "m7_final/val/B2",
+    compare: str | Path | None = None,
+    b2_run: str | Path | None = None,
     n_per_cat: int = 10,
     seed: int = 0,
     workers: int | None = None,
     max_pairs: int | None = None,
-    relaxed: bool = False,
+    m7_method: bool = False,
 ) -> dict[str, Any]:
     """`lsg audit sample`: FULL with details (or reuse `from_run`), pools, sample, panels, CSVs.
 
-    By default the audited method is the M7 FULL (`ablations.M7_OVERRIDES`: CHANGE 1 and
-    CHANGE 2 off, the ablation row FULL-m7): the run must reproduce `m7_final/val/FULL`.
-    `relaxed=True` audits the current default instead (pass `compare=None`).
+    The audited method is the current default (CHANGE 1 + 2 + 3). `m7_method=True` audits the
+    M7 FULL instead (`ablations.M7_OVERRIDES`, row FULL-m7; compare with `m7_final/val/FULL`).
 
     Args:
         run_id: Output folder (`outputs/<run_id>/`; the FULL run goes to `<run_id>/val_FULL`).
@@ -436,7 +436,7 @@ def run_audit_sample(
         b2_run: Run dir with B2 graphs (`graphs/<mode>/`) for the veto set; None = no veto set.
         n_per_cat: Sample size per mode and category.
         max_pairs: Only the first N pairs (dry runs).
-        relaxed: Keep the config as given (CHANGE 1 / 2 on) instead of forcing the M7 method.
+        m7_method: Force the M7 method (CHANGE 1, 2 and 3 off).
     """
     from lsg.config import data_root, outputs_root
     from lsg.eval.ablations import M7_OVERRIDES, apply_overrides
@@ -444,7 +444,7 @@ def run_audit_sample(
     from lsg.io.scan3r import read_pairs
     from lsg.runinfo import write_metrics
 
-    if not relaxed:
+    if m7_method:
         cfg = apply_overrides(cfg, M7_OVERRIDES)
     out_root = outputs_root(cfg)
     out_dir = out_root / run_id
@@ -458,6 +458,8 @@ def run_audit_sample(
         run_dir = Path(res["metrics_path"]).parent
     else:
         run_dir = resolve(from_run)
+        if not (run_dir / "details").is_dir():
+            raise FileNotFoundError(f"{run_dir} has no details/ (run FULL with details, e.g. `lsg m7`)")
     cmp_dir = resolve(compare)
     if cmp_dir is not None and max_pairs is None:
         a = json.loads((run_dir / "metrics.json").read_text(encoding="utf-8"))["metrics"]

@@ -46,6 +46,19 @@ M7_OVERRIDES: dict[str, Any] = {
     "alignment.online.enabled": False,  # CHANGE 3 Part B off (the M7 pre-pass)
 }
 
+# CHANGE 1 + 2 as fixed by Erik on 2026-11-20 with the CHANGE 3 Part 0 tuning-set changes (flat start value 0.9 /
+# p_del 0.2, dev_tune rooms out of the CLIP vocabulary) = the config of `outputs/chg3_dev_baseline/FULL`. Every
+# CHANGE 3 part after Part 0 is off. Ablation row FULL-chg2 (docs/CHANGE_online_graph.md §7.4).
+CHG2_OVERRIDES: dict[str, Any] = {
+    "association.old_place.enabled": False,  # Part A
+    "confidence.L_hit": 2.5, "confidence.L_miss": 2.5, "confidence.p_del": 0.2,  # Part C
+    "confidence.candidates.track.enabled": False,
+    "confidence.candidates.p_new_min": 0.92,
+    "perception.segment.method": "none",  # Part N
+    "confidence.candidates.track.appearance": False,
+    "alignment.online.enabled": False,  # Part B
+}
+
 
 @dataclass(frozen=True)
 class Ablation:
@@ -117,8 +130,10 @@ def registry(cfg: Mapping[str, Any]) -> dict[str, Ablation]:
                  desc="candidate voxels linked by space only (CHANGE 3 Part N co-segmentation off)"),
         Ablation("FULL-moveev", "FULL", {"association.old_place.enabled": False}, group="component",
                  desc="a move needs no old-place evidence (CHANGE 3 Part A off)"),
+        Ablation("FULL-chg2", "FULL", CHG2_OVERRIDES, group="component",
+                 desc="CHANGE 3 off after Part 0 (= CHANGE 1 + 2, the method before CHANGE 3; outputs/chg3_dev_baseline)"),
         Ablation("FULL-m7", "FULL", M7_OVERRIDES, group="component",
-                 desc="the M7 method (CHANGE 1 and 2 off) = outputs/m7_final"),
+                 desc="the M7 method (CHANGE 1, 2 and 3 off) = outputs/m7_final"),
         Ablation("FULL-decorr", "FULL", {"decorrelation.enabled": False}, group="component",
                  desc="every vote counts (no viewpoint decorrelation)"),
         Ablation("B1-decorr", "B1", {"decorrelation.enabled": False}, group="component",
@@ -183,8 +198,12 @@ def run_ablation(
     modes: Sequence[str] = MODES,
     workers: int | None = None,
     resume: bool = True,
+    details: bool = False,
 ) -> dict[str, Any]:
     """One ablation row: `run_eval` with the overrides (or the reused result).
+
+    `details=True` also writes per-object outcomes (`details/`, the §7.4 audit's input); a stored
+    row is reused then only if its `details/` folder exists.
 
     Returns:
         `run_eval`'s result (`metrics` block + `metrics_path`, `wall_time_s`) plus
@@ -194,9 +213,10 @@ def run_ablation(
     meta = {"name": ab.name, "method": ab.method, "overrides": dict(ab.overrides), "frac": ab.frac,
             "seed": ab.seed, "group": ab.group, "desc": ab.desc}  # fmt: skip
     path = outputs_root(c) / run_id / "metrics.json"
-    if resume and (d := reusable(path, c)) is not None and list(d["metrics"].get("obs_modes", [])) == list(modes):
+    if resume and (d := reusable(path, c)) is not None and list(d["metrics"].get("obs_modes", [])) == list(modes) \
+            and (not details or (path.parent / "details").is_dir()):
         return {**d["metrics"], "metrics_path": str(path), "wall_time_s": d.get("run", {}).get("wall_time_s", 0.0),
                 "ablation": meta, "reused": True}  # fmt: skip
     r = run_eval(c, pairs, list(modes), method=ab.method, frac=ab.frac, seed=ab.seed, workers=workers,
-                 run_id=run_id, split_name=split_name)  # fmt: skip
+                 run_id=run_id, split_name=split_name, details=details)  # fmt: skip
     return {**r, "ablation": meta, "reused": False}

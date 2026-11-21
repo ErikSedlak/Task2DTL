@@ -4,10 +4,11 @@ Steps (each run is one `run_eval`, see `eval.ablations`; nothing is tuned, val r
 reported once):
 
 1. Environment: CUDA availability (DINOv2 / CLIP device) is recorded.
-2. Dev (`splits/dev_train.txt`): B0, B1, B2, FULL and FULL-contrast. Regressions against the
-   stored M5 / M6 dev runs (`m7.regression_refs`): identical `metrics` on shared keys, thin
-   keys excluded (M7 thin-metric fix). Stops here with `dev_only`.
-3. Val (`m7.val_split`, all of `eval_val`): methods, component ablations, variants.
+2. Dev (`splits/dev_train.txt`): `m7.dev_rows`. Regressions against stored dev runs
+   (`m7.regression_refs`; since CHANGE 3: FULL-m7 = `m7_final/dev/FULL`): identical `metrics` on
+   shared keys, thin keys excluded (M7 thin-metric fix). Stops here with `dev_only`.
+3. Val (`m7.val_split`, all of `eval_val`): methods, component ablations, variants. Rows in
+   `m7.details_rows` (FULL) also write per-object details, the input of the §7.4 audit.
 4. τ_free sweep (`m7.tau_free_sweep`) and observed fraction (`m7.fracs` × `m7.frac_seeds`, §7.3).
 5. Relchange (`m7.relchange_split`): `m7.relchange_rows`, for the relation tables (§7.2).
 6. Determinism: FULL on one dev pair twice -> identical `metrics`.
@@ -35,12 +36,14 @@ from lsg.io.scan3r import read_pairs
 from lsg.runinfo import new_run_id, write_metrics
 
 MAIN_KEYS = ("moved_P", "moved_R", "moved_F1", "removed_P", "removed_R", "false_deletion_rate", "false_move_rate",
-             "unchanged_acc", "unchanged_kept", "new_P", "new_R", "unknown_rate", "assoc_acc_strict")  # fmt: skip
+             "unchanged_acc", "unchanged_kept", "new_P", "new_R", "new_ag_P", "new_ag_R", "unknown_rate",
+             "assoc_acc_strict")  # fmt: skip
 SHORT = {"moved_P": "mov P", "moved_R": "mov R", "moved_F1": "mov F1", "removed_P": "rem P", "removed_R": "rem R",
          "false_deletion_rate": "false-del", "false_move_rate": "false-mov", "unchanged_acc": "unch acc",
-         "unchanged_kept": "unch kept", "new_P": "new P", "new_R": "new R", "unknown_rate": "unknown",
+         "unchanged_kept": "unch kept", "new_P": "new P", "new_R": "new R", "new_ag_P": "new P ag",
+         "new_ag_R": "new R ag", "new_ag_F1": "new F1 ag", "unknown_rate": "unknown",
          "assoc_acc_strict": "assoc"}  # fmt: skip
-EXTRA_KEYS = ("removed_F1", "new_F1", "removed_R_thin", "unchanged_kept_thin", "free_ev_removed", "free_ev_removed_thin",
+EXTRA_KEYS = ("removed_F1", "new_F1", "new_ag_F1", "removed_R_thin", "unchanged_kept_thin", "free_ev_removed", "free_ev_removed_thin",
               "free_ev_unchanged", "free_ev_unchanged_removed", "free_ev_absent", "seen_ev_absent",
               "conf_mean_unchanged", "conf_mean_removed", "conf_mean_absent", "cand_per_pair", "cand_explained",
               "cand_appearance_per_pair", "cand_appearance_explained", "moved_R_small", "moved_R_large",
@@ -104,11 +107,12 @@ def _load_metrics(path: Path) -> dict[str, Any] | None:
 
 
 def _run_rows(cfg, rows: Sequence[Ablation], pairs, rid: str, group_dir: str, split_name: str, workers, resume,
-              store: dict[str, Any]) -> dict[str, dict[str, Any]]:  # fmt: skip
+              store: dict[str, Any], details: Sequence[str] = ()) -> dict[str, dict[str, Any]]:  # fmt: skip
     full: dict[str, dict[str, Any]] = {}
     for ab in rows:
         t0 = time.time()
-        r = run_ablation(cfg, ab, pairs, f"{rid}/{group_dir}/{ab.name}", split_name, MODES, workers, resume)
+        r = run_ablation(cfg, ab, pairs, f"{rid}/{group_dir}/{ab.name}", split_name, MODES, workers, resume,
+                         details=ab.name in details)  # fmt: skip
         full[ab.name] = r
         store[ab.name] = summarize(r)
         print(f"[m7] {group_dir}/{ab.name}: {'reused' if r['reused'] else f'{time.time() - t0:.0f} s'}", flush=True)
@@ -156,7 +160,7 @@ def run_m7(
             rows += [a for a in reg.values() if a.group == "tau_free"]
         if frac:
             rows += [a for a in reg.values() if a.group == "frac"]
-        _run_rows(cfg, rows, val_pairs, rid, "val", vname, workers, resume, res["val"])
+        _run_rows(cfg, rows, val_pairs, rid, "val", vname, workers, resume, res["val"], m7.get("details_rows", ()))
         if frac:
             res["frac"] = frac_table(res["val"], cfg)
         if relchange:
@@ -252,9 +256,11 @@ def _table(header: Sequence[str], rows: Sequence[Sequence[str]]) -> list[str]:
 def write_results(res: Mapping[str, Any], cfg: Mapping[str, Any], path: Path) -> Path:
     """Markdown tables: main (CIs), ablation support, τ_free, fraction, relations, diagnostics, checks."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    L = ["# M7 results", "",
+    L = ["# Results (M7 tables)", "",
          "Values in %, 95% bootstrap CI over pairs in brackets (1,000 resamples). Val rows are reported once; "
-         "nothing was tuned on them. `unknown` counts as neither removed nor moved.", ""]  # fmt: skip
+         "nothing was tuned on them. `unknown` counts as neither removed nor moved. New P / R twice: labelled "
+         "(the mode's §5 rule) and class-agnostic (`ag`: geometry only, any label), so detection and naming "
+         "losses show apart.", ""]  # fmt: skip
     L += _section_rows("Dev (`dev_train`, 3 pairs)", res["dev"], MAIN_KEYS)
     if res["regressions"]:
         L += ["**Dev regressions** (shared `metrics` keys, thin keys excluded):", ""]
