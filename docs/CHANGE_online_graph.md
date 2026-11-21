@@ -178,9 +178,10 @@ it (reference position, or the new position for `moved` and `new`). One log-odds
 - **N1 co-segmentation** (default `geometric`): candidate hits on change targets 132 → 178, class-agnostic new R at `p_new_min` 0 21.4 → 49.3, GT new objects inside blobs 83 → 46; SAM variants (new dependency `segment-anything`) found fewer targets;
 - **N2 reference explain-away**: off (drops 808 false nodes but ≈ 20 true new objects);
 - **N3 identity check**: dropped (Erik) — the DINOv2 similarity of reference renders vs rescan crops separates same-class objects too weakly (pick 0.36 rejects 23 % of wrong partners);
-- **N4** candidate weights re-estimated (L_seen 0.01, L_free 0.52), `p_new_min` 0.517493.
+- **N4** candidate weights re-estimated (L_seen 0.01, L_free 0.52), `p_new_min` 0.517493;
+- **N5** thin-object candidates get a confidence (on: new P 10.0 → 12.2 at the same recall); noise rejection (depth-edge pixels, depth-scaled surface distance, structure planes) implemented but off by its rule.
 
-dev_tune, Part C → Part N, perception: new P / R / F1 5.6 / 7.0 / 6.2 → **10.0 / 5.6 / 7.2** (class-agnostic 15.1 / 8.4 / 10.8), removed P / R 48.8 / 24.1 → 50.0 / **33.7**, false deletion 3.6 → 4.1, moved F1 and false move unchanged; oracle unchanged. The candidate ceiling is far higher (new R 26.5 at `p_new_min` 0), but no available confidence signal separates real from false candidates: the next lever is rejecting residual noise (77 % of false candidates).
+dev_tune, Part C → Part N, perception: new P / R / F1 5.6 / 7.0 / 6.2 → **12.2 / 5.6 / 7.7** (class-agnostic 18.4 / 8.4 / 11.5), removed P / R 48.8 / 24.1 → 50.0 / **33.7**, false deletion 3.6 → 4.1, moved F1 and false move unchanged; oracle unchanged. The candidate ceiling is far higher (new R 26.5 at `p_new_min` 0), but no available confidence signal separates real from false candidates: the next lever is rejecting residual noise (77 % of false candidates).
 
 ## 6. Part D — reporting
 
