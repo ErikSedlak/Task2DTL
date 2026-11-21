@@ -11,6 +11,7 @@ pool; results are sorted back into split order, so `metrics` does not depend on 
 
 from __future__ import annotations
 
+import copy
 import json
 import os
 import time
@@ -208,6 +209,8 @@ def _eval_group(task: dict[str, Any]) -> list[dict[str, Any]]:
                 on_snap = None
                 if task.get("snapshots"):  # CHANGE 3 Part B: the method on every snapshot, scored (eval side)
                     n_fr = max(len(fids), 1)
+                    if snap is not None:  # the reference state (arrow origins for `lsg viz rerun`)
+                        tentative_graph(G_ref, {}, 0, cfg).save(snap / "reference.json")
                     anytime.append(snapshot_row(0.0, None, score_pair(tentative_graph(G_ref, {}, 0, cfg), gt, mode, cfg,
                                                                       obs_truth={}, visible=set())["counts"],
                                                 tentative_graph(G_ref, {}, 0, cfg)))  # fmt: skip
@@ -278,8 +281,10 @@ def _eval_group(task: dict[str, Any]) -> list[dict[str, Any]]:
                 if task.get("snapshots"):  # the last snapshot is the final graph itself (Part B)
                     last = int(fids[-1]) if fids else None
                     anytime.append(snapshot_row(1.0, last, sc["counts"], G_upd))
-                    if snap is not None and last is not None:
-                        G_upd.save(snap / f"frame_{last:06d}.json")
+                    if snap is not None and last is not None:  # a copy: the saved final graph keeps frame_idx None
+                        G_last = copy.deepcopy(G_upd)
+                        G_last.meta.update(frame_idx=last, walk_frac=1.0)
+                        G_last.save(snap / f"frame_{last:06d}.json")
                 if mode == "perception" and task.get("run_dir"):
                     cp = Path(task["run_dir"]) / "candidates" / f"{ref}_{s}.json"
                     cp.parent.mkdir(parents=True, exist_ok=True)

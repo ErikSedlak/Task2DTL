@@ -7,7 +7,8 @@ Recording (timeline `frame` = rescan frame index):
 - static: the reference mesh (PLY vertex colours) in the reference frame, z up;
 - per processed frame: the rescan camera at `T_align @ pose` (pinhole + trajectory so far),
   optionally its colour image (JPEG bytes as stored, rotated 90°);
-- per snapshot: node boxes grouped by tentative state (`world/nodes/<state>`), labels with confidence;
+- per snapshot: node boxes grouped by tentative state (`world/nodes/<state>`), labels with confidence; with
+  snapshot method runs (CHANGE 3 Part B) also mid-walk `moved` arrows (from `reference.json`) and `new` boxes;
   perception runs also have a sidecar `candidates_frame_XXXXXX.json` (CHANGE 2): the live candidates
   as `world/candidates`, grey (p 0.5) -> green (p 1) by confidence, labelled "candidate <p>";
 - after the last frame (`frame` = last + 1): the final updated graph, moved nodes with an
@@ -134,7 +135,9 @@ def rerun_timeline(
         rec.log("world/reference_mesh", rr.Mesh3D(vertex_positions=V, triangle_indices=ply.faces.astype(np.uint32),
                                                   vertex_colors=C), static=True)  # fmt: skip
 
-    G0 = Graph.load(snaps[0])
+    # arrow origins = reference centroids (CHANGE 3 Part B: snapshots hold moved nodes, so the first one may not)
+    ref_file = snap_dir / "reference.json"
+    G0 = Graph.load(ref_file if ref_file.is_file() else snaps[0])
     ref_centroid = {n.id: n.centroid for n in G0.nodes if n.centroid is not None}
     traj: list[np.ndarray] = []
     with SequenceReader(Path(root) / info["rescan"]) as seq:
@@ -155,7 +158,7 @@ def rerun_timeline(
                 data = seq.read_bytes(f"frame-{int(idx):06d}.color.jpg")
                 rec.log("world/camera/image", rr.EncodedImage(contents=data, media_type="image/jpeg"))
             if int(idx) in by_frame:
-                _log_nodes(rec, rr, "world/nodes", Graph.load(by_frame[int(idx)]))
+                _log_nodes(rec, rr, "world/nodes", Graph.load(by_frame[int(idx)]), moved_from=ref_centroid)
                 side = snap_dir / f"candidates_frame_{int(idx):06d}.json"
                 if side.is_file():
                     _log_candidates(rec, rr, "world/candidates", json.loads(side.read_text(encoding="utf-8")))
