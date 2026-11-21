@@ -139,3 +139,79 @@ def refine_from_sequence(
     ids = list(seq.frame_ids if frame_ids is None else frame_ids)[:: int(cfg["frame_step"])]
     pts = depth_points(seq, ids, float(cfg["voxel"]), float(cfg["max_depth"]))
     return refine_alignment(pts, mesh_target(ref_vertices, ref_faces), T_init, cfg)
+
+
+class OnlineAligner:
+    """Cumulative online refinement of `T_align` during the walk (CHANGE 3 Part B, `alignment.online`).
+
+    Every `frame_step`-th processed frame adds its back-projected depth (rescan frame) to a growing cloud.
+    `update()` registers the cloud so far against the reference target (the same robust ICP as the pre-pass),
+    warm-started from the current estimate. The estimate is used only if (i) the cloud holds at least
+    `min_cloud_frames` frames, (ii) its correction against the raw 3RScan transform stays within the
+    pre-pass limits (`max_delta_t`, `max_delta_rot_deg`), and (iii) it is not degenerate: the target normals
+    matched to the cloud must span all directions (smallest eigenvalue of their mean outer product >=
+    `min_normal_spread`; a view of one wall cannot fix the translation along it). Until then the raw
+    transform is used. No frame from the future is used.
+    """
+
+    def __init__(self, target: o3d.geometry.PointCloud, T_raw: np.ndarray, cfg: dict[str, Any]):
+        """
+        Args:
+            target: Reference points with normals (`mesh_target`, all surfaces or structure only).
+            T_raw: 3RScan's rescan -> reference transform.
+            cfg: The `alignment` config block (ICP settings + `online`).
+        """
+        from scipy.spatial import cKDTree
+
+        self.cfg = cfg
+        oc = cfg.get("online") or {}
+        self.min_frames = int(oc.get("min_cloud_frames", 3))
+        self.min_spread = float(oc.get("min_normal_spread", 0.05))
+        self.target = target
+        self._tree = cKDTree(np.asarray(target.points))
+        self._normals = np.asarray(target.normals)
+        self.T_raw = np.asarray(T_raw, float).copy()
+        self.T = self.T_raw.copy()
+        self.chunks: list[np.ndarray] = []
+        self.updates: list[dict[str, Any]] = []
+
+    def add_frame(self, depth: np.ndarray, K: np.ndarray, pose_c2w: np.ndarray) -> None:
+        """Back-project one frame's depth (<= `max_depth`) into the rescan frame and keep it (voxelised)."""
+        if not np.all(np.isfinite(pose_c2w)):
+            return
+        d = np.where(np.asarray(depth) <= float(self.cfg["max_depth"]), depth, 0.0)
+        pts = backproject(d, K, pose_c2w)
+        pc = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(pts))
+        self.chunks.append(np.asarray(pc.voxel_down_sample(float(self.cfg["voxel"])).points))
+
+    def normal_spread(self, pts_ref: np.ndarray) -> float:
+        """Smallest eigenvalue of the mean n n^T of the target normals nearest to the (aligned) points."""
+        _, idx = self._tree.query(pts_ref, k=1)
+        n = self._normals[idx]
+        return float(np.linalg.eigvalsh(n.T @ n / max(len(n), 1))[0])
+
+    def update(self) -> tuple[bool, dict[str, Any]]:
+        """Re-estimate from the cloud so far; returns (estimate changed, info). Rejections keep the last estimate."""
+        info: dict[str, Any] = {"frames": len(self.chunks)}
+        if len(self.chunks) < self.min_frames:
+            info["status"] = "too_few_frames"
+            self.updates.append(info)
+            return False, info
+        pc = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(np.concatenate(self.chunks)))
+        pts = np.asarray(pc.voxel_down_sample(float(self.cfg["voxel"])).points)
+        T, ri = refine_alignment(pts, self.target, self.T, self.cfg)
+        dT = T @ invert(self.T_raw)
+        info.update(n_source=int(len(pts)), delta_t_m=float(np.linalg.norm(dT[:3, 3])),
+                    delta_rot_deg=rotation_angle_deg(dT), fitness=ri["fitness"])  # fmt: skip
+        if not ri["accepted"] or info["delta_t_m"] > float(self.cfg["max_delta_t"]) or \
+                info["delta_rot_deg"] > float(self.cfg["max_delta_rot_deg"]):
+            info["status"] = "rejected"
+        else:
+            spread = self.normal_spread(pts @ T[:3, :3].T + T[:3, 3])
+            info["normal_spread"] = spread
+            info["status"] = "degenerate" if spread < self.min_spread else "accepted"
+        self.updates.append(info)
+        if info["status"] != "accepted":
+            return False, info
+        self.T = np.asarray(T, float).copy()
+        return True, info

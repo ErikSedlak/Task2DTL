@@ -185,7 +185,9 @@ def run_online(
     dec = Decorrelator.from_config(cfg)
     K = seq_info.intrinsics.K_depth
     W, H = seq_info.intrinsics.depth_wh
-    T_align = np.asarray(seq_info.T_align, float)
+    aligner = online_aligner(ref_ctx, seq_info, cfg)  # CHANGE 3 Part B: cumulative online alignment (or None)
+    a_step = int(cfg["alignment"].get("frame_step", 10))
+    a_every = int((cfg["alignment"].get("online") or {}).get("every", 20))
     every = int(cfg.get("online", {}).get("snapshot_every", 0) or 0)
     thin = ref_ctx.thin_oids(float(cfg["appearance"]["thin_max_extent"])) & set(node_of) if appearance else set()
     want_all = bool(getattr(obs_source, "wants_appearance", False)) and appearance is not None
@@ -205,7 +207,7 @@ def run_online(
     last_idx = None
     for frame in iter_frames(seq, idx=seq_info.frame_ids):
         t1 = time.time()
-        pose = T_align @ frame.pose_c2w
+        pose = np.asarray(seq_info.T_align, float) @ frame.pose_c2w
         poses[int(frame.idx)] = pose
         amap = up = None
         T_w2c = invert(pose)
@@ -240,6 +242,13 @@ def run_online(
         t_render += t2 - t1
         k += 1
         last_idx = frame.idx
+        if aligner is not None:  # only frames seen so far; the new estimate applies from the next frame on
+            if (k - 1) % a_step == 0:
+                aligner.add_frame(frame.depth, K, frame.pose_c2w)
+            if k % a_every == 0:
+                changed, _ = aligner.update()
+                if changed:  # reassign (sources hold the same SeqInfo and read T_align every frame)
+                    seq_info.T_align = aligner.T.copy()
         if every > 0 and k % every == 0:
             if on_snapshot is not None:  # CHANGE 3 Part B: the method on the current state (eval-side callback)
                 o_now = obs_source.peek()
@@ -260,11 +269,41 @@ def run_online(
     if contrast:
         times["contrast"] = t_contrast
     stats: dict[str, Any] = {"thin_nodes": len(thin), "appearance_frames": n_app}
+    if aligner is not None:
+        stats["align_online"] = aligner.updates
     if appearance is not None:
         times["appearance"] = appearance.time_s
         stats.update(appearance_device=getattr(appearance.ext, "device", None),
                      appearance_cache_hits=appearance.cache.hits, appearance_cache_misses=appearance.cache.misses)  # fmt: skip
     return OnlineResult(obs, votes, k, snaps, times, observation_views(obs, poses, cfg), stats)
+
+
+def online_aligner(ref_ctx: RefContext, seq_info: SeqInfo, cfg: Mapping[str, Any]):
+    """`geom.align.OnlineAligner` when `alignment.online.enabled` (and `alignment.refine`), else None.
+
+    `seq_info.T_align` must hold the raw 3RScan transform at the start (`change.pipeline.prepare_pair` skips the
+    pre-pass then); it is updated in place whenever an estimate is accepted. Target `structure` = the
+    reference wall / floor / ceiling faces (reference labels), falling back to all surfaces below
+    `min_target_points` vertices.
+    """
+    from lsg.geom.align import OnlineAligner, mesh_target
+
+    ac = cfg["alignment"]
+    oc = ac.get("online") or {}
+    if not (ac.get("refine", True) and oc.get("enabled", False)):
+        return None
+    scan = ref_ctx.scan
+    V, F = scan.vertices, scan.faces
+    if oc.get("target", "all") == "structure":
+        oids = [o for o in scan.instances if ref_ctx.object_nyu40(o) in STRUCT_ALIGN_NYU40]
+        Vs, Fs = ref_ctx.faces_of(oids)
+        used, inv = np.unique(Fs, return_inverse=True)  # compact: only the structure's own vertices
+        if len(used) >= int(oc.get("min_target_points", 500)):
+            V, F = Vs[used], inv.reshape(Fs.shape)
+    return OnlineAligner(mesh_target(V, F), np.asarray(seq_info.T_align, float), dict(ac))
+
+
+STRUCT_ALIGN_NYU40 = (1, 2, 22)  # wall, floor, ceiling: never moved between visits
 
 
 def _snapshot(G_ref, votes, frame_idx, cfg, seq_info, obs_mode, snap_dir: Path, priors=None, source=None) -> Path:

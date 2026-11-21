@@ -19,6 +19,8 @@ import time
 from collections.abc import Mapping
 from typing import Any
 
+import numpy as np
+
 from lsg.config import outputs_root
 from lsg.eval.ablations import apply_overrides
 from lsg.eval.harness import MODES, run_split
@@ -349,4 +351,93 @@ def format_part_n_noise(res: Mapping[str, Any]) -> str:
         lines.append(f"{n:<8} pass={v['pass']}  hits {v['hits']}  best p_new_min {b['p_new_min']:.6f}: new P / R "
                      f"{100 * (b['precision'] or 0):.1f} / {100 * (b['recall'] or 0):.1f}, F1 {100 * b['f1']:.2f} ({b['n_new']} nodes)")  # fmt: skip
     lines.append(f"winner: {res['winner']} at p_new_min {res['p_new_min']}")
+    return "\n".join(lines)
+
+
+# --------------------------------------------------------------------------------------------
+# CHANGE 3 Part B (B3): online alignment variants
+# --------------------------------------------------------------------------------------------
+
+ALIGN_PRIMARY = ("moved_F1", "removed_F1", "new_F1")
+
+
+def select_align(rows: Mapping[str, Mapping[str, Mapping[str, Any]]], crit: Mapping[str, Any], order: list[str],
+                 ref: str = "offline") -> dict[str, Any]:  # fmt: skip
+    """Pre-written B3 rule (DECISIONS 2026-11-21): among the online variants, the highest mean of moved / removed /
+    new F1 over both modes wins (ties within `tie` -> earlier in `order`); it is flagged `ask` (Erik decides) if it
+    loses more than `f1_drop` moved or removed F1, or more than `rate_drop` on false deletion / unchanged kept,
+    against `ref` in either mode."""
+    def score(r):
+        return sum((r[m].get(k) or 0.0) for m in MODES for k in ALIGN_PRIMARY) / (len(MODES) * len(ALIGN_PRIMARY))
+
+    cand = [n for n in order if n in rows and n != ref]
+    sc = {n: score(rows[n]) for n in cand}
+    top = max(sc.values())
+    winner = next(n for n in cand if sc[n] >= top - float(crit["tie"]) - 1e-12)
+    w, b = rows[winner], rows[ref]
+    losses = {}
+    for m in MODES:
+        for k in ("moved_F1", "removed_F1"):
+            losses[f"{m}.{k}"] = (b[m].get(k) or 0) - (w[m].get(k) or 0)
+        losses[f"{m}.false_deletion_rate"] = (w[m].get("false_deletion_rate") or 0) - (b[m].get("false_deletion_rate") or 0)
+        losses[f"{m}.unchanged_kept"] = (b[m].get("unchanged_kept") or 0) - (w[m].get("unchanged_kept") or 0)
+    ask = any(v > float(crit["f1_drop"]) + 1e-12 for k, v in losses.items() if k.endswith("F1")) or \
+        any(v > float(crit["rate_drop"]) + 1e-12 for k, v in losses.items() if not k.endswith("F1"))
+    return {"scores": sc, "ref_score": score(b), "winner": winner, "losses": losses, "ask": bool(ask)}
+
+
+def align_stats(metrics_path) -> dict[str, Any]:
+    """Online-alignment outcome over a run's pairs (from metrics.json `run.per_pair[].online.align_online`)."""
+    import json
+    from collections import Counter
+
+    d = json.loads(open(metrics_path, encoding="utf-8").read())
+    status, first, final_dt = Counter(), [], []
+    for r in d["run"]["per_pair"]:
+        ups = (r.get("online") or {}).get("align_online") or []
+        if r["mode"] != "oracle" or not ups:
+            continue
+        for u in ups:
+            status[u["status"]] += 1
+        acc = [i for i, u in enumerate(ups) if u["status"] == "accepted"]
+        first.append(acc[0] if acc else None)
+        last = [u for u in ups if u["status"] == "accepted"]
+        if last:
+            final_dt.append(last[-1]["delta_t_m"])
+    return {"updates": dict(status), "pairs_never_accepted": sum(f is None for f in first),
+            "first_accepted_update_median": (float(np.median([f for f in first if f is not None]))
+                                             if any(f is not None for f in first) else None),
+            "final_correction_vs_raw_cm_median": float(100 * np.median(final_dt)) if final_dt else None}  # fmt: skip
+
+
+def run_part_b_align(cfg: dict[str, Any], run_id: str = "chg3_partB_align", split: str = "dev_tune",
+                     workers: int | None = None) -> dict[str, Any]:  # fmt: skip
+    """The B3 variants (`chg3.part_b.align`) on the tuning set (resumable) + the selection."""
+    t0 = time.time()
+    pc = cfg["chg3"]["part_b"]["align"]
+    variants = {n: dict(ov or {}) for n, ov in pc["variants"].items()}
+    rows, paths = run_variants(cfg, variants, run_id, split, workers, resume=True)
+    sel = select_align(rows, pc["criterion"], list(pc["variants"]))
+    stats = {n: align_stats(p) for n, p in paths.items() if n != "offline"}
+    res = {"split": split, "variants": variants, "rows": rows, "criterion": dict(pc["criterion"]), **sel,
+           "align_stats": stats, "metrics_paths": paths}  # fmt: skip
+    path = write_metrics(outputs_root(cfg) / run_id, res, cfg, extra={"wall_time_s": time.time() - t0})
+    return {**res, "metrics_path": str(path)}
+
+
+def format_part_b_align(res: Mapping[str, Any]) -> str:
+    """Variant table (both modes), primary scores, losses of the winner vs offline, alignment stats."""
+    cols = ("moved_F1", "removed_F1", "new_F1", "false_deletion_rate", "unchanged_kept", "false_move_rate")
+    lines = [f"{'variant':<14} {'mode':<11}" + "".join(f"{c[:14]:>15}" for c in cols)]
+    for n, r in res["rows"].items():
+        for m in MODES:
+            lines.append(f"{n:<14} {m:<11}" + "".join(f"{'-' if r[m].get(c) is None else f'{100 * r[m][c]:.1f}':>15}"
+                                                       for c in cols))  # fmt: skip
+    lines.append(f"primary (mean moved / removed / new F1, both modes): offline {100 * res['ref_score']:.2f}; "
+                 + ", ".join(f"{n} {100 * v:.2f}" for n, v in res["scores"].items()))  # fmt: skip
+    lines.append(f"winner: {res['winner']}; losses vs offline (pt): "
+                 + ", ".join(f"{k} {100 * v:+.1f}" for k, v in res["losses"].items()))  # fmt: skip
+    lines.append("STOP: loss beyond the limit -> Erik decides" if res["ask"] else "within the limit -> new default")
+    for n, st in res["align_stats"].items():
+        lines.append(f"{n}: {st}")
     return "\n".join(lines)

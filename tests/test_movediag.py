@@ -137,3 +137,21 @@ def test_part_n_noise_rule():
     assert not sel["verdict"]["edge"]["pass"]  # loses 10 hits
     assert not sel["verdict"]["all"]["pass"]  # removed F1 -2 pt
     assert sel["winner"] == "app" and sel["p_new_min"] == 0.5175
+
+
+def test_part_b_align_rule():
+    """CHANGE 3 Part B (B3): best online variant by mean F1; flagged for Erik beyond the loss limit."""
+    from lsg.eval.chg3_checks import select_align
+
+    def row(mf, rf, nf, fd, uk):
+        r = {"moved_F1": mf, "removed_F1": rf, "new_F1": nf, "false_deletion_rate": fd, "unchanged_kept": uk}
+        return {"oracle": dict(r), "perception": dict(r)}
+
+    crit = {"tie": 0.005, "f1_drop": 0.02, "rate_drop": 0.01}
+    rows = {"offline": row(0.50, 0.40, 0.30, 0.03, 0.90), "online_all": row(0.49, 0.39, 0.30, 0.035, 0.90),
+            "online_struct": row(0.49, 0.392, 0.30, 0.035, 0.90)}  # fmt: skip
+    sel = select_align(rows, crit, ["offline", "online_all", "online_struct"])
+    assert sel["winner"] == "online_all" and not sel["ask"]  # tie within 0.5 pt -> the simpler one
+    rows["online_all"] = row(0.45, 0.39, 0.30, 0.035, 0.90)  # moved F1 -5 pt
+    rows["online_struct"] = row(0.45, 0.39, 0.30, 0.035, 0.90)
+    assert select_align(rows, crit, ["offline", "online_all", "online_struct"])["ask"]

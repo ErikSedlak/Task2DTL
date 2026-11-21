@@ -43,6 +43,7 @@ M7_OVERRIDES: dict[str, Any] = {
     "confidence.candidates.track.enabled": False,
     "perception.segment.method": "none",  # CHANGE 3 Part N off
     "confidence.candidates.track.appearance": False,
+    "alignment.online.enabled": False,  # CHANGE 3 Part B off (the M7 pre-pass)
 }
 
 
@@ -110,6 +111,8 @@ def registry(cfg: Mapping[str, Any]) -> dict[str, Ablation]:
                  desc="CHANGE 3 Part C off: equal hand-set vote weights 2.5, p_del 0.2"),
         Ablation("FULL-appconf", "FULL", {"confidence.candidates.track.appearance": False}, group="component",
                  desc="thin-object candidates without confidence, always emitted (CHANGE 3 Part N5 off)"),
+        Ablation("FULL-offlinealign", "FULL", {"alignment.online.enabled": False}, group="component",
+                 desc="T_align refined by a pre-pass over all processed frames (CHANGE 3 Part B online alignment off)"),
         Ablation("FULL-segment", "FULL", {"perception.segment.method": "none"}, group="component",
                  desc="candidate voxels linked by space only (CHANGE 3 Part N co-segmentation off)"),
         Ablation("FULL-moveev", "FULL", {"association.old_place.enabled": False}, group="component",

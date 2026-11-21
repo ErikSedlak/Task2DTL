@@ -16,6 +16,13 @@ alignment:                 # T_align refinement, label-free ICP (DECISIONS 2026-
   max_iter: 50
   max_delta_t: 0.20        # [m] reject corrections larger than this, keep raw T_align
   max_delta_rot_deg: 5.0
+  online:                  # CHANGE 3 Part B: one cumulative estimate during the walk from the frames seen so far
+    enabled: false         # (default set by the dev_tune rule, DECISIONS 2026-11-21); false = the pre-pass over all frames
+    every: 20              # re-estimate every this many processed frames (= online.snapshot_every)
+    min_cloud_frames: 3    # cloud frames (every frame_step-th processed frame) before the first estimate; raw T_align until then
+    target: all            # all reference surfaces | structure (wall / floor / ceiling faces only)
+    min_normal_spread: 0.05  # smallest eigenvalue of the mean n n^T of the matched target normals (degeneracy check)
+    min_target_points: 500 # target structure: fewer vertices -> all surfaces
 
 visibility:                # DESIGN §3 frame votes (tune on dev only)
   tau_near: 0.10           # [m] |d_obs - d_exp| <= tau_near -> present
@@ -339,6 +346,13 @@ chg3:                      # CHANGE 3 dev_tune sweeps (`lsg chg3 parta`; docs/CH
     criterion:             # written before the sweep (DECISIONS 2026-11-20): pass in both modes
       false_move_frac: 0.5 # false-move rate <= 0.5 x the `off` row's
       f1_drop: 0.02        # moved F1 >= the `off` row's - 0.02; winner = highest mean moved F1 of passing rows
+  part_b:                  # CHANGE 3 Part B (DECISIONS 2026-11-21), rules written before the runs
+    align:                 # B3 (`lsg chg3 partb-align`): offline pre-pass (reference) vs online cumulative estimates
+      variants:
+        offline: {alignment.online.enabled: false}
+        online_all: {alignment.online.enabled: true, alignment.online.target: all}
+        online_struct: {alignment.online.enabled: true, alignment.online.target: structure}
+      criterion: {tie: 0.005, f1_drop: 0.02, rate_drop: 0.01}   # Erik: online default unless the loss exceeds this
   part_n:                  # CHANGE 3 Part N (new objects; DECISIONS 2026-11-20), rules written before the runs
     segment:               # N1 blob splitting (`lsg chg3 partn-seg`), list order = simplicity order (ties)
       common: {confidence.candidates.p_new_min: 0.0}   # emit every candidate: the F1 guard sees the fragments

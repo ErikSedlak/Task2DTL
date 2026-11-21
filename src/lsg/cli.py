@@ -421,6 +421,16 @@ def _cmd_chg3_partn_noise(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_chg3_partb_align(args: argparse.Namespace) -> int:
+    """`lsg chg3 partb-align`: CHANGE 3 Part B (B3) online-alignment variants + the pre-written selection."""
+    from lsg.eval.chg3_checks import format_part_b_align, run_part_b_align
+
+    res = run_part_b_align(load_config(args.config), args.run_id, args.split, args.workers)
+    print(format_part_b_align(res))
+    print(f"metrics: {res['metrics_path']}")
+    return 0
+
+
 def _cmd_chg3_idstats(args: argparse.Namespace) -> int:
     """`lsg chg3 idstats --run <dir>`: identity-check similarity of same / different pairs (CHANGE 3 Part N)."""
     from pathlib import Path
@@ -626,6 +636,12 @@ def main(argv: list[str] | None = None) -> int:
     pnn.add_argument("--workers", type=int, default=None)
     pnn.add_argument("--config", default=None)
     pnn.set_defaults(func=_cmd_chg3_partn_noise)
+    pba = c3s.add_parser("partb-align", help="Part B (B3): offline vs online alignment variants + selection")
+    pba.add_argument("--run-id", default="chg3_partB_align")
+    pba.add_argument("--split", default="dev_tune", help="tuning split only (hard rule 4)")
+    pba.add_argument("--workers", type=int, default=None)
+    pba.add_argument("--config", default=None)
+    pba.set_defaults(func=_cmd_chg3_partb_align)
     ids = c3s.add_parser("idstats", help="Part N: identity-check similarity of same / different pairs from details/")
     ids.add_argument("--run", required=True, help="run directory (or id under outputs/) with details/<mode>/")
     ids.add_argument("--modes", default="oracle,perception")

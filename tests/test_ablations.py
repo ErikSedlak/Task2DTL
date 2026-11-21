@@ -46,6 +46,8 @@ def test_registry_overrides_exist_and_sweeps_come_from_config():
     assert reg["FULL-segment"].overrides == {"perception.segment.method": "none"}  # CHANGE 3 Part N
     assert abl.M7_OVERRIDES["perception.segment.method"] == "none"
     assert reg["FULL-appconf"].overrides == {"confidence.candidates.track.appearance": False}
+    assert reg["FULL-offlinealign"].overrides == {"alignment.online.enabled": False}  # CHANGE 3 Part B
+    assert abl.M7_OVERRIDES["alignment.online.enabled"] is False
     for a in reg.values():
         abl.apply_overrides(CFG, a.overrides)
     m7 = abl.apply_overrides(CFG, abl.M7_OVERRIDES)

@@ -76,6 +76,8 @@ def refined_alignment(
     acfg = cfg["alignment"]
     if not acfg.get("refine", True):
         return np.asarray(T_raw, float).copy(), {"accepted": False, "disabled": True, "cached": False}
+    if (acfg.get("online") or {}).get("enabled", False):  # CHANGE 3 Part B: refined during the walk instead
+        return np.asarray(T_raw, float).copy(), {"accepted": False, "online": True, "cached": False}
     path = cache_root(dict(cfg)) / "align" / f"{rescan_id}_{_align_key(ref_scan.scan_id, rescan_id, T_raw, acfg, frame_ids)}.json"
     if use_cache and path.is_file():
         d = json.loads(path.read_text(encoding="utf-8"))
