@@ -49,6 +49,10 @@ def test_registry_overrides_exist_and_sweeps_come_from_config():
     assert reg["FULL-offlinealign"].overrides == {"alignment.online.enabled": False}  # CHANGE 3 Part B
     assert abl.M7_OVERRIDES["alignment.online.enabled"] is False
     assert reg["FULL-chg2"].overrides == abl.CHG2_OVERRIDES
+    assert reg["FULL+detector"].overrides == {"perception.detector.enabled": True}  # CHANGE 3 Part E (lost its rule)
+    assert CFG["perception"]["detector"]["enabled"] is False
+    names = list(reg)
+    assert names.index("FULL+detector") == max(i for i, a in enumerate(reg.values()) if a.group in ("method", "component", "variant"))
     for a in reg.values():
         abl.apply_overrides(CFG, a.overrides)
     m7 = abl.apply_overrides(CFG, abl.M7_OVERRIDES)

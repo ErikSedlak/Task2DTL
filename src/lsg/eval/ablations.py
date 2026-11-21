@@ -144,6 +144,8 @@ def registry(cfg: Mapping[str, Any]) -> dict[str, Ablation]:
                  desc="unobserved things follow their moved anchor"),
         Ablation("FULL-keepparent", "FULL", {"update.keep_supported_parent": False}, group="variant",
                  desc="re-checked things always get infer_support's parent"),
+        Ablation("FULL+detector", "FULL", {"perception.detector.enabled": True}, group="variant",
+                 desc="perception candidates from Grounding DINO + SAM 2 (CHANGE 3 Part E, det_new; needs the detection cache)"),
     ]
     for t in m7.get("tau_free_sweep", []):
         rows.append(Ablation(f"FULL_tau{float(t):g}", "FULL", {"visibility.tau_free": float(t)}, group="tau_free",

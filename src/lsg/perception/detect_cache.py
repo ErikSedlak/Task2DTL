@@ -258,6 +258,10 @@ class DetectionCache:
         """Number of cached frames."""
         return len(list(self.dir.glob("*.npz"))) if self.dir.is_dir() else 0
 
+    def complete(self) -> bool:
+        """`cache_rescan` finished every detected frame of the rescan (`done.json`)."""
+        return (self.dir / "done.json").is_file()
+
 
 def cache_rescan(cfg: Mapping[str, Any], root: str | Path, rescan_id: str, prompts: Sequence[str],
                  frame_ids: Sequence[int], runner: DetectorRunner) -> dict[str, Any]:  # fmt: skip
@@ -281,4 +285,5 @@ def cache_rescan(cfg: Mapping[str, Any], root: str | Path, rescan_id: str, promp
             save_frame(p, det)
             done += 1
             n_det += len(det["scores"])
+    (out / "done.json").write_text(json.dumps({"frames": len(list(frame_ids))}), encoding="utf-8")
     return {"done": done, "skipped": skipped, "s": round(time.time() - t0, 1), "n_det": n_det, "n_prompts": len(used)}

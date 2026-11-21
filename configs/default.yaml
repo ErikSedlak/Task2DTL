@@ -164,15 +164,15 @@ perception:                # PerceptionSource, DESIGN §3 candidate + §6.6 (tun
       min_mask_region_area: 0
   detector:                # CHANGE 3 Part E: open-vocabulary detector (Grounding DINO + SAM 2, `lsg detect cache`;
                            # perception/detect_cache.py, perception/detector.py; DECISIONS 2026-11-21)
-    enabled: false         # set by the pre-written dev_tune rule (`lsg chg3 parte`)
+    enabled: false         # off by the pre-written dev_tune rule (`lsg chg3 parte`, DECISIONS): ablation row FULL+detector
     mode: replace          # replace: detector tracks (+ thin-object candidates) instead of residual candidates;
                            # union: also residual candidates that overlap no track
     frame_every: 2         # detect on every 2nd processed frame (Erik), by position in the strided sequence
-    min_score: 0.30        # Grounding DINO box score to use a cached detection
-    min_views: 1           # decorrelated views of a track to become an observation
+    min_score: 0.25        # Grounding DINO box score to use a cached detection (Part E step 1 on dev_tune)
+    min_views: 2           # decorrelated views of a track to become an observation (step 1)
     min_voxels: 5          # voxels of a track to become an observation
-    p_new_min: 0.0         # newness (share of track voxels > surf_dist off the reference mesh) to become a `new` node
-    labels: gdino          # gdino: label_topk from the summed detection scores | clip: CLIP on the track's crops
+    p_new_min: 0.5         # newness (share of track voxels > surf_dist off the reference mesh) to become a `new` node (step 1)
+    labels: gdino          # gdino: label_topk from the summed detection scores | clip: CLIP on the track's crops (step 1: gdino)
     join_frac: 0.3         # a detection joins the track holding >= this share of its voxels (else a new track)
     merge_frac: 0.5        # tracks overlapping by >= this share of the smaller one's voxels are merged (older id stays)
     min_px: 15             # [depth px] a detection needs this many valid pixels after erosion / outlier / structure filters

@@ -143,8 +143,8 @@ class PerceptionSource:
             from lsg.perception.detector import DetectorTracks
 
             cache = DetectionCache(self.cfg, seq_info.rescan_id, self.det_prompts)
-            if cache.n_frames() == 0:
-                raise FileNotFoundError(f"no detections cached in {cache.dir} (run `lsg detect cache`)")
+            if not cache.complete():  # a half-built cache would silently use fewer frames
+                raise FileNotFoundError(f"detection cache incomplete or missing: {cache.dir} (run `lsg detect cache`)")
             self.det = DetectorTracks(cache, self.filt, self.cfg, seq_info.intrinsics.K_depth, (W, H), self.doors)
         # CHANGE 3 Part N: image segments of every frame's residual pixels (frame -> (sorted pix, seg id))
         self.segm = seg_method(self.cfg)

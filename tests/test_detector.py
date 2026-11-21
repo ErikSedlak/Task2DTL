@@ -82,6 +82,9 @@ class StubCache:
     def n_frames(self):
         return len(self.frames)
 
+    def complete(self):
+        return True
+
 
 def _dcfg(mode="replace", **kw):
     c = copy.deepcopy(load_config())
