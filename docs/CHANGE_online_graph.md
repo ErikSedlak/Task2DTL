@@ -1,6 +1,6 @@
 # CHANGE 3 — tuning set, move evidence, incremental graph, confidence policy (proposal, 2026-11-20)
 
-**Status (2026-11-20): all questions answered (§8); Parts 0, A and C done; next Part B.** Builds on CHANGE 1 + 2,
+**Status (2026-11-20): all questions answered (§8); Parts 0, A, C and N done; next Part B.** Builds on CHANGE 1 + 2,
 which Erik fixed as the **final method** (2026-11-20). Comes from a logic review of the whole solution (chat,
 2026-11-20). Nothing here changes DESIGN.md before sign-off.
 
@@ -171,6 +171,17 @@ it (reference position, or the new position for `moved` and `new`). One log-odds
    (`lsg newcurve`), so that it actually filters. Candidates below it still take part in association (they can
    explain a move); they only do not become `new` nodes.
 
+## 5b. Part N — new objects (added 2026-11-20 at Erik's request, before Part B)
+
+**Implemented 2026-11-21** (DECISIONS "CHANGE 3 Part N"). Diagnosis: perception new P / R was low because of detection, not confidence: 61 % of GT new objects got no candidate (52 inside multi-object blobs), 77 % of emitted new nodes were residual noise or structure, 18 % re-detected reference objects; oracle misses were mostly same-label reference nodes taking a different new object (audit of 15 cases: 9 different objects, 3 ID changes). Steps, each with a rule written before its run:
+
+- **N1 co-segmentation** (default `geometric`): candidate hits on change targets 132 → 178, class-agnostic new R at `p_new_min` 0 21.4 → 49.3, GT new objects inside blobs 83 → 46; SAM variants (new dependency `segment-anything`) found fewer targets;
+- **N2 reference explain-away**: off (drops 808 false nodes but ≈ 20 true new objects);
+- **N3 identity check**: dropped (Erik) — the DINOv2 similarity of reference renders vs rescan crops separates same-class objects too weakly (pick 0.36 rejects 23 % of wrong partners);
+- **N4** candidate weights re-estimated (L_seen 0.01, L_free 0.52), `p_new_min` 0.517493.
+
+dev_tune, Part C → Part N, perception: new P / R / F1 5.6 / 7.0 / 6.2 → **10.0 / 5.6 / 7.2** (class-agnostic 15.1 / 8.4 / 10.8), removed P / R 48.8 / 24.1 → 50.0 / **33.7**, false deletion 3.6 → 4.1, moved F1 and false move unchanged; oracle unchanged. The candidate ceiling is far higher (new R 26.5 at `p_new_min` 0), but no available confidence signal separates real from false candidates: the next lever is rejecting residual noise (77 % of false candidates).
+
 ## 6. Part D — reporting
 
 - New P / R are reported twice: **labelled** (§5 rule, as now) and **class-agnostic** (geometry only), so the
@@ -226,6 +237,7 @@ Original questions:
       `a_u_c02` (Erik), `FULL-moveev` row (2026-11-20)
 - [x] Part C: vote statistics (`lsg chg3 votestats`), learned weights, `p_del` sweep (`lsg chg3 pdel`), cluster-vote
       candidate confidence, `p_new_min` from the curve, rows `FULL-learnedL` / `FULL-candtrack` (2026-11-20)
+- [x] Part N (new objects): diagnosis + identity audit, class-agnostic new P / R, co-segmentation (geometric default, SAM variant), explain-away (off), identity check (dropped), `p_new_min` 0.517493, row `FULL-segment` (2026-11-21)
 - [ ] Part B: `peek()`, candidate tracks, snapshot method runs, CLIP relabel rule, online alignment (per §8.4),
       anytime curve, viz
 - [ ] Part D: class-agnostic new in the tables; audit on the final method

@@ -62,6 +62,7 @@ Task2/
 │   │   ├── movediag.py      `lsg movediag`: predicted moves split by old-place evidence (CHANGE 3 Part A)
 │   │   ├── chg3_checks.py   `lsg chg3 parta` / `pdel`: CHANGE 3 variant sweeps on dev_tune + selection rules
 │   │   ├── votestats.py     `lsg chg3 votestats`: vote weights as likelihood ratios (CHANGE 3 Part C)
+│   │   ├── identitystats.py `lsg chg3 idstats`: same / different pair similarities (CHANGE 3 Part N)
 │   │   └── figures.py       the GT panel of the top-down figure (M8)
 │   ├── viz/                 PICTURES (M8; reads only method inputs / outputs)
 │   │   ├── topdown.py       before / after top-down PNG, nodes coloured by state
@@ -72,6 +73,9 @@ Task2/
 │       ├── residual.py      "nearer" depth pixels -> 3D points, minus reference surfaces / structure
 │       ├── voxels.py        4 cm voxel grid counting distinct viewpoints per voxel; per-voxel log-odds with see-through votes (CHANGE 2)
 │       ├── cluster.py       groups kept voxels into candidates; door swing-region filter
+│       ├── segment.py       per-frame image segments + co-segmentation clustering (CHANGE 3 Part N)
+│       ├── sam_cache.py     `lsg sam cache`: SAM label maps per frame (Part N variant)
+│       ├── identity.py      appearance similarity of node vs observation (Part N, disabled)
 │       ├── labeler.py       CLIP zero-shot labels from colour crops (cached)
 │       ├── appearance.py    rendered texture vs photo, DINOv2 patch features (cached) (M6)
 │       └── source.py        PerceptionSource: the above as an ObsSource
@@ -293,6 +297,11 @@ The rule: no imports from `oracle/` / `eval/`, and no rescan annotations. Inputs
 - `pair_counts(meta, objects_of, exclude_refs)`: per train (reference, rescan) pair, how many things / anchors were removed, moved (`rigid`) and added, from 3RScan.json + 3DSSG `objects.json` only (no downloads). It reads train rescans' change lists, so it lives in `eval/`.
 - `select_dev_tune(...)`: the 20 rooms with the most changes (best rescan each) plus 10 random rooms (seeded); the CLI appends the 3 `dev_train` pairs and writes `splits/dev_tune.txt` and `splits/download_tier3.txt` (scans not yet downloaded).
 - Settings in `splits.dev_tune` of `configs/default.yaml`. All tuning happens on `dev_tune` (CLAUDE.md hard rule 4); `dev_train` stays the 3-pair regression set.
+
+### `perception/segment.py` — CHANGE 3 Part N (co-segmentation)
+- `segment_frame`: one frame's residual pixels form a graph of neighbouring pixels; it is cut where the depth jumps and on concave creases (`normals_from_depth`, `concave_band`), and its connected parts are the frame's segments.
+- `cosegment_cluster`: kept voxels next to each other are joined only if no frame that sees both puts them in different segments; voxels never seen in one frame are not joined across gaps. Used by both candidate tiers in `source.py` when `perception.segment.method` is `geometric` or `sam` (`SamSegments` reads the `lsg sam cache` label maps).
+- `change/association.py`: `explained_by_reference` (N2) and `identity_gate` (N3, with `perception/identity.py`) are implemented but disabled by default.
 
 ### `eval/votestats.py` — CHANGE 3 Part C (`uv run lsg chg3 votestats`, `uv run lsg chg3 pdel`)
 - `node_vote_weights`: from a run's `details/`, the share of seen / free / free-like votes of every GT-unchanged and every GT-removed object (each object counts once), turned into the weights L_hit, L_miss, L_free_like as likelihood ratios, with bootstrap intervals; too few votes of a kind → the fallback 2.5.
