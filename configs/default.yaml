@@ -162,6 +162,28 @@ perception:                # PerceptionSource, DESIGN §3 candidate + §6.6 (tun
       pred_iou_thresh: 0.86
       stability_score_thresh: 0.92
       min_mask_region_area: 0
+  detector:                # CHANGE 3 Part E: open-vocabulary detector (Grounding DINO + SAM 2, `lsg detect cache`;
+                           # perception/detect_cache.py, perception/detector.py; DECISIONS 2026-11-21)
+    enabled: false         # set by the pre-written dev_tune rule (`lsg chg3 parte`)
+    mode: replace          # replace: detector tracks (+ thin-object candidates) instead of residual candidates;
+                           # union: also residual candidates that overlap no track
+    frame_every: 2         # detect on every 2nd processed frame (Erik), by position in the strided sequence
+    min_score: 0.30        # Grounding DINO box score to use a cached detection
+    min_views: 1           # decorrelated views of a track to become an observation
+    min_voxels: 5          # voxels of a track to become an observation
+    p_new_min: 0.0         # newness (share of track voxels > surf_dist off the reference mesh) to become a `new` node
+    labels: gdino          # gdino: label_topk from the summed detection scores | clip: CLIP on the track's crops
+    join_frac: 0.3         # a detection joins the track holding >= this share of its voxels (else a new track)
+    merge_frac: 0.5        # tracks overlapping by >= this share of the smaller one's voxels are merged (older id stays)
+    min_px: 15             # [depth px] a detection needs this many valid pixels after erosion / outlier / structure filters
+    erode_px: 1            # [depth px] mask erosion before back-projection (mixed pixels at object borders)
+    depth_mad_k: 3.0       # drop mask pixels with |d - median| > max(k * MAD, 0.05 m)
+    gdino_model: IDEA-Research/grounding-dino-tiny
+    sam_model: facebook/sam2.1-hiera-small
+    cache_box_threshold: 0.20     # detections are cached down to this score (min_score filters at run time)
+    image_short_side: 540  # [px] Grounding DINO input (the colour frames are 540 x 960 upright)
+    nms_iou: 0.7           # class-agnostic NMS over all prompt chunks
+    max_detections: 60     # per frame, by score
   door_filter: true       # drop clusters inside a reference door's swing region (M4, Erik)
   door_frac: 0.5           # share of a cluster's voxels inside a swing region -> dropped
   door_margin: 0.10        # [m] added to the swing radius (door width)
@@ -352,6 +374,14 @@ chg3:                      # CHANGE 3 dev_tune sweeps (`lsg chg3 parta`; docs/CH
         online_all: {alignment.online.enabled: true, alignment.online.target: all}
         online_struct: {alignment.online.enabled: true, alignment.online.target: structure}
       criterion: {tie: 0.005, f1_drop: 0.02, rate_drop: 0.01}   # Erik: online default unless the loss exceeds this
+  part_e:                  # CHANGE 3 Part E (detector; DECISIONS 2026-11-21), rule written before the runs (`lsg chg3 parte`)
+    common: {perception.detector.enabled: true, perception.detector.mode: replace}
+    step1:                 # perception only, detector `replace`, p_new_min 0: every combination below, then the
+      labels: [gdino, clip]   # newness threshold with the best labelled new F1 (ties: earlier combination, lower threshold)
+      min_score: [0.25, 0.35]
+      min_views: [1, 2]
+    thresholds: [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 0.95]
+    criterion: {tie: 0.005, f1_drop: 0.02, rate_drop: 0.01}   # step 2 guards vs `residual` (perception)
   part_n:                  # CHANGE 3 Part N (new objects; DECISIONS 2026-11-20), rules written before the runs
     segment:               # N1 blob splitting (`lsg chg3 partn-seg`), list order = simplicity order (ties)
       common: {confidence.candidates.p_new_min: 0.0}   # emit every candidate: the F1 guard sees the fragments

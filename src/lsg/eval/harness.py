@@ -116,7 +116,7 @@ def _candidate_rows(obs: Sequence[ObsInstance], truth: dict[str, tuple[int, str]
              "centroid": [round(float(v), 4) for v in o.centroid],
              "aabb": [[round(float(v), 4) for v in o.aabb_min], [round(float(v), 4) for v in o.aabb_max]],
              "n_voxels": len(o.points), "n_frames": len(o.masks), "n_crops": len(o.crops), "kind": o.kind,
-             "confidence": o.confidence, "emits_new": emits_new(o, cfg),
+             "confidence": o.confidence, "newness": getattr(o, "newness", None), "emits_new": emits_new(o, cfg),
              "cand_votes": None if o.cand_votes is None else [int(x) for x in o.cand_votes],
              "gt": list(truth[o.token]) if o.token in truth else None}
             for o in obs]  # fmt: skip
@@ -151,6 +151,28 @@ def make_appearance(cfg: dict[str, Any], ref: str, tex: TextureRenderer) -> Appe
     return AppearanceRunner(tex, _extractor(cfg), cfg, ref, cache)
 
 
+def pair_vocab(cfg: dict[str, Any], root: Path, ref: str, G_ref=None) -> tuple[list[str], dict[str, int]]:
+    """The perception vocabulary of a reference (CLIP labels and the CHANGE 3 Part E detector prompts):
+    reference-graph labels ∪ the `vocab_top_n` most frequent train labels (`train_meta.perception_vocab`)."""
+    if G_ref is None:
+        R = load_scan(root, ref, with_intrinsics=False)
+        G_ref = build_reference_graph(R, load_objects(root, ref), load_relations(root, ref), "gt", cfg)
+    top_n = int(cfg["perception"]["clip"]["vocab_top_n"])
+    return perception_vocab(G_ref, clip_vocab_table(root, cfg), top_n)
+
+
+def pair_prompts(cfg: dict[str, Any], root: Path, ref: str, G_ref=None) -> list[str]:
+    """Detector prompts of a reference (CHANGE 3 Part E): its perception vocabulary ordered reference labels
+    first, then train labels by frequency (`detect_cache.ordered_prompts`); the cache cuts it to one pass."""
+    from lsg.perception.detect_cache import ordered_prompts
+
+    if G_ref is None:
+        R = load_scan(root, ref, with_intrinsics=False)
+        G_ref = build_reference_graph(R, load_objects(root, ref), load_relations(root, ref), "gt", cfg)
+    vocab, _ = pair_vocab(cfg, root, ref, G_ref)
+    return ordered_prompts([n.label for n in G_ref.nodes if n.label], [t[0] for t in clip_vocab_table(root, cfg)], vocab)
+
+
 def identity_on(cfg: dict[str, Any], method: str) -> bool:
     """The N3 identity check runs for FULL with `association.identity.enabled` (CHANGE 3 Part N)."""
     return method == "FULL" and bool((cfg["association"].get("identity") or {}).get("enabled", False))
@@ -171,10 +193,11 @@ def _eval_group(task: dict[str, Any]) -> list[dict[str, Any]]:
     method = METHODS[task["method"]]
     priors = class_priors(root, cfg) if task["method"] == "FULL" else None
     tex = TextureRenderer(load_textured_mesh(root, ref)) if appearance_on(cfg, task["method"]) else None
-    labeler = vocab_nyu = label_nyu = None
+    labeler = vocab_nyu = label_nyu = det_prompts = None
     if "perception" in task["modes"]:
-        top_n = int(cfg["perception"]["clip"]["vocab_top_n"])
-        vocab, vocab_nyu = perception_vocab(G_ref, clip_vocab_table(root, cfg), top_n)
+        vocab, vocab_nyu = pair_vocab(cfg, root, ref, G_ref)
+        if (cfg["perception"].get("detector") or {}).get("enabled"):  # CHANGE 3 Part E
+            det_prompts = pair_prompts(cfg, root, ref, G_ref)
         labeler = make_labeler(cfg, vocab, task.get("clip_threads"))
         label_nyu = label_to_nyu40(root)  # eval's class mapping for the §5 rule (all of objects.json)
     out = []
@@ -198,7 +221,7 @@ def _eval_group(task: dict[str, Any]) -> list[dict[str, Any]]:
                 psrc = None
                 n_enc0, n_cache0 = (labeler.n_encoded, labeler.n_cached) if labeler is not None else (0, 0)
                 if mode == "perception":
-                    psrc = PerceptionSource(labeler, vocab_nyu, cfg)
+                    psrc = PerceptionSource(labeler, vocab_nyu, cfg, det_prompts=det_prompts)
                     src = _TeeSource(psrc, oracle)
                 else:
                     src = oracle

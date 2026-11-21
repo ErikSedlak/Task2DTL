@@ -16,7 +16,7 @@ Tuning set only (hard rule 4); writes `outputs/<run>/metrics.json` (hard rule 5)
 from __future__ import annotations
 
 import time
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from typing import Any
 
 import numpy as np
@@ -60,8 +60,8 @@ def select(rows: Mapping[str, Mapping[str, Mapping[str, Any]]], crit: Mapping[st
 
 def run_variants(cfg: dict[str, Any], variants: Mapping[str, Mapping[str, Any]], rid: str, split: str,
                  workers: int | None = None, details: bool = False, resume: bool = False,
-                 only: list[str] | None = None) -> tuple[dict[str, Any], dict[str, str]]:  # fmt: skip
-    """FULL on `split` (both modes) once per variant (dotted overrides) into `outputs/<rid>/<variant>`.
+                 only: list[str] | None = None, modes: Sequence[str] = MODES) -> tuple[dict[str, Any], dict[str, str]]:  # fmt: skip
+    """FULL on `split` (`modes`, default both) once per variant (dotted overrides) into `outputs/<rid>/<variant>`.
 
     `resume`: a variant whose `metrics.json` exists is read back instead of rerun (CHANGE 3 Part N: the SAM
     variants wait for the SAM cache). `only`: run just these variants (others are read back if present).
@@ -75,13 +75,13 @@ def run_variants(cfg: dict[str, Any], variants: Mapping[str, Mapping[str, Any]],
         if (resume and mp.exists()) or (only is not None and name not in only):
             if mp.exists():
                 summ = json.loads(mp.read_text(encoding="utf-8"))["metrics"]["summary"]
-                rows[name] = {m: _pick(summ[m]) for m in MODES}
+                rows[name] = {m: _pick(summ[m]) for m in modes}
                 paths[name] = str(mp)
             continue
         c = apply_overrides(cfg, ov)
-        r = run_split(c, split, obs_modes=list(MODES), method="FULL", run_id=f"{rid}/{name}", workers=workers,
+        r = run_split(c, split, obs_modes=list(modes), method="FULL", run_id=f"{rid}/{name}", workers=workers,
                       details=details)  # fmt: skip
-        rows[name] = {m: _pick(r["summary"][m]) for m in MODES}
+        rows[name] = {m: _pick(r["summary"][m]) for m in modes}
         paths[name] = r["metrics_path"]
     return rows, paths
 
@@ -441,3 +441,115 @@ def format_part_b_align(res: Mapping[str, Any]) -> str:
     for n, st in res["align_stats"].items():
         lines.append(f"{n}: {st}")
     return "\n".join(lines)
+
+
+# ---- Part E: open-vocabulary detector (DECISIONS 2026-11-21, rule written before the runs) ----------------------
+
+
+def part_e_grid(pe: Mapping[str, Any]) -> dict[str, dict[str, Any]]:
+    """Step 1 variants: every (min_score, min_views, labels) of `chg3.part_e.step1`, detector `replace`, p_new_min 0."""
+    s1 = pe["step1"]
+    out = {}
+    for lab in s1["labels"]:
+        for ms in s1["min_score"]:
+            for mv in s1["min_views"]:
+                out[f"{lab}_s{ms:g}_v{mv}"] = {**pe["common"], "perception.detector.min_score": float(ms),
+                                               "perception.detector.min_views": int(mv),
+                                               "perception.detector.labels": lab, "perception.detector.p_new_min": 0.0}
+    return out
+
+
+def select_part_e_step1(curves: Mapping[str, Mapping[str, Any]]) -> dict[str, Any]:
+    """Best (variant, newness threshold) by labelled new F1 (ties: earlier variant, then lower threshold)."""
+    best = None
+    for name, cv in curves.items():
+        for r in cv["curve"]:
+            if best is None or r["f1"] > best["f1"] + 1e-12:
+                best = {"variant": name, "p_new_min": r["p_new_min"], "f1": r["f1"], "precision": r["precision"],
+                        "recall": r["recall"], "ag_f1": r["ag_f1"]}  # fmt: skip
+    return best or {}
+
+
+def select_part_e(rows: Mapping[str, Mapping[str, Mapping[str, Any]]], crit: Mapping[str, Any], order: list[str],
+                  ref: str = "residual") -> dict[str, Any]:  # fmt: skip
+    """Step 2 rule: highest perception new F1 among the variants that pass the guards against `ref` (perception:
+    moved / removed F1 not lower by more than `f1_drop`, false deletion not higher and unchanged kept not lower by
+    more than `rate_drop`); ties within `tie` -> earlier in `order`. `ref` itself always passes. Oracle rows must be
+    identical (`oracle_differs` lists the variants whose oracle metrics differ from `ref`)."""
+    b = rows[ref]["perception"]
+    verdict = {}
+    for n in order:
+        r = rows[n]["perception"]
+        losses = {k: (b.get(k) or 0) - (r.get(k) or 0) for k in ("moved_F1", "removed_F1", "unchanged_kept")}
+        losses["false_deletion_rate"] = (r.get("false_deletion_rate") or 0) - (b.get("false_deletion_rate") or 0)
+        ok = n == ref or (losses["moved_F1"] <= float(crit["f1_drop"]) + 1e-12
+                          and losses["removed_F1"] <= float(crit["f1_drop"]) + 1e-12
+                          and losses["unchanged_kept"] <= float(crit["rate_drop"]) + 1e-12
+                          and losses["false_deletion_rate"] <= float(crit["rate_drop"]) + 1e-12)  # fmt: skip
+        verdict[n] = {"pass": bool(ok), "new_F1": float(r.get("new_F1") or 0.0), "losses": losses}
+    passing = [n for n in order if verdict[n]["pass"]]
+    top = max(verdict[n]["new_F1"] for n in passing)
+    winner = next(n for n in passing if verdict[n]["new_F1"] >= top - float(crit["tie"]) - 1e-12)
+    oracle_differs = [n for n in order if "oracle" in rows[n] and "oracle" in rows[ref]
+                      and rows[n]["oracle"] != rows[ref]["oracle"]]  # fmt: skip
+    return {"verdict": verdict, "winner": winner, "oracle_differs": oracle_differs}
+
+
+def run_part_e(cfg: dict[str, Any], run_id: str = "chg3_partE", split: str = "dev_tune",
+               workers: int | None = None) -> dict[str, Any]:  # fmt: skip
+    """Part E on the tuning set (resumable): step 1 grid (perception) + newness curves, step 2 variants + rule."""
+    from pathlib import Path
+
+    from lsg.eval.newcurve import new_curve
+    from lsg.eval.newfunnel import new_funnel
+
+    t0 = time.time()
+    pe = cfg["chg3"]["part_e"]
+    grid = part_e_grid(pe)
+    rows1, paths1 = run_variants(cfg, grid, f"{run_id}/step1", split, workers, resume=True, modes=("perception",))
+    ths = [float(t) for t in pe["thresholds"]]
+    curves = {n: new_curve(apply_overrides(cfg, ov), Path(paths1[n]).parent, ths, score="newness")
+              for n, ov in grid.items()}  # fmt: skip
+    pick = select_part_e_step1(curves)
+    best = {**grid[pick["variant"]], "perception.detector.p_new_min": float(pick["p_new_min"])}
+    variants = {"residual": {},
+                "det": {**best, "perception.detector.mode": "replace", "perception.detector.p_new_min": 0.0},
+                "det_new": {**best, "perception.detector.mode": "replace"},
+                "det_union": {**best, "perception.detector.mode": "union"}}  # fmt: skip
+    rows2, paths2 = run_variants(cfg, variants, f"{run_id}/step2", split, workers, details=True, resume=True)
+    sel = select_part_e(rows2, pe["criterion"], list(variants))
+    funnels = {n: new_funnel(Path(p).parent) for n, p in paths2.items()}
+    res = {"split": split, "step1": {"variants": grid, "rows": rows1, "curves": {n: c["curve"] for n, c in curves.items()},
+                                     "pick": pick},
+           "step2": {"variants": variants, "rows": rows2, **sel, "funnels": funnels},
+           "criterion": dict(pe["criterion"]), "metrics_paths": {**paths1, **{f"step2/{n}": p for n, p in paths2.items()}}}  # fmt: skip
+    path = write_metrics(outputs_root(cfg) / run_id, res, cfg, extra={"wall_time_s": time.time() - t0})
+    return {**res, "metrics_path": str(path)}
+
+
+def format_part_e(res: Mapping[str, Any]) -> str:
+    """Step 1 best thresholds per variant, the pick; step 2 table, verdicts, winner, funnels."""
+    L = ["step 1 (perception, detector replace): best labelled new F1 over the newness threshold"]
+    for n, cv in res["step1"]["curves"].items():
+        b = max(cv, key=lambda r: r["f1"])
+        L.append(f"  {n:<22} p_new_min {b['p_new_min']:.2f}: P {100 * (b['precision'] or 0):5.1f} R "
+                 f"{100 * (b['recall'] or 0):5.1f} F1 {100 * b['f1']:5.1f}  (agnostic F1 {100 * b['ag_f1']:5.1f}, "
+                 f"{b['n_new']} new)")  # fmt: skip
+    p = res["step1"]["pick"]
+    L.append(f"  pick: {p['variant']} at newness >= {p['p_new_min']:.2f} (F1 {100 * p['f1']:.1f})")
+    cols = ("new_P", "new_R", "new_F1", "new_ag_P", "new_ag_R", "moved_F1", "removed_F1", "false_deletion_rate",
+            "unchanged_kept", "false_move_rate", "cand_per_pair")  # fmt: skip
+    L.append(f"step 2 (FULL, dev_tune): {'variant':<10} {'mode':<11}" + "".join(f"{c[:12]:>13}" for c in cols))
+    s2 = res["step2"]
+    for n, r in s2["rows"].items():
+        for m in MODES:
+            L.append(f"  {n:<10} {m:<11}" + "".join(
+                f"{'-' if r[m].get(c) is None else (f'{r[m][c]:.1f}' if c == 'cand_per_pair' else f'{100 * r[m][c]:.1f}'):>13}"
+                for c in cols))  # fmt: skip
+    for n, v in s2["verdict"].items():
+        L.append(f"  {n:<10} {'pass' if v['pass'] else 'FAIL'}  new F1 {100 * v['new_F1']:.1f}  losses vs residual (pt): "
+                 + ", ".join(f"{k} {100 * x:+.1f}" for k, x in v["losses"].items()))  # fmt: skip
+    L.append(f"  winner: {s2['winner']}; oracle differs from residual in: {s2['oracle_differs'] or 'none'}")
+    for n, fu in s2["funnels"].items():
+        L.append(f"  funnel {n}: {fu['summary']}")
+    return "\n".join(L)

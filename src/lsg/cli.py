@@ -313,6 +313,42 @@ def _cmd_sam_cache(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_detect_cache(args: argparse.Namespace) -> int:
+    """`lsg detect cache --split <split>`: Grounding DINO + SAM 2 detections of every 2nd processed frame (CHANGE 3 Part E)."""
+    import time
+    from pathlib import Path
+
+    from lsg.config import REPO_ROOT, data_root
+    from lsg.eval.harness import pair_prompts
+    from lsg.io.scan3r import open_sequence, read_pairs
+    from lsg.perception.detect_cache import DetectorRunner, cache_key, cache_rescan, detect_frames
+
+    cfg = load_config(args.config)
+    root = data_root(cfg)
+    d = cfg["perception"]["detector"]
+    pairs = []
+    for sp_name in args.split.split(","):
+        sp = Path(sp_name) if Path(sp_name).suffix else REPO_ROOT / "splits" / f"{sp_name}.txt"
+        pairs += read_pairs(sp)
+    pairs = pairs[: args.pairs] if args.pairs else pairs
+    runner = DetectorRunner(cfg, device=args.device)
+    print(f"detect cache key {cache_key(cfg)}; {len(pairs)} rescans of {args.split}", flush=True)
+    t0, n = time.time(), 0
+    prompts_of: dict[str, list[str]] = {}
+    for k, (ref, s) in enumerate(pairs):
+        if ref not in prompts_of:
+            prompts_of[ref] = pair_prompts(cfg, root, ref)
+        with open_sequence(root, s) as seq:
+            fids = detect_frames(seq.frame_ids, int(cfg["frames"]["stride"]), int(d.get("frame_every", 2)))
+        r = cache_rescan(cfg, root, s, prompts_of[ref], fids, runner)
+        n += r["done"]
+        rate = (time.time() - t0) / max(n, 1)
+        print(f"[{k + 1}/{len(pairs)}] {s}: {r['done']} new, {r['skipped']} cached, {r['n_det']} detections, "
+              f"{r['n_prompts']} prompts, {r['s']} s ({rate:.2f} s/frame, {runner.device}, {runner.sam_kind})",
+              flush=True)  # fmt: skip
+    return 0
+
+
 def _cmd_anytime(args: argparse.Namespace) -> int:
     """`lsg anytime`: FULL with snapshot method runs; anytime curve + stability (CHANGE 3 Part B)."""
     from lsg.eval.anytime import format_anytime
@@ -428,6 +464,28 @@ def _cmd_chg3_partb_align(args: argparse.Namespace) -> int:
     res = run_part_b_align(load_config(args.config), args.run_id, args.split, args.workers)
     print(format_part_b_align(res))
     print(f"metrics: {res['metrics_path']}")
+    return 0
+
+
+def _cmd_chg3_parte(args: argparse.Namespace) -> int:
+    """`lsg chg3 parte`: CHANGE 3 Part E detector thresholds + variants on dev_tune + the pre-written selection."""
+    from lsg.eval.chg3_checks import format_part_e, run_part_e
+
+    res = run_part_e(load_config(args.config), args.run_id, args.split, args.workers)
+    print(format_part_e(res))
+    print(f"metrics: {res['metrics_path']}")
+    return 0
+
+
+def _cmd_newfunnel(args: argparse.Namespace) -> int:
+    """`lsg newfunnel --run <dir>`: where GT new objects are lost in perception (needs details/ + candidates/)."""
+    from pathlib import Path
+
+    from lsg.config import outputs_root
+    from lsg.eval.newfunnel import format_funnel, new_funnel
+
+    run = Path(args.run) if Path(args.run).is_dir() else outputs_root(load_config(args.config)) / args.run
+    print(format_funnel(new_funnel(run)))
     return 0
 
 
@@ -617,6 +675,20 @@ def main(argv: list[str] | None = None) -> int:
     smc.add_argument("--config", default=None)
     smc.set_defaults(func=_cmd_sam_cache)
 
+    nf = sub.add_parser("newfunnel", help="where GT new objects are lost in perception (run with details)")
+    nf.add_argument("--run", required=True, help="run dir or id under outputs/ (with details/ and candidates/)")
+    nf.add_argument("--config", default=None)
+    nf.set_defaults(func=_cmd_newfunnel)
+
+    dt = sub.add_parser("detect", help="open-vocabulary detection cache: Grounding DINO + SAM 2 (CHANGE 3 Part E)")
+    dts = dt.add_subparsers(dest="detect_cmd", required=True)
+    dtc = dts.add_parser("cache", help="detections of every 2nd processed frame of a split's rescans")
+    dtc.add_argument("--split", default="dev_tune", help="split name(s) under splits/ (comma list) or a pair file")
+    dtc.add_argument("--pairs", type=int, default=None, help="only the first N pairs (timing)")
+    dtc.add_argument("--device", default="cuda")
+    dtc.add_argument("--config", default=None)
+    dtc.set_defaults(func=_cmd_detect_cache)
+
     pns = c3s.add_parser("partn-seg", help="Part N (N1): blob-splitting variants + selection (resumable)")
     pns.add_argument("--run-id", default="chg3_partN_seg")
     pns.add_argument("--split", default="dev_tune", help="tuning split only (hard rule 4)")
@@ -643,6 +715,12 @@ def main(argv: list[str] | None = None) -> int:
     pba.add_argument("--workers", type=int, default=None)
     pba.add_argument("--config", default=None)
     pba.set_defaults(func=_cmd_chg3_partb_align)
+    pe_ = c3s.add_parser("parte", help="Part E: detector thresholds (step 1) + variants (step 2) + selection (resumable)")
+    pe_.add_argument("--run-id", default="chg3_partE")
+    pe_.add_argument("--split", default="dev_tune", help="tuning split only (hard rule 4)")
+    pe_.add_argument("--workers", type=int, default=None)
+    pe_.add_argument("--config", default=None)
+    pe_.set_defaults(func=_cmd_chg3_parte)
     ids = c3s.add_parser("idstats", help="Part N: identity-check similarity of same / different pairs from details/")
     ids.add_argument("--run", required=True, help="run directory (or id under outputs/) with details/<mode>/")
     ids.add_argument("--modes", default="oracle,perception")
@@ -755,7 +833,10 @@ def main(argv: list[str] | None = None) -> int:
     args = p.parse_args(argv)
     from lsg.config import setup_hub_offline
 
-    setup_hub_offline(load_config(getattr(args, "config", None)))  # before torch / timm / open_clip load
+    hub_cfg = load_config(getattr(args, "config", None))
+    if getattr(args, "func", None) is _cmd_detect_cache:  # the detector models must be cached too
+        hub_cfg["perception"]["detector"]["enabled"] = True
+    setup_hub_offline(hub_cfg)  # before torch / timm / open_clip / transformers load
     return args.func(args)
 
 

@@ -28,13 +28,17 @@ def load_config(path: str | os.PathLike | None = None) -> dict[str, Any]:
 
 
 def hub_repos(cfg: dict[str, Any]) -> list[str]:
-    """Hugging Face Hub repos of the frozen models: DINOv2 via timm (`timm/<appearance.model>`) and
-    CLIP via open_clip (`perception.clip.hf_repo`)."""
+    """Hugging Face Hub repos of the frozen models: DINOv2 via timm (`timm/<appearance.model>`),
+    CLIP via open_clip (`perception.clip.hf_repo`), and with `perception.detector.enabled` the detector's
+    Grounding DINO + SAM 2 (`lsg detect cache` enables it for the check)."""
     out = []
     if cfg.get("appearance", {}).get("model"):
         out.append(f"timm/{cfg['appearance']['model']}")
     if cfg.get("perception", {}).get("clip", {}).get("hf_repo"):
         out.append(str(cfg["perception"]["clip"]["hf_repo"]))
+    det = cfg.get("perception", {}).get("detector") or {}  # CHANGE 3 Part E: needed by `lsg detect cache` only
+    if det.get("enabled", False):
+        out += [str(det[k]) for k in ("gdino_model", "sam_model") if det.get(k)]
     return out
 
 

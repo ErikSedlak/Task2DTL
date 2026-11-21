@@ -42,13 +42,19 @@ reference surface). The same >= `min_views` / clustering / door rules apply; clu
 depth candidate are dropped (depth wins). They become `ObsInstance(kind="appearance")`, with
 tokens continuing after the depth candidates.
 
+Detector (CHANGE 3 Part E, `perception.detector`): cached Grounding DINO + SAM 2 detections are fused
+into 3D tracks (`detector.DetectorTracks`) and become `ObsInstance(kind="detector")` with tokens `d<k>`
+(stable across snapshots), `label_topk` from the detection scores (or CLIP, `labels: clip`) and a
+`newness` score. `mode: replace` drops the residual depth candidates (thin-object candidates stay);
+`union` keeps the residual candidates that overlap no detector instance.
+
 Method side: inputs are the reference context and the rescan's RGB-D frames + poses +
 refined `T_align` only. Never imports `oracle` / `eval`, never reads rescan annotations.
 """
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from typing import Any
 
 import numpy as np
@@ -75,6 +81,7 @@ class PerceptionSource:
         label_nyu: Mapping[str, int],
         cfg: Mapping[str, Any],
         with_crops: bool = True,
+        det_prompts: Sequence[str] | None = None,
     ):
         """
         Args:
@@ -82,7 +89,9 @@ class PerceptionSource:
             label_nyu: Vocabulary label -> nyu40 (`train_meta.perception_vocab`).
             cfg: Full config (`perception`, `decorrelation`).
             with_crops: Read colour frames for crops (needs `seq_info.root` with the sequence).
+            det_prompts: The detector's ordered prompt list (`detect_cache.ordered_prompts`; CHANGE 3 Part E).
         """
+        self.det_prompts = list(det_prompts or [])
         self.labeler = labeler
         self.label_nyu = dict(label_nyu)
         self.cfg = cfg
@@ -126,6 +135,17 @@ class PerceptionSource:
         W, H = seq_info.intrinsics.depth_wh
         self._wh = (W, H)
         self._frames: list[tuple[int, np.ndarray, np.ndarray]] = []
+        dc = self.pc.get("detector") or {}  # CHANGE 3 Part E
+        self.det = None
+        self.det_mode = str(dc.get("mode", "replace"))
+        if dc.get("enabled", False):
+            from lsg.perception.detect_cache import DetectionCache
+            from lsg.perception.detector import DetectorTracks
+
+            cache = DetectionCache(self.cfg, seq_info.rescan_id, self.det_prompts)
+            if cache.n_frames() == 0:
+                raise FileNotFoundError(f"no detections cached in {cache.dir} (run `lsg detect cache`)")
+            self.det = DetectorTracks(cache, self.filt, self.cfg, seq_info.intrinsics.K_depth, (W, H), self.doors)
         # CHANGE 3 Part N: image segments of every frame's residual pixels (frame -> (sorted pix, seg id))
         self.segm = seg_method(self.cfg)
         self._segs: dict[int, tuple[np.ndarray, np.ndarray]] = {}
@@ -177,6 +197,10 @@ class PerceptionSource:
         self.stats["nearer_px"] += int(nearer_mask(frame.depth, d_exp, self.cfg).sum())
         if self.wants_appearance and ref_render is not None and ref_render.appearance is not None:
             self._observe_appearance(frame, ref_render, K, pose)
+        if self.det is not None:
+            self.det.observe(int(frame.idx), frame.depth, pose)
+            if self.det_mode == "replace":  # no residual depth candidates
+                return
         tau = float(self.pc["tau_new"])
         vl = None
         if not self.relaxed:
@@ -292,7 +316,20 @@ class PerceptionSource:
 
     def _build(self, record: bool) -> list[ObsInstance]:
         """`finish` (record: stats, `candidates`, tokens `c<k>` by size) or `peek` (tracks, cached labels)."""
-        cands, grid, dropped = self._depth_clusters(record=record)
+        dets = self.det.instances(record) if self.det is not None else []
+        if self.det is not None and self.det_mode == "replace":
+            cands, grid, dropped = [], [], []
+        else:
+            cands, grid, dropped = self._depth_clusters(record=record)
+            if dets:  # union: residual candidates overlapping a detector instance are dropped
+                from lsg.perception.detector import overlaps
+
+                d_pts = [d["points"] for d in dets]
+                keep = [not overlaps(c.points, d_pts, 1.5 * float(self.pc["voxel"]), 0.3) for c in cands]
+                if record:
+                    self.stats["det_union_dropped"] = int(len(keep) - sum(keep))
+                cands = [c for c, k in zip(cands, keep) if k]
+                grid = [g for g, k in zip(grid, keep) if k]
         votes = [self.cluster_votes(c, g) if self.track else None for c, g in zip(cands, grid)]
         conf = [self._confidence(c, g, v) for c, g, v in zip(cands, grid, votes)]
         if self.candconf and record:
@@ -303,7 +340,8 @@ class PerceptionSource:
             self.stats["below_p_new_min"] = int(sum(bool(p is not None and p < p_min) for p in conf))
         masks = self._tier_masks(cands, grid)
         kinds = ["depth"] * len(cands)
-        app = self._appearance_candidates([(self.vox_large if g else self.vox).coords(c.voxels) for c, g in zip(cands, grid)])
+        app = self._appearance_candidates([(self.vox_large if g else self.vox).coords(c.voxels) for c, g in zip(cands, grid)]
+                                          + [d["voxel_coords"] for d in dets])  # fmt: skip
         if app:
             masks += self._masks(app, self._frames_app, len(self.vox_app))
             kinds += ["appearance"] * len(app)
@@ -348,7 +386,43 @@ class PerceptionSource:
                 nyu40=self.label_nyu.get(label), points=c.points.copy(), masks=pm, crops=cr, kind=kind,
                 confidence=p, cand_votes=cv,
             ))  # fmt: skip
-        return out if record else sorted(out, key=lambda o: int(o.token[1:]))
+        out += self._detector_instances(dets, record, k_top)
+        return out if record else sorted(out, key=lambda o: (o.token[0], int(o.token[1:])))
+
+    def _detector_instances(self, dets: list[dict[str, Any]], record: bool, k_top: int) -> list[ObsInstance]:
+        """CHANGE 3 Part E: detector tracks -> `ObsInstance(kind="detector")` (labels: summed detection scores or CLIP)."""
+        if self.det is None:
+            return []
+        if record:
+            self.stats.update(self.det.stats)
+        if not dets:
+            return []
+        use_clip = str(self.pc["detector"].get("labels", "gdino")) == "clip" and self.labeler is not None
+        crops: list[list[np.ndarray]] = [[] for _ in dets]
+        if use_clip:
+            grow = float((self.cfg.get("online") or {}).get("relabel_growth", 0.25))
+            need = [i for i, d in enumerate(dets) if record or d["token"] not in self._track_label
+                    or len(d["points"]) > (1.0 + grow) * self._track_label[d["token"]][0]]  # fmt: skip
+            if self.with_crops and need:
+                for i, cr in zip(need, self._crops([dets[i]["masks"] for i in need])):
+                    crops[i] = cr
+            for i in need:
+                topk = self.labeler.topk(crops[i], k_top) if crops[i] else []
+                self._track_label[dets[i]["token"]] = (len(dets[i]["points"]), topk)
+            topks = [self._track_label[d["token"]][1] for d in dets]
+        else:
+            topks = [self.det.label_topk(d["label_sum"], k_top) for d in dets]
+        out = []
+        for d, cr, topk in zip(dets, crops, topks):
+            label = topk[0][0] if topk else UNLABELLED
+            if record:
+                self.stats["labelled"] += bool(topk)
+            out.append(ObsInstance(
+                token=d["token"], label=label, label_topk=[(a, float(b)) for a, b in topk],
+                nyu40=self.label_nyu.get(label), points=d["points"].copy(), masks=d["masks"], crops=cr,
+                kind="detector", confidence=None, newness=round(float(d["newness"]), 6),
+            ))  # fmt: skip
+        return out
 
     def _track_ids(self, cands: list[Candidate], grids: list[int]) -> list[str]:
         """Stable ids across snapshots: the previous snapshot's tracks, oldest first, each take the unassigned

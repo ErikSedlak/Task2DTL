@@ -111,7 +111,11 @@ def new_node(k: int, o: ObsInstance, rescan_id: str | None) -> Node:
 
 def emits_new(o: ObsInstance, cfg: Mapping[str, Any] | None) -> bool:
     """An unmatched observation becomes a `new` node unless its candidate confidence (CHANGE 2,
-    perception only; oracle instances carry None) is below `confidence.candidates.p_new_min`."""
+    perception only; oracle instances carry None) is below `confidence.candidates.p_new_min`.
+    Detector instances (CHANGE 3 Part E) instead need `newness >= perception.detector.p_new_min`."""
+    if getattr(o, "kind", None) == "detector" and cfg is not None:
+        dc = (cfg.get("perception", {}) or {}).get("detector") or {}
+        return o.newness is None or float(o.newness) >= float(dc.get("p_new_min", 0.0))
     if o.confidence is None or cfg is None:
         return True
     cc = (cfg.get("confidence", {}) or {}).get("candidates") or {}

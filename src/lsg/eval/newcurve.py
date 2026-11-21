@@ -37,25 +37,42 @@ def thresholds_of(cfg: Mapping[str, Any], extra: Sequence[float] | None = None) 
 
 
 def curve_counts(pred_new_by_pair: Mapping[str, Sequence[Any]], gts: Mapping[str, Any], cfg: Mapping[str, Any],
-                 thresholds: Sequence[float], label_nyu: Mapping[str, int] | None = None) -> list[dict[str, Any]]:  # fmt: skip
-    """TP / FP / FN / P / R per threshold over pairs (nodes without confidence always count)."""
+                 thresholds: Sequence[float], label_nyu: Mapping[str, int] | None = None,
+                 scores: Mapping[str, Sequence[float | None]] | None = None) -> list[dict[str, Any]]:  # fmt: skip
+    """TP / FP / FN / P / R / F1 per threshold over pairs, labelled and class-agnostic (`ag_*`).
+
+    A node's score is its `confidence`, or `scores[pair][i]` when given (CHANGE 3 Part E: detector newness);
+    nodes without a score always count.
+    """
     rows = []
     for t in thresholds:
-        tp = fp = fn = 0
+        c = {"tp": 0, "fp": 0, "fn": 0, "ag_tp": 0, "ag_fp": 0, "ag_fn": 0}
         for key, nodes in pred_new_by_pair.items():
-            keep = [n for n in nodes if n.confidence is None or float(n.confidence) >= t]
-            m = match_new(keep, gts[key], "perception", cfg, label_nyu=label_nyu)
-            tp += len(m["tp"])
-            fp += len(m["fp"])
-            fn += len(m["fn"])
-        rows.append({"p_new_min": float(t), "tp": tp, "fp": fp, "fn": fn, "n_new": tp + fp,
-                     "precision": tp / (tp + fp) if tp + fp else None,
-                     "recall": tp / (tp + fn) if tp + fn else None})  # fmt: skip
+            sc = scores[key] if scores is not None else [n.confidence for n in nodes]
+            keep = [n for n, s in zip(nodes, sc) if s is None or float(s) >= t]
+            for pre, lab in (("", True), ("ag_", False)):
+                m = match_new(keep, gts[key], "perception", cfg, label_nyu=label_nyu, use_label=lab)
+                for k in ("tp", "fp", "fn"):
+                    c[pre + k] += len(m[k])
+        row = {"p_new_min": float(t), **c, "n_new": c["tp"] + c["fp"]}
+        for pre in ("", "ag_"):
+            tp, fp, fn = c[pre + "tp"], c[pre + "fp"], c[pre + "fn"]
+            P = tp / (tp + fp) if tp + fp else None
+            R = tp / (tp + fn) if tp + fn else None
+            row[pre + "precision"], row[pre + "recall"] = P, R
+            row[pre + "f1"] = 2 * P * R / (P + R) if P and R else 0.0
+        rows.append(row)
     return rows
 
 
-def new_curve(cfg: dict[str, Any], run_dir: str | Path, thresholds: Sequence[float] | None = None) -> dict[str, Any]:
-    """Score the saved perception graphs of `run_dir` at every threshold; write `newcurve/metrics.json`."""
+def new_curve(cfg: dict[str, Any], run_dir: str | Path, thresholds: Sequence[float] | None = None,
+              score: str = "confidence") -> dict[str, Any]:  # fmt: skip
+    """Score the saved perception graphs of `run_dir` at every threshold; write `newcurve/metrics.json`.
+
+    `score`: `confidence` (the new node's) or `newness` (CHANGE 3 Part E: the detector instance's newness, read
+    from `candidates/<pair>.json` by the node's `obs_token`; the run must have used `p_new_min` 0).
+    """
+    import json
     run_dir = Path(run_dir)
     files = sorted((run_dir / "graphs" / "perception").glob("*.json"))
     if not files:
@@ -65,6 +82,7 @@ def new_curve(cfg: dict[str, Any], run_dir: str | Path, thresholds: Sequence[flo
     label_nyu = label_to_nyu40(root)
     ths = thresholds_of(cfg, thresholds)
     preds: dict[str, list[Any]] = {}
+    scores: dict[str, list[float | None]] | None = {} if score == "newness" else None
     gts: dict[str, Any] = {}
     cache_R: dict[str, Any] = {}
     for f in files:
@@ -75,8 +93,12 @@ def new_curve(cfg: dict[str, Any], run_dir: str | Path, thresholds: Sequence[flo
         S = load_scan(root, rescan, with_intrinsics=False)
         gts[f.stem] = gt_changes(meta[rescan], R, S, objs_R, load_objects(root, rescan), cfg)
         preds[f.stem] = [n for n in Graph.load(f).nodes if n.state == "new"]
-    rows = curve_counts(preds, gts, cfg, ths, label_nyu)
-    out = {"run": str(run_dir), "n_pairs": len(files), "curve": rows}
+        if scores is not None:
+            cand = json.loads((run_dir / "candidates" / f"{f.stem}.json").read_text(encoding="utf-8"))["candidates"]
+            nw = {c["token"]: c.get("newness") for c in cand}
+            scores[f.stem] = [nw.get(n.obs_token) for n in preds[f.stem]]
+    rows = curve_counts(preds, gts, cfg, ths, label_nyu, scores)
+    out = {"run": str(run_dir), "n_pairs": len(files), "score": score, "curve": rows}
     write_metrics(run_dir / "newcurve", out, cfg)
     return out
 

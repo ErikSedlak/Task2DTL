@@ -78,9 +78,10 @@ class ObsInstance:
     points: np.ndarray  # (N, 3) reference frame
     masks: Mapping[int, np.ndarray] = field(default_factory=dict)  # frame_idx -> bool[172, 224]
     crops: list[np.ndarray] = field(default_factory=list)  # upright RGB crops
-    kind: str = "depth"  # perception: "depth" (residual voxels) or "appearance" (thin-object voxels, M6)
+    kind: str = "depth"  # perception: "depth" (residual voxels), "appearance" (thin-object voxels, M6), "detector" (Part E)
     confidence: float | None = None  # perception depth candidates (CHANGE 2): sigmoid(median voxel log-odds)
     cand_votes: tuple[int, int] | None = None  # CHANGE 3 Part C: counted (seen, free) cluster votes behind `confidence`
+    newness: float | None = None  # CHANGE 3 Part E (kind "detector"): share of its voxels off the reference mesh
 
     @property
     def centroid(self) -> np.ndarray:

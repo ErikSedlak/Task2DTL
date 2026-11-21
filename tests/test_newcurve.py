@@ -14,7 +14,7 @@ def test_thresholds_include_the_default_sorted_unique():
 
 
 def test_curve_filters_new_nodes_by_confidence(monkeypatch):
-    def fake_match(nodes, gt, mode, cfg, label_nyu=None):  # node "t*" are true positives; GT has 2 new objects
+    def fake_match(nodes, gt, mode, cfg, label_nyu=None, use_label=True):  # node "t*" are true positives; GT has 2 new objects
         tp = {n.id: 1 for n in nodes if n.id.startswith("t")}
         return {"tp": tp, "fp": [n.id for n in nodes if n.id not in tp], "ignored": [], "fn": [0] * (2 - len(tp))}
 
@@ -25,3 +25,6 @@ def test_curve_filters_new_nodes_by_confidence(monkeypatch):
     assert [(r["tp"], r["fp"], r["fn"]) for r in rows] == [(2, 2, 0), (1, 1, 1), (0, 1, 2)]
     assert rows[0]["precision"] == 0.5 and rows[1]["recall"] == 0.5
     assert "p_new_min" in nc.format_curve({"n_pairs": 1, "run": "x", "curve": rows})
+    # CHANGE 3 Part E: explicit per-node scores (detector newness) instead of the confidence
+    rows = nc.curve_counts({"p": nodes}, {"p": None}, {}, [0.5], scores={"p": [0.9, 0.1, 0.9, None]})
+    assert (rows[0]["tp"], rows[0]["fp"]) == (1, 2) and rows[0]["ag_tp"] == 1 and rows[0]["f1"] > 0
