@@ -21,7 +21,7 @@ alignment:                 # T_align refinement, label-free ICP (DECISIONS 2026-
                            # false = the pre-pass over all processed frames (row FULL-offlinealign, M7)
     every: 20              # re-estimate every this many processed frames (= online.snapshot_every)
     min_cloud_frames: 3    # cloud frames (every frame_step-th processed frame) before the first estimate; raw T_align until then
-    target: structure      # structure (wall / floor / ceiling faces only; B3 sweep winner) | all reference surfaces
+    target: all            # all reference surfaces (B3 rule winner after the 2026-11-22 fix: tie with structure, simpler wins) | structure
     min_normal_spread: 0.05  # smallest eigenvalue of the mean n n^T of the matched target normals (degeneracy check)
     min_target_points: 500 # target structure: fewer vertices -> all surfaces
 
