@@ -29,7 +29,7 @@ from __future__ import annotations
 import copy
 import time
 from collections.abc import Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
@@ -68,6 +68,7 @@ class OnlineResult:
     time_s: dict[str, float] = field(default_factory=dict)
     obs_views: dict[str, int] = field(default_factory=dict)  # token -> decorrelated views (M6)
     stats: dict[str, Any] = field(default_factory=dict)  # appearance frames, thin nodes, ...
+    T_align: np.ndarray | None = None  # the alignment at the end of the walk (online estimate or the given one)
 
 
 def tentative_state(v: NodeVotes | None, cfg: Mapping[str, Any]) -> str:
@@ -168,6 +169,10 @@ def run_online(
         `OnlineResult` with the observations, per-node vote tallies and snapshot paths.
     """
     t0 = time.time()
+    # The walk works on its own SeqInfo: the online aligner replaces `T_align` during the walk, and the caller's
+    # object (shared by both observation modes of a pair in the eval harness) must keep the raw transform, or the
+    # second mode would start from an estimate made from all frames of the first walk (fixed 2026-11-22).
+    seq_info = replace(seq_info, T_align=np.array(seq_info.T_align, dtype=float, copy=True))
     scan, G_ref = ref_ctx.scan, ref_ctx.graph
     r = renderer or Renderer(scan.vertices, scan.faces, scan.face_labels)
     node_of: dict[int, str] = {}
@@ -247,7 +252,7 @@ def run_online(
                 aligner.add_frame(frame.depth, K, frame.pose_c2w)
             if k % a_every == 0:
                 changed, _ = aligner.update()
-                if changed:  # reassign (sources hold the same SeqInfo and read T_align every frame)
+                if changed:  # reassign (the sources hold this walk's SeqInfo and read T_align every frame)
                     seq_info.T_align = aligner.T.copy()
         if every > 0 and k % every == 0:
             if on_snapshot is not None:  # CHANGE 3 Part B: the method on the current state (eval-side callback)
@@ -275,7 +280,8 @@ def run_online(
         times["appearance"] = appearance.time_s
         stats.update(appearance_device=getattr(appearance.ext, "device", None),
                      appearance_cache_hits=appearance.cache.hits, appearance_cache_misses=appearance.cache.misses)  # fmt: skip
-    return OnlineResult(obs, votes, k, snaps, times, observation_views(obs, poses, cfg), stats)
+    return OnlineResult(obs, votes, k, snaps, times, observation_views(obs, poses, cfg), stats,
+                        np.asarray(seq_info.T_align, float).copy())
 
 
 def online_aligner(ref_ctx: RefContext, seq_info: SeqInfo, cfg: Mapping[str, Any]):

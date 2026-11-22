@@ -15,6 +15,7 @@ import copy
 import json
 import os
 import time
+from dataclasses import replace
 from collections.abc import Mapping, Sequence
 from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
@@ -285,8 +286,9 @@ def _eval_group(task: dict[str, Any]) -> list[dict[str, Any]]:
                 if task.get("details") and task.get("run_dir"):
                     sc["token_truth"] = {t: [int(v[0]), str(v[1])] for t, v in truth.items()}  # eval only (N3 idstats)
                     sc["identity"] = G_states.meta.get("identity", [])
-                    _write_details(Path(task["run_dir"]) / "details" / mode / f"{ref}_{s}.json", ref, s, mode, info,
-                                   sc)  # fmt: skip
+                    walk_info = replace(info, T_align=online.T_align) if online.T_align is not None else info
+                    _write_details(Path(task["run_dir"]) / "details" / mode / f"{ref}_{s}.json", ref, s, mode,
+                                   walk_info, sc)  # fmt: skip  # the walk's final T_align (audit panels)
                 if gs_S is not None:
                     for p, G_p in graphs.items():
                         sc["counts"].update(score_relations(G_p, gt, gs_S, pkinds, sc["new_match"]["tp"], truth,

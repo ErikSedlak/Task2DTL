@@ -100,10 +100,11 @@ def test_run_online_updates_t_align_only_when_enabled():
         info = SeqInfo("S", Path("."), INTR, _offset(T_ALIGN), list(seq.frame_ids))
         raw = info.T_align.copy()
         res = run_online(ctx, info, seq, OracleSource(S, {}, c), c, obs_mode="oracle")
+        assert np.array_equal(info.T_align, raw)  # the caller's SeqInfo keeps the raw transform (fix 2026-11-22)
         if enabled:
-            assert _err(info.T_align, T_ALIGN)[0] < 0.01 and res.stats["align_online"][-1]["status"] == "accepted"
+            assert _err(res.T_align, T_ALIGN)[0] < 0.01 and res.stats["align_online"][-1]["status"] == "accepted"
         else:
-            assert np.array_equal(info.T_align, raw) and "align_online" not in res.stats
+            assert np.array_equal(res.T_align, raw) and "align_online" not in res.stats
     assert online_aligner(ctx, info, CFG) is not None  # default: online (Erik 2026-11-21)
     off = copy.deepcopy(CFG)
     off["alignment"]["online"]["enabled"] = False
@@ -121,3 +122,23 @@ def test_structure_target_and_pipeline_skip():
     assert n_struct < len(R.vertices)  # the basket is not in the target
     T, ainfo = refined_alignment(None, R, "S", T_ALIGN, _cfg(), [], use_cache=False)
     assert np.array_equal(T, T_ALIGN) and ainfo["online"] is True
+
+
+def test_second_walk_on_the_same_seqinfo_starts_from_the_raw_transform():
+    """Both observation modes of a pair share one SeqInfo in the harness: the second walk must not inherit the
+    first walk's final estimate (it was made from all of that walk's frames)."""
+    R, S, poses = _scene()
+    seq = FakeSeq(S, poses)
+    ctx = RefContext("REF", R, graph_of(R), 0.0, {oid: inst.nyu40 for oid, inst in R.instances.items()})
+    c = _cfg(every=4, min_cloud_frames=2)
+    c["alignment"]["frame_step"] = 1
+    info = SeqInfo("S", Path("."), INTR, _offset(T_ALIGN), list(seq.frame_ids))
+    runs = [run_online(ctx, info, seq, OracleSource(S, {}, c), c, obs_mode="oracle") for _ in range(2)]
+    u0, u1 = runs[0].stats["align_online"], runs[1].stats["align_online"]  # Open3D ICP: equal up to float noise
+    assert [u["status"] for u in u0] == [u["status"] for u in u1]
+    assert all(abs(a.get("delta_t_m", 0) - b.get("delta_t_m", 0)) < 1e-9 for a, b in zip(u0, u1))
+    assert u0[0]["delta_t_m"] > 0.05  # the second walk also corrects the full planted offset (5.8 cm)
+    np.testing.assert_allclose(runs[0].T_align, runs[1].T_align, atol=1e-9)
+    assert sorted(runs[0].votes) == sorted(runs[1].votes)
+    assert all(runs[0].votes[n].seen == runs[1].votes[n].seen and runs[0].votes[n].free == runs[1].votes[n].free
+               for n in runs[0].votes)
