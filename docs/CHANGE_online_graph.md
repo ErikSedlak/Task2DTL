@@ -1,6 +1,6 @@
 # CHANGE 3 — tuning set, move evidence, incremental graph, confidence policy (proposal, 2026-11-20)
 
-**Status (2026-11-20): all questions answered (§8); Parts 0, A, B, C, N and E done; next Part D.** Builds on CHANGE 1 + 2,
+**Status (2026-11-20): all questions answered (§8); all parts done (0, A, B, C, N, E, D); the audit labels are open.** Builds on CHANGE 1 + 2,
 which Erik fixed as the **final method** (2026-11-20). Comes from a logic review of the whole solution (chat,
 2026-11-20). Nothing here changes DESIGN.md before sign-off.
 
@@ -252,6 +252,6 @@ Original questions:
 - [x] Part B (2026-11-21): `peek()`, candidate tracks, snapshot method runs, CLIP relabel rule, anytime curve + stability (`lsg anytime`), online alignment (`online_struct`, Erik), rows `FULL-offlinealign`, viz; was:
       anytime curve, viz
 - [x] Part E (2026-11-21): Grounding DINO + SAM 2 detection cache, detector tracks, newness gate, `lsg chg3 parte` (rule: residual stays), row `FULL+detector`, `lsg newfunnel`
-- [ ] Part D: class-agnostic new in the tables (code done, c4bd661); audit on the final method
-- [ ] DECISIONS, DESIGN (§3, §6.4, §6.7, §6.9, §6.11, §7), CODE_STRUCTURE, STATUS, after sign-off
-- [ ] **Erik:** final `lsg m7` on val; then REPORT / README / slides / audit refresh
+- [x] Part D (2026-11-22): class-agnostic new in the tables, `FULL-chg2`, final val run `chg3_final`, REPORT / README / slides, audit sampled from the final run (labels: Erik)
+- [x] DECISIONS, DESIGN, CODE_STRUCTURE, STATUS
+- [x] final `lsg m7` on val (run by Claude Code at Erik's request, 2026-11-22); REPORT / README / slides refreshed; [ ] audit labels (Erik)

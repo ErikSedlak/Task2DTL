@@ -2,7 +2,8 @@
 
 *Erik Sedlák, November 2026. Code, spec and decision log: this repository ([README](../README.md),
 [DESIGN](DESIGN.md), [DECISIONS](DECISIONS.md)). All numbers are on the 3RScan validation split (110
-reference → rescan pairs, 47 rooms), reported once; every threshold was tuned on 3 training pairs only.*
+reference → rescan pairs, 47 rooms), from one run of the final method (`outputs/chg3_final`). Thresholds were
+chosen on 33 training pairs (`dev_tune`); §8 lists the earlier decisions that val results influenced.*
 
 ## 1. Problem and framing
 
@@ -13,7 +14,8 @@ the reference mesh and its texture, and the RGB-D frames, camera poses and align
 - give every reference node a state: `unchanged`, `moved`, `removed` or `unknown`;
 - add `new` nodes;
 - recompute the relations of whatever changed;
-- attach a confidence and `last_seen` to each node.
+- attach a confidence and `last_seen` to each node;
+- keep the graph up to date *during* the walk, not only at its end.
 
 The central difficulty is telling **"gone" from "not seen"**. A rescan typically covers only part of the
 room. In the validation split, 737 reference objects are absent from the rescan annotation *without* being
@@ -56,8 +58,14 @@ building anything changed the evaluation:
 ## 3. Method
 
 Rescan frames are processed **online, in time order** (stride 3). The reference mesh is rendered (Open3D
-ray casting on CPU, ~5 ms per frame) at the rescan pose. The pose comes from `T_align`, refined by a label-free
-ICP pre-pass: 1.6–8.4 cm corrections, residual 2 cm.
+ray casting on CPU, ~5 ms per frame) at the rescan pose given by `T_align`.
+
+**Alignment, online.** 3RScan's `T_align` is about 5 cm off. The method refines it during the walk, from the
+frames seen so far only: every 20 processed frames, one label-free point-to-plane ICP registers the depth of
+all frames so far (every 10th) to the reference walls, floor and ceiling. It is warm-started from the last
+estimate. An estimate is used only if it stays within 20 cm / 5° of the raw transform, rests on ≥ 3 frames,
+and is not degenerate (the matched surface normals must span all directions; one wall cannot fix a
+translation along it). Until the first accepted estimate the raw transform is used.
 
 **Votes from free space only.** Per frame and reference node, compare observed depth d_obs with rendered
 depth d_exp on the node's first-hit pixels:
@@ -66,46 +74,62 @@ depth d_exp on the node's first-hit pixels:
 - otherwise it is no information: occlusion, out of view and invalid depth say nothing.
 
 Two refinements make "seen" honest:
-- **Seen needs contrast** (FULL): a present pixel counts only if the next reference surface behind the node
-  lies more than τ_free behind it. If the node were gone, depth would show it. A pillow on a sofa cannot be seen
-  in place by depth, because the sofa is right behind it.
+- **Seen needs contrast**: a present pixel counts only if the next reference surface behind the node lies more
+  than τ_free behind it. If the node were gone, depth would show it. A pillow on a sofa cannot be seen in
+  place by depth, because the sofa is right behind it.
 - **Appearance for thin objects** (< 0.15 m): depth cannot see a book or towel vanish. For these nodes the
   reference **texture** is rendered at the rescan pose and compared with the photo using frozen DINOv2 ViT-S/14
-  patch features. Distances are taken relative to the frame median, because the rescans are lit differently.
-  A thin node's depth vote is replaced by `free-like` (mismatch) or `seen`. Appearance alone never deletes: it
-  needs ≥ 3 decorrelated `free-like` votes.
+  patch features, relative to the frame median (the rescans are lit differently). A thin node's depth vote is
+  replaced by `free-like` (mismatch) or `seen`. Appearance alone never deletes: it needs ≥ 3 decorrelated
+  `free-like` votes.
 
 **Viewpoint decorrelation.** A vote counts only if the camera moved ≥ 0.30 m or turned ≥ 20° since the last
 counted vote of that kind for that node. A person standing still and filming one spot casts one vote, not 30.
 
-**Deferred commitment.** During the walk, states are tentative (written as snapshots). `removed` and `moved` become
-final only at the end, because a moved object can reappear at its new place hundreds of frames after its old
-place was seen empty.
+**Perception candidates.**
+1. Pixels nearer than the rendered reference by > 0.10 m are back-projected; points near the reference
+   surface or structure are dropped.
+2. The rest are accumulated in a 4 cm voxel grid with a per-voxel log-odds: a decorrelated hit adds 2.5, a
+   pixel that sees *through* the voxel subtracts 2.5 (a person who walks away leaves see-through votes
+   behind). A voxel is kept at net one decorrelated hit. A second grid at a lower nearer-threshold (5 cm)
+   adds large objects: its clusters count only from 40 voxels on.
+3. Kept voxels are **co-segmented**: every frame splits its residual pixels into image segments at depth jumps
+   and concave creases, and two neighbouring voxels are linked only if no frame that sees both puts them in
+   different segments. Plain connected components chained touching objects into one blob (a new sofa with its
+   cushions). Clusters in door swing regions are dropped.
+4. Each cluster is labelled with CLIP ViT-B/32 (top-k over a vocabulary from training-split metadata plus the
+   reference labels) from its 5 largest upright crops.
+5. Its **confidence** comes from cluster votes over the whole walk: per frame, the cluster's voxels vote seen /
+   free by the node rule, decorrelated; p = sigmoid(0.01 · seen − 0.52 · free). A candidate becomes a `new`
+   node only if p ≥ 0.5175 (≥ 7 decorrelated cluster views and no see-through vote); below it, it can still
+   explain a move.
 
-**Perception candidates.** Each candidate goes through these steps:
-1. Pixels nearer than the rendered reference by > 0.10 m are back-projected.
-2. Points near the reference surface or structure are dropped.
-3. The rest are accumulated in a 4 cm voxel grid.
-4. A voxel is kept only if hit from ≥ 3 decorrelated viewpoints; this removes people, noise and mesh holes.
-5. Kept voxels are clustered (connected components), and clusters in door swing regions are dropped.
-6. Each cluster is labelled with CLIP ViT-B/32 (top-k over a vocabulary from training-split metadata plus the
-   reference labels), from its 5 largest upright crops.
-
-Appearance mismatches lying on support surfaces add thin-object candidates.
+Appearance mismatches lying on support surfaces add thin-object candidates, with the same confidence rule.
 
 **Association and classification** (B2 and FULL), at the end of the sequence:
 - *Confirmed in place* (≥ 3 counted seen votes and no free vote): `unchanged`. Such a node absorbs the
   observations lying inside it.
 - The rest: a Hungarian assignment on label, size and position, with a hard label gate in oracle mode and a
   soft CLIP term in perception.
+- **A move needs evidence at the old place** (FULL): a node whose old place is net-seen (more weighted seen than
+  free evidence) or never observed may only be matched to an observation inside its own place. It is the mirror
+  of the removal rule: an object is not moved away from a place where the sensor keeps seeing it, nor from one
+  never looked at.
 - A matched node is `moved` if ICP of the partial observation onto the node's reference points moves its
-  centroid by > 0.10 m.
+  centroid by > 0.10 m (0.2 m for a net-seen node).
 - An unmatched node is `removed` only with **free evidence** (≥ 2 counted free votes); otherwise it is `unknown`.
 
-**Confidence** (FULL): a log-odds score per node:
-- it starts at a class prior learned from the training rescans (p_persist, e.g. chair 0.968);
-- each counted seen vote adds 2.5 and each free / free-like vote subtracts 2.5;
-- a node is deleted only if it has free evidence **and** p < 0.2.
+**Confidence** (FULL): one log-odds scale for every node, with weights measured, not chosen:
+- every reference node starts at p = 0.9 (no class prior);
+- the vote weights are likelihood ratios measured on the tuning set (counted votes of GT-unchanged vs
+  GT-removed objects): a seen vote adds 0.63, a free vote subtracts 1.47, a free-like vote 2.5;
+- a node is deleted only if it has free evidence **and** p < 0.4 (2 free votes delete; 1 seen + 2 free do not).
+
+**The graph during the walk.** Every 20 processed frames the same method (association, ICP, states,
+relations, confidence) runs on the current state and writes a tentative graph. Candidates keep their ids
+across these snapshots by voxel overlap. States stay tentative: `removed` and `moved` become final only at the
+end (**deferred commitment**), because a moved object can reappear at its new place hundreds of frames after
+its old place was seen empty. The last snapshot is the final graph.
 
 **Relations.** Moved and new things, and things whose parent moved or vanished, are re-checked. A thing keeps its
 old parent if that parent still supports it at the new pose. Otherwise geometric contact / containment rules
@@ -116,24 +140,36 @@ pick a new parent (an anchor, a thing, or the floor).
 | B0 | nearest same-label observation | unmatched → removed | – |
 | B1 | B0 | online votes, decorrelated, deferred: removed only with free evidence, else unknown | – |
 | B2 | confirmed-in-place + Hungarian + ICP moved test | as B1 | – |
-| FULL | B2 (+ thin-object candidates) | free evidence **and** p < 0.2; contrastive seen votes; appearance votes for thin nodes | class priors + log-odds |
+| FULL | B2 + old-place evidence for moves (+ thin-object candidates) | free evidence **and** p < 0.4; contrastive seen votes; appearance votes for thin nodes | measured log-odds weights, flat start 0.9 |
+
+**Tuning.** Every threshold was chosen on `dev_tune` (33 training pairs: the 20 rooms with the most changes,
+10 random rooms and the 3 original dev pairs; 82 removed, 102 moved, 212 new objects), each sweep with its
+selection rule written down before the run (DECISIONS). Val was run once for the tables below.
+
+**Open-vocabulary detector (ablation, CHANGE 3 Part E).** As an alternative to the depth-residual candidates,
+Grounding DINO (tiny) proposes boxes on every 2nd processed frame, prompted with the same vocabulary, and SAM 2
+cuts each box into a mask. Masks become 3D points (depth, aligned pose), and detections are fused across frames
+into tracks by voxel overlap. A track becomes a `new` node only if most of it lies off the reference mesh
+(newness ≥ 0.5); otherwise it is an observation of an existing object, handled by the association like an
+oracle instance. On the tuning set it raised perception new F1 from 3 to 16 %, but lost 8 of 83 removals
+(the rule's removed-F1 guard), so it is not the default; it is reported as the row `FULL+detector`.
 
 ## 4. Results
 
-> **Note (2026-11-19).** All tables, figures and numbers in this report, including the qualitative figures, are the **M7 method with the strict candidate rules** (every candidate cluster needs 3 decorrelated views) and the learned class priors: ablation row `FULL-m7`. The code now defaults to the relaxed rules of [CHANGE 1](CHANGE_candidate_detection.md) (2 views for small, 1 view for large clusters) and to [CHANGE 2](CHANGE_confidence_unified.md) (2026-11-20: no class prior, l0 = 0 with p_del 0.027; per-voxel candidate log-odds with see-through votes). Their val effect is reported in DECISIONS when measured; a rerun of `lsg m7` replaces the numbers below.
-
 **Change detection on val** (%, micro-averaged over 110 pairs; 95% bootstrap CI over pairs for FULL).
+New P / R is given twice: **labelled** (§5 rule: the label must match) and **class-agnostic** (any label).
 
-| method | mode | removed P / R | false deletion ↓ | unchanged strict / kept | moved P / R / F1 | new P / R | unknown |
-|---|---|---|---|---|---|---|---|
-| B0 | oracle | 21.2 / 69.9 | 95.0 | 80.9 / 80.9 | 38.2 / 24.7 / 30.0 | 85.0 / 59.6 | 0 |
-| B1 | oracle | 66.0 / 45.2 | 9.5 | 80.9 / 92.9 | 38.2 / 24.7 / 30.0 | 85.0 / 59.6 | 31.6 |
-| B2 | oracle | 57.7 / 41.1 | 9.5 | 76.9 / 86.6 | 45.7 / 68.5 / 54.9 | 80.5 / 60.2 | 28.1 |
-| **FULL** | oracle | 55.6 [37, 73] / 27.4 [18, 38] | **8.1** [5.1, 12.0] | 76.0 / 86.4 | 45.0 / 69.4 / 54.6 [49, 60] | 81.6 / 59.6 | 29.5 |
-| B0 | perception | 4.2 / 91.8 | 95.9 | 2.2 / 2.2 | 22.4 / 8.1 / 11.9 | 3.3 / 12.9 | 0 |
-| B1 | perception | 17.7 / 57.5 | 9.4 | 2.2 / 90.4 | 22.4 / 8.1 / 11.9 | 3.3 / 12.9 | 81.2 |
-| B2 | perception | 17.7 / 45.2 | 9.5 | 57.9 / 92.7 | 52.9 / 23.0 / 32.0 | 2.4 / 9.4 | 45.3 |
-| **FULL** | perception | 24.2 [16, 35] / 32.9 [24, 43] | **7.7** [4.8, 11.4] | 56.2 / **95.3** | 49.1 / 23.4 / 31.7 [24, 39] | 2.0 / 8.8 | 50.2 |
+| method | mode | removed P / R | false deletion ↓ | unchanged strict / kept | moved P / R / F1 | new P / R | new P / R, any label | unknown |
+|---|---|---|---|---|---|---|---|---|
+| B0 | oracle | 21.5 / 71.2 | 95.0 | 80.7 / 80.7 | 38.2 / 25.5 / 30.6 | 85.0 / 59.6 | 85.0 / 59.6 | 0 |
+| B1 | oracle | 60.8 / 42.5 | 9.5 | 80.7 / 92.4 | 38.2 / 25.5 / 30.6 | 85.0 / 59.6 | 85.0 / 59.6 | 31.6 |
+| B2 | oracle | 55.6 / 41.1 | 9.5 | 76.4 / 85.7 | 46.0 / 72.8 / 56.3 | 82.1 / 59.1 | 82.1 / 59.1 | 28.1 |
+| **FULL** | oracle | 58.3 [42, 76] / 28.8 [20, 40] | **9.1** [5.9, 13.2] | 79.4 / **90.9** | 52.2 / 61.7 / **56.5** [49, 63] | 67.5 / 66.7 | 67.5 / 66.7 | 31.3 |
+| B0 | perception | 4.0 / 74.0 | 83.6 | 6.3 / 6.3 | 13.8 / 14.5 / 14.1 | 5.6 / 7.6 | 7.9 / 10.5 | 0 |
+| B1 | perception | 15.5 / 46.6 | 8.0 | 6.3 / 80.4 | 13.8 / 14.5 / 14.1 | 5.6 / 7.6 | 7.9 / 10.5 | 69.4 |
+| B2 | perception | 18.5 / 46.6 | 7.9 | 55.2 / 86.2 | 39.8 / 36.6 / 38.1 | 3.4 / 3.5 | 6.9 / 7.0 | 42.5 |
+| **FULL** | perception | 24.3 [16, 34] / 37.0 [28, 46] | **7.2** [4.6, 10.8] | 54.7 / **93.4** | 54.3 / 34.9 / **42.5** [35, 48] | 3.1 / 3.5 | 6.9 / 7.6 | 49.7 |
+| FULL+detector | perception | 29.3 / 32.9 | 7.1 | 59.6 / 92.1 | 49.2 / 41.7 / 45.2 | 6.1 / 21.1 | 10.1 / 34.5 | 44.7 |
 
 **Support:**
 - 73 removed, 737 absent-unlisted, 1,401 unchanged, 235 moved, 171 new;
@@ -141,106 +177,145 @@ pick a new parent (an anchor, a thing, or the floor).
 
 **What the table says:**
 
-- **Free-space evidence is the big win.** B0 deletes 95% of the absent-unlisted objects; B1 deletes 9.5%, with the
-  same matching. Removed precision rises from 21 to 66% (oracle) and from 4 to 18% (perception).
-- **Association + ICP fixes moves.** Oracle moved F1 goes from 30 (B1) to 55% (B2). Recall by displacement is
-  55 / 76 / 90% for moves of 0.1–0.3 / 0.3–1 / ≥ 1 m.
-- **Confidence trades recall for safety.** FULL keeps the most unchanged objects (perception 95.3%) and has the
-  lowest false deletion. Its removed recall is lower than B2's (27 vs 41% oracle), because a GT-removed object that
-  also collects seen votes is vetoed. Seen-needs-contrast was introduced *against* this veto, and fixed before any
-  further val run. It recovered only ~1 object per mode: the vetoed objects are mostly *really seen* in place.
-  The audit (§6) looks at what they are.
-- **Perception costs most on `new`** (new P 2.0% vs 81.6% oracle): there are 8.7 candidates per pair, and only
-  43% of them correspond to any GT instance (plants, black TV screens, clutter, mesh holes; Fig. 3).
-  - Moved F1 halves (32 vs 55%): candidates must be seen from ≥ 3 viewpoints, so small moves whose old and new
-    footprints overlap are missed.
-  - Perception's *strict* association is low (~3%): unchanged objects produce no depth residual, hence no
-    candidate. They are handled by "confirmed in place" instead (unchanged strict 56%).
+- **Free-space evidence is the big win.** B0 deletes 95% of the absent-unlisted objects; B1 deletes 9.5% (oracle)
+  and 8.0% (perception), with the same matching. Removed precision rises from 22 to 61% (oracle) and from 4 to
+  16% (perception).
+- **Association + ICP fixes moves; old-place evidence makes them safe.** Oracle moved F1 goes from 31 (B1) to 56%
+  (B2). FULL keeps that F1 but halves the false moves of absent-unlisted objects (oracle 4.5 → 1.9%, perception
+  6.1 → 3.7%) and keeps more unchanged objects (oracle 85.7 → 90.9%), because a node whose old place the sensor
+  still sees, or never saw, is not moved away. The price is recall on large moves whose old place was never
+  observed (oracle ≥ 1 m: 89.5 → 65.8%). Recall by displacement (oracle FULL): 50 / 75 / 66% for moves of
+  0.1–0.3 / 0.3–1 / ≥ 1 m.
+- **Confidence trades recall for safety.** FULL keeps more unchanged objects than B2 (oracle 90.9 vs 85.7%,
+  perception 93.4 vs 86.2%). Its removed recall in oracle mode is lower than B2's (29 vs 41%): a GT-removed
+  object that also collects seen votes is kept.
+  Measured vote weights (a seen vote counts 0.63, a free vote 1.47) made this veto weaker than the hand-set ones
+  (perception removed R 32.9 → 37.0% against the row `FULL-learnedL`).
+- **Perception costs most on `new`.** With depth residuals, perception finds 6 of 171 GT new objects with the
+  right label (13 with any label). The detector row finds 36 (59 with any label), at 6 / 10% precision. §8
+  explains where the residual candidates lose them.
+- **Moves in perception** improved most over the M7 method (moved F1 31.7 → 42.5, row `FULL-m7` in §5), but
+  small moves and same-label swaps stay hard (perception moved R 32–39% in every displacement bucket).
+- Perception's *strict* association is low (5%): unchanged objects produce no depth residual, hence no candidate.
+  They are handled by "confirmed in place" instead (unchanged strict 55%). With the detector, unchanged objects
+  are observed too and strict association rises to 13%.
+
+**The graph during the walk** (`lsg anytime`, val, FULL; the method runs on the state every 20 processed
+frames; walk fraction 30 / 50 / 100%): ANYTIME_NUMBERS
 
 **Relations** (parent accuracy of things, GT universe; R0 = keep the reference relations, R1 = geometric
 rules from scratch, update = ours, FULL):
 
 | set | mode | (a) all things | (b) moved things | (c) parent swapped |
 |---|---|---|---|---|
-| val | oracle | 92.0 / 79.4 / **92.2** (n = 993) | 94.0 / 64.9 / 85.7 (n = 168) | 0 / 66.7 / 66.7 (n = 3) |
-| val | perception | 94.7 / 80.4 / 92.4 (n = 965) | 94.0 / 75.0 / 87.5 (n = 168) | 0 / 66.7 / 66.7 (n = 3) |
-| relchange | oracle | 84.4 / 70.3 / 83.4 (n = 441) | 48.4 / 39.8 / 48.4 (n = 93) | 0 / 50.0 / **42.9** (n = 14) |
-| relchange | perception | 84.5 / 71.6 / 84.1 (n = 440) | 48.4 / 45.2 / 49.5 (n = 93) | 0 / 28.6 / 21.4 (n = 14) |
+| val | oracle | 91.9 / 79.7 / **93.3** (n = 995) | 94.0 / 63.7 / 86.3 (n = 168) | 0 / 100 / 100 (n = 3) |
+| val | perception | 94.9 / 78.7 / 91.3 (n = 963) | 94.0 / 69.6 / 86.3 (n = 168) | 0 / 66.7 / 66.7 (n = 3) |
+| relchange | oracle | 84.4 / 70.7 / 83.2 (n = 441) | 48.4 / 40.9 / 47.3 (n = 93) | 0 / 42.9 / **35.7** (n = 14) |
+| relchange | perception | 84.5 / 71.6 / 83.9 (n = 440) | 48.4 / 45.2 / 48.4 (n = 93) | 0 / 28.6 / 21.4 (n = 14) |
 
 - **R0 is a strong baseline on 3RScan.** Most moved things keep their parent, so keeping the old relation is right
   94% of the time on val (b). Ours is level with it on (a) and beats it only where parents really change
-  (relchange (c): 43% vs 0%).
-- **Keeping a still-supporting parent matters.** Without that rule, val (b) oracle drops from 85.7 to 71.4%.
-- Type accuracy (on / in) given the correct parent is 94–97%.
+  (relchange (c): 36% vs 0%).
+- **Keeping a still-supporting parent matters.** Without that rule, val (b) oracle drops from 86.3 to 73.8%.
+- Type accuracy (on / in) given the correct parent is 95–97%.
 - `next_to` edges are computed (AABB gap ≤ 0.15 m) but provisional and not scored.
 
 ## 5. Ablations (FULL, val, both modes; Fig. 4–6)
 
-| switch | oracle: removed P / R, false del. | perception: removed P / R, false del. | other effect |
-|---|---|---|---|
-| FULL | 55.6 / 27.4 / 8.1 | 24.2 / 32.9 / 7.7 | |
-| − appearance (depth only) | 55.6 / 27.4 / 8.1 | 23.5 / 31.5 / 7.9 | only 4 scored GT-removed objects are thin |
-| − seen-needs-contrast | 54.3 / 26.0 / 8.1 | 24.0 / 31.5 / 7.7 | ~1 object per mode |
-| − class priors (p = 0.9) | 56.4 / 30.1 / 8.4 | 23.7 / 37.0 / 8.0 | |
-| − decorrelation | 56.1 / 31.5 / 9.1 | 24.1 / 37.0 / 8.7 | B1: false deletion 9.5 → 10.7 / 9.4 → 10.6 |
-| **+ immediate commitment** | 19.6 / 42.5 / 9.5 | 19.6 / 42.5 / 9.5 | oracle moved F1 54.6 → 34.5, new P 81.6 → 50.9 |
-| + children follow parent | 55.6 / 27.4 / 8.1 | = FULL | oracle moved F1 54.6 → 53.9 |
+Each row switches one part off (−) or on (+); everything else is FULL. Removed R / false deletion / moved F1 per
+mode, perception new P / R (labelled).
+
+| row | oracle: rem R / false del. / moved F1 | perception: rem R / false del. / moved F1 | perception new P / R | other effect |
+|---|---|---|---|---|
+| FULL | 28.8 / 9.1 / 56.5 | 37.0 / 7.2 / 42.5 | 3.1 / 3.5 | |
+| − old-place evidence (CHANGE 3 A) | 32.9 / 9.1 / 56.1 | 38.4 / 7.5 / 37.7 | 3.3 / 3.5 | unchanged kept 90.9 → 85.9 / 93.4 → 88.4; false move 1.9 → 4.3 / 3.7 → 6.5 |
+| − measured vote weights (C) | 26.0 / 8.7 / 55.9 | 32.9 / 6.9 / 40.8 | 4.0 / 4.7 | |
+| − cluster-vote candidate confidence (C) | = FULL | = FULL | 0.7 / 27.5 | any label 1.3 / 48.5 |
+| − co-segmentation (N) | = FULL | 32.9 / 6.9 / 38.4 | 5.4 / 2.9 | |
+| − online alignment (B: pre-pass over all frames) | 28.8 / 9.0 / 54.6 | 35.6 / 7.9 / 40.4 | 3.6 / 4.1 | |
+| + detector (E) | = FULL | 32.9 / 7.1 / 45.2 | 6.1 / 21.1 | any label 10.1 / 34.5 |
+| all CHANGE 3 off (= CHANGE 1 + 2) | 30.1 / 8.4 / 54.6 | 28.8 / 6.9 / 37.7 | 0.9 / 14.0 | unchanged kept 86.3 / 88.8 |
+| the M7 method (CHANGE 1–3 off) | 27.4 / 8.1 / 54.6 | 32.9 / 7.7 / 31.7 | 2.0 / 8.8 | unchanged kept 86.4 / 95.3 |
+| − appearance (depth only) | 28.8 / 8.8 / 56.0 | 35.6 / 6.9 / 42.6 | 3.2 / 3.5 | only 4 scored GT-removed objects are thin |
+| − seen-needs-contrast | 28.8 / 9.0 / 56.4 | 37.0 / 6.9 / 42.4 | 3.1 / 3.5 | |
+| + class priors (p_del 0.2) | 15.1 / 5.7 / 56.5 | 17.8 / 4.9 / 42.5 | 3.1 / 3.5 | |
+| − decorrelation | 31.5 / 9.5 / 56.5 | 39.7 / 8.1 / 41.4 | 1.6 / 4.7 | B1: false deletion 9.5 → 10.7 / 8.0 → 9.1 |
+| **+ immediate commitment** | 49.3 / 9.9 / 22.1 | 52.1 / 9.8 / 12.9 | 4.5 / 6.4 | removed P 58 → 16 / 24 → 17; oracle new P 67.5 → 38.8 |
+| + children follow parent | = FULL / 56.2 | = FULL / 42.3 | | |
 
 - **Deferred commitment is the clearest ablation result.** Deleting a node as soon as its place is seen empty
   deletes objects that merely moved. Their observations at the new place then become false `new` nodes, or are
-  taken by another same-label node. Removed precision drops from 56 to 20%, and oracle moved F1 from 55 to 35%.
-- **Decorrelation** trades a little recall for fewer false deletions, as expected.
+  taken by another node. Removed precision drops from 58 to 16% (oracle), and oracle moved F1 from 57 to 22%.
+- **CHANGE 3 as a whole** (against the row with all its parts off): oracle unchanged kept 86.3 → 90.9% and false
+  move 3.8 → 1.9%; perception moved F1 37.7 → 42.5, unchanged kept 88.8 → 93.4%, removed R 28.8 → 37.0%. It
+  costs perception new recall (14.0 → 3.5%; precision 0.9 → 3.1%): the candidate confidence threshold chosen on
+  the tuning set mostly drops candidates.
+- **Online alignment** (no future frames) did not cost on val: perception moved F1 40.4 → 42.5 and false
+  deletion 7.9 → 7.2 against the pre-pass, whereas on the tuning set it cost 3.9 / 1.5 points (§8).
 - **Appearance** (the depth vs depth + appearance ablation of the brief) has almost no effect on val, because only
   4 of the 73 scored removals are thin. In the controlled case (a 2 cm book removed from a table, synthetic test)
   depth alone keeps the book and appearance deletes it. On dev it catches a real, unlisted removal (a robot
   vacuum, §6). It is a targeted tool, not an overall gain.
-- **τ_free sweep** (0.05–0.30 m) is a monotone trade-off: removed recall 36 → 11% and false deletion 9.4 → 6.6%
-  (oracle). The dev-chosen 0.15 m was not changed on val.
+- **Decorrelation** trades a little recall for fewer false deletions, as expected.
+- **τ_free sweep** (0.05–0.30 m) is a monotone trade-off: removed recall 40 → 16% and false deletion 10.6 → 7.5%
+  (oracle; perception 41 → 16%, 9.0 → 6.0%). The 0.15 m chosen on dev was not changed.
 - **Observed fraction** (one contiguous chunk of 50 / 25 / 10% of the frames): less observation gives more
-  `unknown` (oracle 30 → 77%), *not* more false deletions (8.1 → 1.2%). This is the intended behaviour.
+  `unknown` (oracle 31 → 78%, perception 50 → 92%), *not* more false deletions (9.1 → 1.4%, 7.2 → 1.4%). This is
+  the intended behaviour.
 
 ## 6. Ground-truth audit (§7.4)
 
 > **[To be filled after labelling.]** `lsg audit sample` drew, per mode, 10 false-positive `moved`, 10 `removed`
-> and 10 `new` predictions of FULL on val (seed 0). The removed / moved pools include absent-unlisted objects. It also
-> drew every GT-removed object that B2 deletes but FULL's confidence keeps (the veto set). The run reproduces the M7
-> FULL metrics exactly. Each case is a panel: reference photo, rescan photo at the old place, rescan at the
-> predicted place, top-down. Erik labelled each case `gt_missing` / `method_error` / `unclear`. Table: share of GT
-> gaps per mode and category, with Wilson 95% CIs.
+> and 10 `new` predictions of FULL on val (seed 0), from the final run's own FULL row (`outputs/chg3_final/val/FULL`,
+> per-object details), so the audited predictions are exactly the reported ones. The removed / moved pools include
+> absent-unlisted objects (pool sizes: oracle 147 moved / 82 removed / 55 new; perception 96 / 137 / 186). It also
+> drew every GT-removed object that B2 deletes but FULL's confidence keeps (the veto set: 6 oracle, 5 perception).
+> Each case is a panel: reference photo, rescan photo at the old place, rescan at the predicted place, top-down.
+> Erik labels each case `gt_missing` / `method_error` / `unclear`. Table: share of GT gaps per mode and category,
+> with Wilson 95% CIs.
 
 Cases found during development (dev pairs, not part of the sample):
 - **r68, robot vacuum** (absent-unlisted): visible in the reference texture, bare floor in the rescan photo. It is
   really gone, the GT does not list it, and only appearance catches it (12 cm high, below depth's reach). It is
   scored as a *false deletion*.
-- **r50, pillow** (GT removed): a white pillow lies where a blue-grey one was. Depth sees "something there"
-  (23 counted seen votes), and DINOv2, being largely semantic, sees "a pillow where a pillow was". A same-class
-  replacement: not caught.
+- **r50, pillow** (GT removed): a white pillow lies where a blue-grey one was. Depth sees "something there", and
+  DINOv2, being largely semantic, sees "a pillow where a pillow was". A same-class replacement: not caught.
 - **r69, shoes** (absent-unlisted): displaced or partly gone; deleted.
 - **19eda6f4, pillow 49**: not listed as moved, but its reference and rescan footprints barely overlap
   (IoU 0.14), so it is probably an unlisted move.
+- **Identity audit** (CHANGE 3, 15 oracle cases on the tuning set where a reference node took a different-label GT
+  new object): 9 different objects, 3 the same object (GT re-identification), 1 re-ID with the wrong partner,
+  2 unclear.
 
 ## 7. Qualitative results
 
 - **Fig. 1 — a val room with many changes, oracle and perception.**
   - Pair 8eabc45f → 5341b7b3, chosen by rule: the most scored GT changes in the 20-pair milestone subset.
   - Left: the reference graph; middle: the updated graph; right: the GT.
-  - Oracle finds the moved sofa, lamp and pillows and the two pillows removed from the sofa. It also moves a
-    bench that did not move.
-  - Perception also deletes the two removed pillows, but leaves the moved sofa `unknown` and adds several small
-    false `new` nodes.
+  - Oracle finds the two pillows removed from the sofa and several moved pillows and the lamp. It misses the moved
+    sofa and couch table, moves a bench the GT does not list, and deletes a vase that is absent but not listed.
+  - Perception also deletes the two removed pillows and finds two pillow moves, but leaves the sofa `unknown` and
+    adds a large false `new` node ("clothes").
 
   ![](figures/topdown_val_8eabc45f_oracle.png)
   ![](figures/topdown_val_8eabc45f_perception.png)
 
-- **Fig. 2 — the README demo pair** (dev, 0ad2d39b → 0ad2d3a1, perception). The GT has a moved rack and a moved
-  bin. Perception gives the bin's new place to a nearby "dispenser" node (a false move), leaves the rack `unknown`,
-  and adds one false `new` node ("ottoman"). The oracle run finds the rack move but calls the bin `unchanged` (a 15 cm move; the rack moved 28 cm).
+- **Fig. 1b — the same pair with the detector (row `FULL+detector`).** The detector observes the sofa, which is
+  now found as moved, and a new lamp; it also adds false `new` nodes (a "kitchen appliance", a "desk chair" on the
+  sofa) and moves a vase across the room.
+
+  ![](figures/topdown_val_8eabc45f_perception_detector.png)
+
+- **Fig. 2 — the README demo pair** (dev, 0ad2d39b → 0ad2d3a1, perception). The GT has a moved rack and a moved bin. Perception leaves both
+  `unknown` and adds no false node (the M7 method gave the bin's new place to a nearby "dispenser" node and added a
+  false `new` node). The oracle run finds the rack move but calls the bin `unchanged` (a 15 cm move; the rack moved
+  28 cm).
 
   ![](figures/topdown_dev_0ad2d39b_perception.png)
 
-- **Fig. 3 — a perception failure case** (4a9a43d2 → 4a9a43d4, chosen by rule: the most perception false
-  positives in the subset). Many small candidates are labelled "linen" and match no GT object, and a moved stool
-  is deleted instead of moved.
+- **Fig. 3 — a perception failure case** (4a9a43d2 → 4a9a43d4, chosen by rule: the most perception false positives
+  in the subset, 15). Large false `new` nodes ("lamp", "kitchen counter", "linen") come from residual geometry that
+  matches no GT object, and the moved stool is deleted instead of moved; the moved chair is found.
 
   ![](figures/topdown_val_4a9a43d2_perception_failure.png)
 
@@ -251,40 +326,68 @@ Cases found during development (dev pairs, not part of the sample):
   ![](figures/m7_fraction.png)
 
 The **Rerun timeline** (`lsg viz rerun`) replays a pair: the reference mesh, the camera path, and node boxes
-coloured by their tentative state at each snapshot, ending with the final graph.
+coloured by their tentative state at each snapshot (moves and new nodes appear during the walk), ending with the
+final graph.
 
 ## 8. Limitations, deviations and honesty notes
 
-- **Val was run twice at M5.** The first B2 val run (oracle new R 24.0%, false move 9.8%) exposed reference nodes
-  taking GT-new objects of a *different* label through the nyu40 catch-all classes 39 / 40 (keyboard → blanket).
-  Excluding them gave new R 60.2% and false move 4.1%. The same run motivated the keep-supporting-parent rule
-  (val (b) oracle 72.0 → 86.3%); that rule was checked on dev only. Both runs are reported in DECISIONS.
+- **Which decisions val influenced.** Val is meant to be run once. In this project it was looked at between
+  development steps, and these decisions followed from val results (all logged in DECISIONS with dates):
+  1. **M5:** val was run twice. The first B2 run (oracle new R 24.0%, false move 9.8%) exposed reference nodes
+     taking GT-new objects of a *different* label through the nyu40 catch-all classes 39 / 40. Excluding them gave
+     new R 60.2%. The same run motivated the keep-supporting-parent rule (checked on dev only).
+  2. **M7:** "seen needs contrast" was introduced against the confidence veto seen on val at M6.
+  3. **CHANGE 1** (relaxed candidate rules) came from the M7 val new-recall funnel.
+  4. **CHANGE 2** Part A (no class prior) came from the `FULL-priors` val row; its defaults were fixed after its
+     val run.
+  5. **CHANGE 3** came from a logic review after the CHANGE 2 val run (false move 1.6 → 6.4%). From then on every
+     choice was made on the tuning set `dev_tune` with a rule written before each run.
+  6. **CHANGE 3 Part E** (the detector) was prompted by the first final val run, stopped after 14 rows, which found
+     6 of 171 new objects. It was decided on the tuning set and lost its rule; no default changed after that run.
+  Before CHANGE 3 (2026-11-20), every threshold was tuned on 3 training pairs only, which is why val became the
+  design loop. The tables above are from one run of the final method.
+- **Tuning set vs val disagree on two choices.** Online alignment cost perception on the tuning set (moved F1
+  −3.9, false deletion +1.5 points) and was made the default anyway, by choice (a graph built during the walk may
+  not use future frames); on val it is slightly better than the pre-pass. The detector failed its removal guard on
+  the tuning set (−8.4 points removed F1), but on val its removed F1 is higher than FULL's (31.0 vs 29.3%). Neither
+  choice was revisited after val.
 - **Spec deviations** (all logged in DECISIONS with reasons):
-  - confidence step sizes rescaled: with the spec's ±0.4 and the class priors, a node could never reach p_del;
+  - confidence step sizes measured instead of the spec's ±0.4 (with the spec's values a node could never reach p_del);
   - thin = 0.15 m (= τ_free) instead of 0.10 m;
   - appearance distances relative to the frame median;
   - a node-level mean appearance vote instead of a per-pixel majority.
-- **The confidence veto** costs removed recall (FULL 27–33% vs B2 41–45%). Contrast did not resolve it.
-- **Perception association is weak:** about 3% strict, because unchanged objects give no candidates.
-- **False candidates:** 8.7 per pair, 43% explained by GT. New precision is 2%.
+- **New objects in perception.** On val, 155 of 171 GT new objects are visible in the processed frames, but only
+  58 get a residual candidate assigned, among 62 candidates per pair of which 29% correspond to any GT object
+  (sensor noise at depth edges, reconstruction differences between the two scans, people, unannotated clutter).
+  The candidate confidence cannot separate these static artefacts from real objects, so any threshold trades
+  recall for precision at new F1 of 2–3%. An open-vocabulary detector raises recall (row `FULL+detector`) but
+  re-detected objects near an emptied place then take over removed nodes.
+- **The confidence veto** costs removed recall (FULL 29–37% vs B2 41–47%).
+- **Perception association is weak:** about 5% strict, because unchanged objects give no candidates.
 - **Small moves** (< 0.3 m) are mostly missed in perception, and same-label swaps (two identical chairs) occur.
-- **τ_move = 0.10 m** turns ICP noise into small false moves: oracle unchanged kept 86.4% vs B1's 92.9%. τ_move and
-  τ_assoc were not swept.
+- **τ_move = 0.10 m** turns ICP noise into small false moves; τ_move and τ_assoc were not swept.
 - **Relation types:** the geometric rules confuse `on` / `in`. Anchors carry no support edge. Relation-change
   events are few (val (c) n = 3; relchange n = 14).
 - **Out of scope:**
   - articulation (door swings);
   - rotation-only moves;
   - multi-visit chains;
-  - a full-frame detector;
-  - the optional DINOv2 association term.
+  - the optional DINOv2 association term (an identity check with DINOv2 was tried on the tuning set and dropped:
+    it separates same-class objects too weakly).
+- **Related work, same val split.** Adam et al. (2023, "Has Anything Changed? 3D Change Detection by 2D
+  Segmentation Masks") segment changed regions on the same 110 val pairs, offline, by rendering both
+  reconstructed meshes and growing depth-difference seeds with SAM masks; they report class-agnostic recall at box
+  IoU (R@0.25 = 65.7%) and leave out precision because the GT is incomplete. Their numbers are not comparable to
+  the node-level P / R here: they do not associate objects across visits, decide removed vs not seen, or label.
 - **GT incompleteness** penalises correct detections of unlisted changes; the audit (§6) quantifies this.
 
 ## 9. Reproducibility and compute
 
 - Every number comes from `outputs/<run_id>/metrics.json` with the config hash and git SHA. The same config and
-  seed give an identical `metrics` block (checked at M2, M3, M5, M7).
-- One command produces all tables and plots: `uv run lsg m7` (111 min, 16-core CPU + GTX 1650; DINOv2 / CLIP
-  features cached in `cache/`).
+  seed give an identical `metrics` block (checked at M2, M3, M5, M7 and for this run: FULL on one pair twice,
+  0 differences).
+- One command produces all tables and plots: `uv run lsg m7 --run-id chg3_final` (4.3 h, 16-core CPU + GTX 1650;
+  CLIP / DINOv2 features cached in `cache/`). The detector row needs `uv run lsg detect cache --split eval_val`
+  first (≈ 2 h on the GPU, once).
 - The README reproduces one pair end-to-end in both modes from a clean `uv sync`.
 - AI assistance (Claude Code) and per-milestone compute are logged in [AI_USAGE.md](AI_USAGE.md).
