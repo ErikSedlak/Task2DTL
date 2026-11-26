@@ -277,14 +277,44 @@ mode, perception new P / R (labelled).
 
 ## 6. Ground-truth audit (§7.4)
 
-> **[To be filled after labelling.]** `lsg audit sample` drew, per mode, 10 false-positive `moved`, 10 `removed`
-> and 10 `new` predictions of FULL on val (seed 0), from the final run's own FULL row (`outputs/chg3_final/val/FULL`,
-> per-object details), so the audited predictions are exactly the reported ones. The removed / moved pools include
-> absent-unlisted objects (pool sizes: oracle 157 moved / 81 removed / 52 new; perception 95 / 141 / 194). It also
-> drew every GT-removed object that B2 deletes but FULL's confidence keeps (the veto set: 4 oracle, 5 perception).
-> Each case is a panel: reference photo, rescan photo at the old place, rescan at the predicted place, top-down.
-> Each panel asks one plain question about the world (for example "did this pillow really move?"); Erik answers `yes` / `no` / `unsure`, and the answer is mapped to `gt_missing` (GT incomplete or wrong) / `method_error` / `unclear`. Table: share of GT gaps per mode and category,
-> with Wilson 95% CIs.
+`lsg audit sample` drew, per mode, 10 false-positive `moved`, 10 `removed` and 10 `new` predictions of FULL on val
+(seed 0) from the final run's own FULL row (`outputs/chg3_final/val/FULL`), so the audited predictions are exactly the
+reported ones. The removed / moved pools include absent-unlisted objects (pool sizes: oracle 157 moved / 81 removed /
+52 new; perception 95 / 141 / 194). It also drew every GT-removed object that B2 deletes but FULL's confidence keeps
+(the veto set: 4 oracle, 5 perception). Each case is a panel with a reference photo, the rescan photo at the old
+place, the rescan photo at the predicted place and a top-down view, and asks one question about the object (for
+example "did this pillow really move?"). Erik answered `yes` / `no` / `unsure` by hand (one labeller, no second opinion). A
+`yes` to a false positive means the method was right and the annotation is incomplete (**GT gap**); a `no` means a
+**method error**. For the veto set the answer is inverted: `yes` (the object really is gone) means the GT is right
+and the veto was too careful.
+
+| mode | false positives of | n | GT gap | method error | unsure | GT-gap share [95% CI] |
+|---|---|---|---|---|---|---|
+| oracle | moved | 10 | 2 | 6 | 2 | 20% [6, 51] |
+| oracle | removed | 10 | 7 | 2 | 1 | 70% [40, 89] |
+| oracle | new | 10 | 1 | 6 | 3 | 10% [2, 40] |
+| perception | moved | 10 | 4 | 6 | 0 | 40% [17, 69] |
+| perception | removed | 10 | 3 | 7 | 0 | 30% [11, 60] |
+| perception | new | 10 | 0 | 8 | 2 | 0% [0, 28] |
+| all | | 60 | 17 | 35 | 8 | 28% [19, 41] |
+| oracle | veto (GT removed, FULL kept) | 4 | 0 | 4 | 0 | 0% [0, 49] |
+| perception | veto (GT removed, FULL kept) | 5 | 1 | 4 | 0 | 20% [4, 62] |
+
+(Each row is a sample of 10 from a pool of 52–194, so the intervals are wide.)
+
+- **A false deletion is often a real removal.** Of the sampled false deletions that are absent-unlisted objects,
+  7 of 8 (oracle) and 3 of 4 (perception) really are gone from the room; the annotation just does not list them.
+  The false-deletion rates of §4 (7–9%) are therefore upper bounds, and the true error is lower. The deletions of
+  objects the GT says are unchanged or moved were method errors (oracle 1 of 1 clear case, perception 6 of 6).
+- **Unlisted moves exist too.** All 3 sampled absent-unlisted perception `moved` predictions are real moves. The
+  6 predictions on GT-unchanged objects were method errors (6 of 6), so the false-move rate is mostly a true error
+  rate. In oracle mode, 2 of the 10 sampled false moves (all on GT-unchanged objects) were real moves.
+- **New:** almost all false `new` nodes are method errors (oracle 6 of 10, perception 8 of 10). Only 1 of 20 is a
+  real object the GT lacks, so the very low new precision (3.5% in perception) is not an annotation artefact.
+- **The confidence veto costs real removals.** In 8 of 9 veto cases the object really is gone, so FULL's confidence
+  kept a node that B2 correctly deleted. The 1 GT error (perception) is an object that is still there. This
+  agrees with §4, where the veto lowers removed recall (33–34% vs 43–44%) in exchange for fewer false deletions.
+- 8 of 60 false positives were `unsure` (blur, occlusion, partial view); they are kept apart, not counted as either.
 
 Cases found during development (dev pairs, not part of the sample):
 - **r68, robot vacuum** (absent-unlisted): visible in the reference texture, bare floor in the rescan photo. It is

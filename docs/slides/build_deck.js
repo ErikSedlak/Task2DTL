@@ -277,10 +277,12 @@ bullets(s, [
 ], { x: M, y: 4.05, w: 7.6, h: 2.6, fontSize: 15 });
 card(s, 8.6, 1.4, 4.13, 5.3, "E8F0FA");
 text(s, "GT audit (§7.4)", { x: 8.9, y: 1.6, w: 3.6, h: 0.45, fontFace: HEAD, fontSize: 18, bold: true, color: COL.slate });
-text(s, "30 false positives per mode (10 moved / removed / new) + the confidence-veto cases, labelled by hand from photo panels.\n\n" +
-  "[Share of GT gaps: pending labelling]\n\nDev examples: a robot vacuum really gone but unlisted (caught only by appearance); " +
-  "a pillow replaced by a different pillow (missed).",
-  { x: 8.9, y: 2.15, w: 3.6, h: 4.4, fontSize: 14, color: COL.ink, valign: "top" });
+text(s, "30 false positives per mode (10 moved / removed / new) + 9 confidence-veto cases, each answered by hand from photo panels.\n\n" +
+  "Real removals the GT lacks: 7 of 8 (oracle) and 3 of 4 (perception) sampled false deletions of unlisted objects, so false deletion is an upper bound.\n" +
+  "False new nodes: 1 of 20 is a real object, so low new precision is not an annotation artefact.\n" +
+  "Veto: in 8 of 9 cases the object really was gone, so the veto costs real removals.\n\n" +
+  "Small samples (10 per cell): CIs in the report.",
+  { x: 8.9, y: 2.15, w: 3.6, h: 4.4, fontSize: 12, color: COL.ink, valign: "top" });
 
 // 12 — takeaways
 s = pres.addSlide({ masterName: "DARK_LIST" });
