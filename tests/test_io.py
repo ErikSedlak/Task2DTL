@@ -100,7 +100,6 @@ def test_meta_both_rigid_forms():
     assert s1.rigid[0].T is not None and s1.rigid[1].T is None
     assert s1.removed == [9]
     np.testing.assert_array_equal(meta["S2"].T_align, np.eye(4))
-    assert sorted(meta.rescans_of("R")) == ["S1", "S2"]
 
 
 def test_face_majority():

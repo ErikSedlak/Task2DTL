@@ -13,7 +13,7 @@ DESIGN.md (the spec) and DECISIONS.md (the dated log, with the reasons) stay the
   1. ~~Label the audit~~ **done 2026-11-26** (`outputs/chg3_audit`, `lsg audit summarize`; REPORT §6 and slide 11 filled; DECISIONS 2026-11-26): GT-gap share 28% [19, 41] of 60 false positives; 7 of 8 (oracle) and 3 of 4 (perception) sampled false deletions of unlisted objects are real removals; 8 of 9 veto cases are really gone.
   2. Acceptance check from a clean clone (README §3; expected result updated for the final method).
   3. The "Erik: (fill in)" lines in `docs/AI_USAGE.md`; push (nothing pushed since `b237be2`).
-  4. Open choices: keep or remove the unused `segment-anything` dependency (SAM 1, Part N variant; Part E uses SAM 2 via `transformers`); delete the old SAM timing cache `cache/sam/1ec391361533/`.
+  4. ~~Keep or remove `segment-anything`~~ **removed 2026-11-26** with the other rejected variants (DECISIONS); the folder `cache/sam/` is unused and can be deleted.
 
 ## State of 2026-11-20
 - **CHANGE 1 + 2 is the final method** (Erik, 2026-11-20). **CHANGE 3 proposed** (`docs/CHANGE_online_graph.md`, DECISIONS 2026-11-20): tuning set `dev_tune` (33 train pairs, download ≈ 2–3 GB), move needs old-place evidence, incremental graph during the walk, confidence policy from sensor statistics, class-agnostic new P / R. All §8 questions answered. **Part 0 done** (DECISIONS 2026-11-20 "CHANGE 3 Part 0"): `splits/dev_tune.txt` (33 pairs), `download_tier3.txt` (60 scans), 102 texture references, vocabulary without dev_tune rooms, flat start value 0.9 / p_del 0.2, hard rule 4 = tune on dev_tune.

@@ -63,8 +63,7 @@ def run_variants(cfg: dict[str, Any], variants: Mapping[str, Mapping[str, Any]],
                  only: list[str] | None = None, modes: Sequence[str] = MODES) -> tuple[dict[str, Any], dict[str, str]]:  # fmt: skip
     """FULL on `split` (`modes`, default both) once per variant (dotted overrides) into `outputs/<rid>/<variant>`.
 
-    `resume`: a variant whose `metrics.json` exists is read back instead of rerun (CHANGE 3 Part N: the SAM
-    variants wait for the SAM cache). `only`: run just these variants (others are read back if present).
+    `resume`: a variant whose `metrics.json` exists is read back instead of rerun. `only`: run just these variants (others are read back if present).
     """
     import json
 
@@ -236,42 +235,6 @@ def format_part_n_segment(res: Mapping[str, Any]) -> str:
         lines.append(f"{n:<14} pass={v['pass']}  {score}")
     lines.append(f"winner: {res.get('winner')}" + (f"  (missing: {res['missing']})" if res.get("missing") else ""))
     return "\n".join(lines)
-
-
-def select_explain(rows: Mapping[str, Mapping[str, Mapping[str, Any]]], crit: Mapping[str, Any],
-                   order: list[str], base: str = "ref_off") -> dict[str, Any]:  # fmt: skip
-    """Pre-written N2 rule (DECISIONS 2026-11-20): highest perception class-agnostic new F1 among variants whose
-    class-agnostic new R >= base - `r_drop`; ties within `tie_f1` -> earlier in `order`."""
-    b = rows[base]["perception"]
-    drop, tie = float(crit["r_drop"]), float(crit["tie_f1"])
-    verdict: dict[str, Any] = {}
-    for name in order:
-        if name not in rows:
-            continue
-        p = rows[name]["perception"]
-        ok = (p["new_ag_R"] or 0) >= (b["new_ag_R"] or 0) - drop - 1e-12
-        verdict[name] = {"pass": bool(ok), "new_ag_F1": float(p["new_ag_F1"] or 0)}
-    passing = [n for n in order if verdict.get(n, {}).get("pass")]
-    best = max(verdict[n]["new_ag_F1"] for n in passing)
-    winner = next(n for n in passing if verdict[n]["new_ag_F1"] >= best - tie - 1e-12)
-    return {"verdict": verdict, "winner": winner}
-
-
-def run_part_n_explain(cfg: dict[str, Any], seg: str, run_id: str = "chg3_partN_ref", split: str = "dev_tune",
-                       workers: int | None = None) -> dict[str, Any]:  # fmt: skip
-    """The N2 variants (`chg3.part_n.explain_ref`) on top of N1 variant `seg`, + the selection."""
-    t0 = time.time()
-    pn = cfg["chg3"]["part_n"]
-    base = {**dict(pn["segment"].get("common") or {}), **dict(pn["segment"]["variants"][seg] or {})}
-    base = {k: v for k, v in base.items() if not k.startswith("association.identity")}
-    pc = pn["explain_ref"]
-    variants = {n: {**base, **(ov or {})} for n, ov in pc["variants"].items()}
-    rows, paths = run_variants(cfg, variants, f"{run_id}/{seg}", split, workers, details=True, resume=True)
-    sel = select_explain(rows, pc["criterion"], list(pc["order"]))
-    res = {"split": split, "segment": seg, "variants": variants, "rows": rows, "criterion": dict(pc["criterion"]),
-           **sel, "metrics_paths": paths}  # fmt: skip
-    path = write_metrics(outputs_root(cfg) / run_id / seg, res, cfg, extra={"wall_time_s": time.time() - t0})
-    return {**res, "metrics_path": str(path)}
 
 
 # --------------------------------------------------------------------------------------------

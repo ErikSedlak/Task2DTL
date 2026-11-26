@@ -65,14 +65,6 @@ class Meta:
         """`scan_id in meta`."""
         return scan_id in self.scans
 
-    def rescans_of(self, reference_id: str) -> list[str]:
-        """Ids of all rescans whose reference is `reference_id` (same room, later visits)."""
-        return [
-            s.scan_id
-            for s in self.scans.values()
-            if s.reference_id == reference_id and not s.is_reference
-        ]
-
 
 def _parse_rigid(entry) -> RigidEntry:
     """One item of a rescan's `rigid` list: a dict with a transform, or a bare object id.

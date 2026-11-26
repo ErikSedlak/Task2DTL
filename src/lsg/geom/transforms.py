@@ -79,22 +79,6 @@ def backproject(depth: np.ndarray, K: np.ndarray, T_c2w: np.ndarray | None = Non
     return apply(T_c2w, pts) if T_c2w is not None else pts
 
 
-def project(pts_cam: np.ndarray, K: np.ndarray) -> np.ndarray:
-    """Project camera-frame points into the image (inverse of `backproject`).
-
-    Args:
-        pts_cam: (N, 3) points in the camera frame, z > 0 (in front of the camera).
-        K: 3x3 intrinsics.
-
-    Returns:
-        (N, 2) pixel coordinates (u = column, v = row), not rounded.
-    """
-    z = pts_cam[:, 2]
-    u = K[0, 0] * pts_cam[:, 0] / z + K[0, 2]
-    v = K[1, 1] * pts_cam[:, 1] / z + K[1, 2]
-    return np.stack([u, v], axis=1)
-
-
 def rotation_angle_deg(T: np.ndarray) -> float:
     """Size of the rotation part of T in degrees (angle about its axis), 0..180."""
     c = (np.trace(T[:3, :3]) - 1.0) / 2.0

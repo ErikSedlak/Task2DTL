@@ -25,13 +25,6 @@ net-seen (counted seen > free + free-like) may only take an observation inside i
 distant same-label observation cannot. Optionally the same for nodes without any counted vote
 (`unobserved_inside_only`), or a distance limit for them (`max_dist_unseen`).
 
-Reference explain-away (CHANGE 3 Part N, N2, FULL only, `association.explain_ref`): a perception depth
-candidate left over after association is not emitted as `new` if >= `min_frac` of its points lie within
-`dist` of the reference points of one node that still stands at its place (not committed removed, old
-place not `free_ev`): it is that node re-observed (pose / reconstruction offset; dev_tune: 175 of 970
-new nodes re-detected reference objects). No label condition: CLIP labels of such fragments are often
-wrong. Association is unchanged.
-
 Method side: imports only `change.visibility`, `graph`, `obs` (no-leak test).
 """
 
@@ -191,36 +184,6 @@ def old_place_gate(votes: Mapping[str, NodeVotes] | None, cfg: Mapping[str, Any]
     return gate
 
 
-def identity_gate(votes: Mapping[str, NodeVotes] | None, scorer: Any, cfg: Mapping[str, Any]) -> Gate | None:
-    """CHANGE 3 Part N (N3) pair gate: a node whose old place has free evidence (`free_ev` / `mixed`) may take an
-    observation outside its own place only if `scorer.similarity(node, obs)` >= `identity.tau_id` (None -> allowed).
-    `inside_too`: also observations inside its place. None if `association.identity.enabled` is false or no scorer."""
-    ic = _acfg(cfg).get("identity") or {}
-    if scorer is None or not ic.get("enabled", False):
-        return None
-    vs = votes or {}
-    oc = _acfg(cfg).get("old_place") or {}
-    frac, margin = float(oc.get("inside_frac", 0.5)), float(oc.get("margin", 0.10))
-    tau, inside_too = float(ic["tau_id"]), bool(ic.get("inside_too", False))
-
-    def gate(n: Node, o: ObsInstance) -> bool:
-        if old_place_class(vs.get(n.id), cfg) not in ("free_ev", "mixed"):
-            return True
-        if not inside_too and inside_frac(n, o, margin) >= frac:
-            return True
-        s = scorer.similarity(n, o)
-        return s is None or s >= tau
-
-    return gate
-
-
-def both_gates(a: Gate | None, b: Gate | None) -> Gate | None:
-    """AND of two optional gates (Part A old place, N3 identity); the identity gate runs only if the first passes."""
-    if a is None or b is None:
-        return a or b
-    return lambda n, o: a(n, o) and b(n, o)
-
-
 def associate(
     nodes: Sequence[Node], obs: Sequence[ObsInstance], mode: str, cfg: Mapping[str, Any], gate: Gate | None = None
 ) -> tuple[list[tuple[Node, ObsInstance, float]], list[Node], list[ObsInstance]]:
@@ -239,9 +202,8 @@ def associate(
     tau = tau_assoc(mode, cfg)
     if not N or not O:
         return [], N, O
-    # gates only for pairs below tau (equivalent: a pair at or above tau stays unmatched anyway); this keeps
-    # the identity gate (N3) from scoring hopeless pairs
-    C = np.array([[pair_cost(n, o, mode, cfg) for o in O] for n in N], float)
+    # gates only for pairs below tau (equivalent: a pair at or above tau stays unmatched anyway)
+    C =np.array([[pair_cost(n, o, mode, cfg) for o in O] for n in N], float)
     if gate is not None:
         for i, j in zip(*np.nonzero(C < tau)):
             if not gate(N[i], O[j]):
@@ -251,53 +213,3 @@ def associate(
     mn = {p[0].id for p in pairs}
     mo = {p[1].token for p in pairs}
     return pairs, [n for n in N if n.id not in mn], [o for o in O if o.token not in mo]
-
-
-def explained_by_reference(
-    obs: Sequence[ObsInstance],
-    nodes: Sequence[Node],
-    ref_points: Mapping[str, np.ndarray],
-    votes: Mapping[str, NodeVotes] | None,
-    skip: set[str],
-    cfg: Mapping[str, Any],
-) -> dict[str, str]:
-    """N2 rule (module docstring): `{token: node id}` of the depth candidates a standing node explains.
-
-    Args:
-        obs: Unmatched, unabsorbed observations (only `kind == "depth"` ones are tested).
-        nodes: Reference nodes; those in `skip` (committed removed) and those whose old place is
-            `free_ev` do not explain anything.
-        ref_points: Reference points per node id (`baselines.ref_node_points`).
-        votes: Counted votes per node id.
-        skip: Node ids that cannot explain (committed removed).
-        cfg: Full config (`association.explain_ref.dist`, `min_frac`).
-    """
-    from scipy.spatial import cKDTree
-
-    ec = _acfg(cfg).get("explain_ref") or {}
-    dist, min_frac = float(ec.get("dist", 0.10)), float(ec.get("min_frac", 0.5))
-    vs = votes or {}
-    ids, pts = [], []
-    for n in sorted(nodes, key=lambda x: x.id):
-        P = ref_points.get(n.id)
-        if n.id in skip or P is None or not len(P) or old_place_class(vs.get(n.id), cfg) == "free_ev":
-            continue
-        ids.append(n.id)
-        pts.append(np.asarray(P, float))
-    if not pts:
-        return {}
-    owner = np.concatenate([np.full(len(P), k, np.int64) for k, P in enumerate(pts)])
-    tree = cKDTree(np.concatenate(pts))
-    out: dict[str, str] = {}
-    for o in sorted(obs, key=lambda x: x.token):
-        if getattr(o, "kind", "depth") != "depth" or not len(o.points):
-            continue
-        d, j = tree.query(np.asarray(o.points, float), distance_upper_bound=dist)
-        near = np.isfinite(d)
-        if not near.any():
-            continue
-        cnt = np.bincount(owner[j[near]], minlength=len(pts))
-        k = int(np.argmax(cnt))
-        if cnt[k] >= min_frac * len(o.points):
-            out[o.token] = ids[k]
-    return out

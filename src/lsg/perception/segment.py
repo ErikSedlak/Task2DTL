@@ -8,18 +8,16 @@ in different ones; pairs never seen together keep today's spatial link.
 Segment sources (`perception.segment.method`):
 - `geometric`: per frame, the residual pixels form a 4-neighbour graph whose edges are cut where the
   depth jumps by more than `depth_edge_abs + depth_edge_rel * z` (`segment_frame`);
-- `sam`: label maps of a class-agnostic 2D segmenter (SAM ViT-B automatic masks) on the rescan colour
-  frames, precomputed by `lsg sam cache` (`perception.sam_cache`) and read by `SamSegments`;
 - `none`: no co-segmentation (today's `cluster.cluster`).
 
-Segment id -1 = unknown (pixel in no SAM mask); unknown pixels give no vote. Method side: uses only
-the rescan's depth / colour frames (hard rules 1-2).
+(A third source, cached SAM masks, lost the dev_tune selection and was removed, DECISIONS 2026-11-26.)
+Segment id -1 = unknown (crease pixel); unknown pixels give no vote. Method side: uses only the
+rescan's depth frames (hard rules 1-2).
 """
 
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -28,7 +26,7 @@ from scipy.spatial import cKDTree
 
 from lsg.perception.cluster import Candidate
 
-METHODS = ("none", "geometric", "sam")
+METHODS = ("none", "geometric")
 
 
 def seg_cfg(cfg: Mapping[str, Any]) -> Mapping[str, Any]:
@@ -139,33 +137,6 @@ def segment_frame(depth: np.ndarray, pix: np.ndarray, cfg: Mapping[str, Any], K:
     seg = csgraph.connected_components(g, directed=False)[1].astype(np.int64)
     seg[crease] = -1
     return seg
-
-
-class SamSegments:
-    """Cached SAM label maps of one rescan (`cache/sam/<key>/<rescan>/<frame>.npz`, see `sam_cache`)."""
-
-    def __init__(self, folder: str | Path):
-        """
-        Args:
-            folder: The rescan's cache folder (`sam_cache.rescan_dir`).
-        """
-        self.folder = Path(folder)
-
-    def labels(self, frame_idx: int) -> np.ndarray:
-        """(H, W) int32 segment map at depth resolution, stored orientation; -1 = no mask.
-
-        Raises:
-            FileNotFoundError: The frame is not cached (run `lsg sam cache` first).
-        """
-        p = self.folder / f"{int(frame_idx):06d}.npz"
-        if not p.exists():
-            raise FileNotFoundError(f"no SAM segments for frame {frame_idx} in {self.folder}; "
-                                    "run `uv run lsg sam cache --split <split>` first")  # fmt: skip
-        return np.load(p)["labels"].astype(np.int32)
-
-    def segment(self, frame_idx: int, pix: np.ndarray) -> np.ndarray:
-        """(N,) segment id of each flat residual pixel index (-1 = unknown)."""
-        return self.labels(frame_idx).ravel()[np.asarray(pix, np.int64)].astype(np.int64)
 
 
 def voxel_segments(vidx: np.ndarray, seg: np.ndarray) -> tuple[np.ndarray, np.ndarray]:

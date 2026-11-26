@@ -28,8 +28,8 @@ view-count rules become thresholds: strict voxels need `lv >= l_keep_small` (rel
 new nodes (`change.baselines.emits_new`). `live_candidates()` gives the current candidates for
 the snapshot sidecars. Appearance candidates are unchanged (view counts, confidence None).
 
-Co-segmentation (CHANGE 3 Part N, `perception.segment`): with method `geometric` / `sam`
-every frame's residual pixels get image-segment ids (depth-edge components or cached SAM masks), and
+Co-segmentation (CHANGE 3 Part N, `perception.segment`): with method `geometric`
+every frame's residual pixels get image-segment ids (depth-edge components), and
 both depth tiers cluster their kept voxels with `segment.cosegment_cluster` (adjacent voxels link only
 if the frames seeing both mostly put them in one segment) instead of `cluster.cluster`.
 
@@ -66,7 +66,7 @@ from lsg.obs.base import ObsInstance, PackedMasks, RefContext, RefRender, SeqInf
 from lsg.perception.cluster import Candidate, cluster, door_regions, drop_door_clusters, is_large
 from lsg.perception.labeler import Labeler
 from lsg.perception.residual import SurfaceFilter, nearer_mask, nearer_points
-from lsg.perception.segment import SamSegments, cosegment_cluster, seg_method, segment_frame, voxel_segments
+from lsg.perception.segment import cosegment_cluster, seg_method, segment_frame, voxel_segments
 from lsg.perception.voxels import VoxelEvidence, window_min_depth
 
 UNLABELLED = "object"  # label of a candidate without usable crops
@@ -149,11 +149,6 @@ class PerceptionSource:
         # CHANGE 3 Part N: image segments of every frame's residual pixels (frame -> (sorted pix, seg id))
         self.segm = seg_method(self.cfg)
         self._segs: dict[int, tuple[np.ndarray, np.ndarray]] = {}
-        self._sam = None
-        if self.segm == "sam":
-            from lsg.perception.sam_cache import rescan_dir
-
-            self._sam = SamSegments(rescan_dir(self.cfg, seq_info.rescan_id))
         self.candidates, self.dropped_door = [], []
         # CHANGE 3 Part B: snapshot tracks (`peek`)
         self._tracks: dict[str, tuple[int, np.ndarray]] = {}
@@ -230,11 +225,7 @@ class PerceptionSource:
         if self.segm == "none" or not len(pix):
             return
         pix = np.sort(np.asarray(pix, np.int64))
-        if self.segm == "geometric":
-            seg = segment_frame(frame.depth, pix, self.cfg, K=self.info.intrinsics.K_depth)
-        else:
-            assert self._sam is not None
-            seg = self._sam.segment(int(frame.idx), pix)
+        seg = segment_frame(frame.depth, pix, self.cfg, K=self.info.intrinsics.K_depth)
         self._segs[int(frame.idx)] = (pix, seg)
 
     def _seg_of(self, fidx: int, pix: np.ndarray) -> np.ndarray:

@@ -63,7 +63,6 @@ Task2/
 │   │   ├── chg3_checks.py   `lsg chg3 parta` / `pdel`: CHANGE 3 variant sweeps on dev_tune + selection rules
 │   │   ├── votestats.py     `lsg chg3 votestats`: vote weights as likelihood ratios (CHANGE 3 Part C)
 │   │   ├── anytime.py       `lsg anytime`: metrics over the walk from snapshot graphs, state flips (CHANGE 3 Part B)
-│   │   ├── identitystats.py `lsg chg3 idstats`: same / different pair similarities (CHANGE 3 Part N)
 │   │   ├── newfunnel.py     `lsg newfunnel`: where GT new objects are lost in perception (CHANGE 3 Part E)
 │   │   └── figures.py       the GT panel of the top-down figure (M8)
 │   ├── viz/                 PICTURES (M8; reads only method inputs / outputs)
@@ -76,10 +75,8 @@ Task2/
 │       ├── voxels.py        4 cm voxel grid counting distinct viewpoints per voxel; per-voxel log-odds with see-through votes (CHANGE 2)
 │       ├── cluster.py       groups kept voxels into candidates; door swing-region filter
 │       ├── segment.py       per-frame image segments + co-segmentation clustering (CHANGE 3 Part N)
-│       ├── sam_cache.py     `lsg sam cache`: SAM label maps per frame (Part N variant)
 │       ├── detect_cache.py  `lsg detect cache`: Grounding DINO + SAM 2 detections per frame (CHANGE 3 Part E)
 │       ├── detector.py      detections -> 3D tracks with a newness score (Part E, row FULL+detector)
-│       ├── identity.py      appearance similarity of node vs observation (Part N, disabled)
 │       ├── labeler.py       CLIP zero-shot labels from colour crops (cached)
 │       ├── appearance.py    rendered texture vs photo, DINOv2 patch features (cached) (M6)
 │       └── source.py        PerceptionSource: the above as an ObsSource
@@ -152,7 +149,6 @@ Task2/
 ### `io/dssg.py` — reading 3DSSG
 - `load_objects(root, id)`: per object, its label, class ids and attributes.
 - `load_relations(root, id)`: relations such as `(12, 5, "standing on")` = object 12 stands on object 5.
-- `load_predicates(root)`: the list of relation names.
 
 The big JSON files are parsed only once per run and then reused.
 
@@ -305,8 +301,8 @@ The rule: no imports from `oracle/` / `eval/`, and no rescan annotations. Inputs
 
 ### `perception/segment.py` — CHANGE 3 Part N (co-segmentation)
 - `segment_frame`: one frame's residual pixels form a graph of neighbouring pixels; it is cut where the depth jumps and on concave creases (`normals_from_depth`, `concave_band`), and its connected parts are the frame's segments.
-- `cosegment_cluster`: kept voxels next to each other are joined only if no frame that sees both puts them in different segments; voxels never seen in one frame are not joined across gaps. Used by both candidate tiers in `source.py` when `perception.segment.method` is `geometric` or `sam` (`SamSegments` reads the `lsg sam cache` label maps).
-- `change/association.py`: `explained_by_reference` (N2) and `identity_gate` (N3, with `perception/identity.py`) are implemented but disabled by default.
+- `cosegment_cluster`: kept voxels next to each other are joined only if no frame that sees both puts them in different segments; voxels never seen in one frame are not joined across gaps. Used by both candidate tiers in `source.py` when `perception.segment.method` is `geometric`.
+- Removed 2026-11-26 (lost their dev_tune selections, no reported row used them): the SAM segment source and `lsg sam cache`, the N2 reference explain-away, the N3 identity check (`lsg chg3 idstats`, `partn-ref`) and the N5 noise filters (DECISIONS).
 
 ### `perception/detect_cache.py`, `perception/detector.py` — CHANGE 3 Part E (detector, off by default)
 - `DetectorRunner.detect`: Grounding DINO on the upright colour frame with the vocabulary as one prompt (`fit_prompts`, `ordered_prompts`: reference labels first), a score per label from the token logits (`label_scores`), NMS, then SAM 2 masks from the boxes at depth resolution; `cache_rescan` writes one `.npz` per frame and `done.json`.

@@ -138,16 +138,10 @@ perception:                # PerceptionSource, DESIGN §3 candidate + §6.6 (tun
     large_min_extent: 0.0  # [m] ... and a longest AABB side of at least this (0 = no extent rule)
   link_voxels: 2          # voxels within this Chebyshev distance [voxels] are connected (1 = 26-conn.)
   min_voxels: 5            # drop clusters with fewer kept voxels (step 5)
-  noise:                   # CHANGE 3 Part N (N5): residual noise rejection (perception/residual.py); values fixed before the
-                           # dev_tune sweep, switches set by its pre-written rule (DECISIONS 2026-11-21)
-    edge: {enabled: false, abs: 0.05, rel: 0.03}     # drop residual pixels next to a depth jump > abs + rel * z (flying pixels)
-    dscale: {enabled: false, surf_rel: 0.015}        # surf_dist grows by surf_rel [m per m of depth] (3 m: 5 -> 9.5 cm)
-    planes: {enabled: false, margin: 0.30, max_rms: 0.03, min_vertices: 200}   # walls / ceiling / doors (struct_dist) and
-                           # floor (surf_dist) as fitted planes over their extent + margin [m] (mesh holes); planar if rms <= max_rms
   segment:                 # CHANGE 3 Part N (N1): co-segmentation; adjacent voxels link only if the frames seeing both
                            # mostly put them in one image segment (perception/segment.py)
     method: geometric      # none (link by space only, as before; M7 / CHANGE 3 Part C) | geometric (depth-edge + crease
-                           # components; N1 winner on dev_tune, DECISIONS 2026-11-21) | sam (cached SAM; N1 variant)
+                           # components; N1 winner on dev_tune, DECISIONS 2026-11-21; the losing SAM variant was removed)
     depth_edge_abs: 0.03   # [m] geometric: neighbouring residual pixels are cut if |d1 - d2| > abs + rel * z
     depth_edge_rel: 0.02
     concave_deg: 30        # geometric: pixels on a concave crease (neighbour normals differ by more, surfaces meet
@@ -156,12 +150,6 @@ perception:                # PerceptionSource, DESIGN §3 candidate + §6.6 (tun
     cut_frac: 0.0          # an adjacent voxel pair seen together is cut if more than this share of those frames put them in
                            # different segments (0 = any disagreement; 0.5 = majority)
     bridge_unseen: 0       # pairs never seen in one frame link only up to this Chebyshev distance [voxels] (null = link_voxels)
-    sam:                   # `lsg sam cache` (SamAutomaticMaskGenerator on the upright colour frame)
-      model: vit_b
-      points_per_side: 12     # 16: 3.3 s / frame on the GTX 1650, 12: 2.4 s with nearly the same masks (encoder 1.1 s)
-      pred_iou_thresh: 0.86
-      stability_score_thresh: 0.92
-      min_mask_region_area: 0
   detector:                # CHANGE 3 Part E: open-vocabulary detector (Grounding DINO + SAM 2, `lsg detect cache`;
                            # perception/detect_cache.py, perception/detector.py; DECISIONS 2026-11-21)
     enabled: false         # off by the pre-written dev_tune rule (`lsg chg3 parte`, DECISIONS): ablation row FULL+detector
@@ -226,24 +214,6 @@ association:               # DESIGN §6.9, B2 (tune on dev only)
     unobserved_inside_only: true    # a node without counted votes may only match inside its own place too (Erik: a_u_c02)
     max_dist_unseen: null  # [m] or null: a node without counted votes only matches obs within this centroid distance
     tau_move_seen: 0.2     # [m] or null: a net-seen node needs ICP displacement > this (instead of classify.tau_move)
-  identity:                # CHANGE 3 Part N (N3, FULL only): a node with free evidence at its old place (free_ev / mixed) may
-                           # take an observation outside its place only if they look alike (perception/identity.py)
-    enabled: false
-    tau_id: 0.5            # min cosine of DINOv2 descriptors (node: reference texture, virtual views; obs: rescan crops)
-    inside_too: false      # also observations inside the node's own place (in-place replacements)
-    k_obs: 3               # observation frames with the largest masks
-    k_node: 2              # virtual reference views (of 8) with the largest node masks
-    min_patches: 4         # a crop needs this many 14 px patches >= half inside the mask
-    crop_margin: 0.15      # square crop around the mask, enlarged by this share per side
-    crop_px: 224           # crop side after resizing (multiple of 14)
-    view_px: 448           # virtual reference view side [px] (60° field of view)
-  explain_ref:             # CHANGE 3 Part N (N2, FULL only): a leftover depth candidate with >= min_frac of its points within
-                           # dist of the reference points of a standing node (not committed removed, old place not free_ev)
-                           # is that node re-observed -> not emitted as new; no label condition; association unchanged
-    enabled: false
-    modes: [perception]
-    dist: 0.10             # [m]
-    min_frac: 0.5
 
 classify:                  # DESIGN §6.10 ICP moved test (tune on dev only)
   tau_move: 0.10           # [m] ICP-refined centroid displacement above this -> moved (§3)
@@ -385,32 +355,18 @@ chg3:                      # CHANGE 3 dev_tune sweeps (`lsg chg3 parta`; docs/CH
   part_n:                  # CHANGE 3 Part N (new objects; DECISIONS 2026-11-20), rules written before the runs
     segment:               # N1 blob splitting (`lsg chg3 partn-seg`), list order = simplicity order (ties)
       common: {confidence.candidates.p_new_min: 0.0}   # emit every candidate: the F1 guard sees the fragments
-      variants:            # `none` also scores identity pairs (tau_id -1: rejects nothing) for `lsg chg3 idstats`
-        none: {perception.segment.method: none, association.identity.enabled: true, association.identity.tau_id: -1.0}
+      variants:            # the sam / sam_add variants lost and were removed with their code (DECISIONS 2026-11-26)
+        none: {perception.segment.method: none}
         none_add: {perception.segment.method: none, perception.relaxed.merge: add}
         geometric: {perception.segment.method: geometric}
         geometric_add: {perception.segment.method: geometric, perception.relaxed.merge: add}
-        sam: {perception.segment.method: sam}
-        sam_add: {perception.segment.method: sam, perception.relaxed.merge: add}
       criterion: {f1_drop: 0.01, tie_objects: 2}
     noise:                 # N5 (`lsg chg3 partn-noise`): each variant at p_new_min 0, then its own best threshold
       common: {confidence.candidates.p_new_min: 0.0}
-      variants:            # list order = simplicity order (ties)
-        base: {}
+      variants:            # list order = simplicity order (ties); the losing noise filters (edge, dscale, planes, all)
+        base: {}           # were removed with their code (DECISIONS 2026-11-26)
         app: {confidence.candidates.track.appearance: true}
-        edge: {perception.noise.edge.enabled: true}
-        dscale: {perception.noise.dscale.enabled: true}
-        planes: {perception.noise.planes.enabled: true}
-        all: {confidence.candidates.track.appearance: true, perception.noise.edge.enabled: true,
-              perception.noise.dscale.enabled: true, perception.noise.planes.enabled: true}
       criterion: {f1_drop: 0.01, fd_up: 0.01, hits_drop: 5, tie_f1: 0.005}
-    explain_ref:           # N2 (`lsg chg3 partn-ref --seg <N1 winner>`), at p_new_min 0 like N1
-      variants:
-        ref_off: {association.explain_ref.enabled: false}
-        d10: {association.explain_ref.enabled: true, association.explain_ref.dist: 0.10}
-        d15: {association.explain_ref.enabled: true, association.explain_ref.dist: 0.15}
-      order: [d10, ref_off, d15]   # tie preference (DECISIONS: ties -> 0.10, then off; "off" would parse as a YAML bool)
-      criterion: {r_drop: 0.01, tie_f1: 0.005}
   part_c:                  # §5: confidence policy from sensor statistics (lsg chg3 votestats; DECISIONS 2026-11-20)
     votestats:             # vote weights as likelihood ratios (eval/votestats.py), written before the run
       min_votes: 20        # a vote kind with fewer counted votes in either class keeps `fallback`

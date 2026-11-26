@@ -90,7 +90,6 @@ class DinoV2Features:
         self.req_device = device
         self.device: str | None = None
         self._m = None
-        self.n_images = 0
 
     def _load(self):
         if self._m is not None:
@@ -121,7 +120,6 @@ class DinoV2Features:
         t = torch.from_numpy(x.transpose(0, 3, 1, 2).copy()).to(self.device)
         with torch.no_grad():
             f = self._m.forward_features(t)[:, self._m.num_prefix_tokens :].float()
-        self.n_images += len(imgs)
         return f.cpu().numpy().reshape(len(imgs), H // PATCH, W // PATCH, -1)
 
 
@@ -190,11 +188,6 @@ class AppearanceMap:
     comparable_px: np.ndarray  # (H, W) bool at depth resolution
     mismatch_px: np.ndarray  # (H, W) bool at depth resolution
     rel_px: np.ndarray | None = None  # (H, W) float32 frame-relative patch distance, 0 off comparable
-
-    @property
-    def match_px(self) -> np.ndarray:
-        """Comparable pixels whose patch agrees."""
-        return self.comparable_px & ~self.mismatch_px
 
 
 def comparable_pixels(d_obs: np.ndarray, d_exp: np.ndarray, cfg: Mapping[str, Any]) -> np.ndarray:

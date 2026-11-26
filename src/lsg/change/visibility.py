@@ -35,7 +35,6 @@ from typing import Any
 import numpy as np
 
 SEEN, FREE, NOINFO, UNOBSERVED, FREE_LIKE = "seen", "free", "noinfo", "unobserved", "free_like"
-VOTE_KINDS = (SEEN, FREE, NOINFO, UNOBSERVED, FREE_LIKE)
 COUNTED_KINDS = (SEEN, FREE, FREE_LIKE)  # kinds that go through the decorrelator
 
 

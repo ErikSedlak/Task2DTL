@@ -102,21 +102,6 @@ def test_part_n_segment_rule():
     assert select_segment(rows, crit, order)["winner"] == "sam"
 
 
-def test_part_n_explain_rule():
-    """CHANGE 3 Part N (N2): best agnostic new F1 with agnostic new R >= off - 1 pt; ties -> d10, then off."""
-    from lsg.eval.chg3_checks import select_explain
-
-    def row(r, f1):
-        return {"perception": {"new_ag_R": r, "new_ag_F1": f1}, "oracle": {}}
-
-    crit = {"r_drop": 0.01, "tie_f1": 0.005}
-    rows = {"ref_off": row(0.49, 0.08), "d10": row(0.485, 0.10), "d15": row(0.47, 0.12)}
-    sel = select_explain(rows, crit, ["d10", "ref_off", "d15"])
-    assert sel["verdict"]["d15"]["pass"] is False and sel["winner"] == "d10"
-    rows["d10"] = row(0.485, 0.083)  # within 0.5 pt of off -> d10 first in the tie order
-    assert select_explain(rows, crit, ["d10", "ref_off", "d15"])["winner"] == "d10"
-
-
 def test_part_n_noise_rule():
     """CHANGE 3 Part N (N5): best curve F1 among variants passing the change-metric and hit guards."""
     from lsg.eval.chg3_checks import select_noise

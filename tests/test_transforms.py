@@ -1,7 +1,7 @@
 import numpy as np
 
 from conftest import random_rigid
-from lsg.geom.transforms import apply, backproject, invert, mat4_from_colmajor, project
+from lsg.geom.transforms import apply, backproject, invert, mat4_from_colmajor
 
 
 def test_colmajor():
@@ -24,7 +24,6 @@ def test_backproject_project_roundtrip(rng):
     assert len(pw) == np.count_nonzero(depth)
     pc = apply(invert(T_c2w), pw)
     np.testing.assert_allclose(pc[:, 2], depth[depth > 0], rtol=1e-6)
-    uv = project(pc, K)
-    v, u = np.nonzero(depth > 0)
-    np.testing.assert_allclose(uv[:, 0], u, atol=1e-6)
-    np.testing.assert_allclose(uv[:, 1], v, atol=1e-6)
+    v, u = np.nonzero(depth > 0)  # pinhole projection gives the pixel grid back
+    np.testing.assert_allclose(K[0, 0] * pc[:, 0] / pc[:, 2] + K[0, 2], u, atol=1e-6)
+    np.testing.assert_allclose(K[1, 1] * pc[:, 1] / pc[:, 2] + K[1, 2], v, atol=1e-6)

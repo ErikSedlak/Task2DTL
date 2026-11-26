@@ -52,7 +52,6 @@ class Track:
     views: int = 0
     n_det: int = 0
     label_sum: np.ndarray | None = None
-    score_sum: float = 0.0
 
 
 def depth_inliers(z: np.ndarray, k: float, floor: float = 0.05) -> np.ndarray:
@@ -166,7 +165,6 @@ class DetectorTracks:
         tr.masks[fidx] = tr.masks[fidx] | it["mask"] if fidx in tr.masks else it["mask"]
         tr.views += int(self.dec.counts(("det", tr.tid), pose))
         tr.n_det += 1
-        tr.score_sum += it["score"]
         ls = it["label_scores"] * it["score"]
         tr.label_sum = ls if tr.label_sum is None else tr.label_sum + ls
 

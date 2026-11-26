@@ -28,15 +28,6 @@ def _index(path: str) -> dict[str, Any]:
     return out
 
 
-def load_predicates(root: str | Path) -> list[str]:
-    """Predicate names from `3DSSG/relationships.txt`.
-
-    Returns:
-        List where index = `rel_id` of a relationship tuple; entry 0 is "none".
-    """
-    return (Path(root) / "3DSSG" / "relationships.txt").read_text(encoding="utf-8").splitlines()
-
-
 def load_objects(root: str | Path, scan_id: str) -> dict[int, dict[str, Any]]:
     """Per-object metadata of one scan from `3DSSG/objects.json`.
 

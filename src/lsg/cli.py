@@ -285,32 +285,6 @@ def _cmd_newcurve(args: argparse.Namespace) -> int:
     return 0
 
 
-def _cmd_sam_cache(args: argparse.Namespace) -> int:
-    """`lsg sam cache --split <split>`: SAM label maps of every processed rescan frame (CHANGE 3 Part N)."""
-    import time
-    from pathlib import Path
-
-    from lsg.change.pipeline import select_frames
-    from lsg.config import REPO_ROOT, data_root
-    from lsg.io.scan3r import open_sequence, read_pairs
-    from lsg.perception.sam_cache import SamRunner, cache_key, cache_rescan
-
-    cfg = load_config(args.config)
-    root = data_root(cfg)
-    sp = Path(args.split) if Path(args.split).suffix else REPO_ROOT / "splits" / f"{args.split}.txt"
-    pairs = read_pairs(sp)[: args.pairs] if args.pairs else read_pairs(sp)
-    runner = SamRunner(cfg, device=args.device)
-    print(f"SAM cache key {cache_key(cfg)}; {len(pairs)} rescans of {sp.name}", flush=True)
-    t0, n = time.time(), 0
-    for k, (_, s) in enumerate(pairs):
-        with open_sequence(root, s) as seq:
-            fids = select_frames(seq.frame_ids, int(cfg["frames"]["stride"]))
-        r = cache_rescan(cfg, root, s, fids, runner)
-        n += r["done"]
-        rate = (time.time() - t0) / max(n, 1)
-        print(f"[{k + 1}/{len(pairs)}] {s}: {r['done']} new, {r['skipped']} cached, {r['s']} s "
-              f"({rate:.2f} s/frame, device {runner.device})", flush=True)  # fmt: skip
-    return 0
 
 
 def _cmd_detect_cache(args: argparse.Namespace) -> int:
@@ -437,14 +411,6 @@ def _cmd_chg3_partn_seg(args: argparse.Namespace) -> int:
     return 0
 
 
-def _cmd_chg3_partn_ref(args: argparse.Namespace) -> int:
-    """`lsg chg3 partn-ref --seg <N1 variant>`: CHANGE 3 Part N (N2) explain-away variants + the pre-written selection."""
-    from lsg.eval.chg3_checks import format_part_n_segment, run_part_n_explain
-
-    res = run_part_n_explain(load_config(args.config), args.seg, args.run_id, args.split, args.workers)
-    print(format_part_n_segment(res))
-    print(f"metrics: {res['metrics_path']}")
-    return 0
 
 
 def _cmd_chg3_partn_noise(args: argparse.Namespace) -> int:
@@ -489,22 +455,6 @@ def _cmd_newfunnel(args: argparse.Namespace) -> int:
     return 0
 
 
-def _cmd_chg3_idstats(args: argparse.Namespace) -> int:
-    """`lsg chg3 idstats --run <dir>`: identity-check similarity of same / different pairs (CHANGE 3 Part N)."""
-    from pathlib import Path
-
-    from lsg.config import outputs_root
-    from lsg.eval.identitystats import format_stats, identity_stats
-    from lsg.runinfo import write_metrics
-
-    cfg = load_config(args.config)
-    run = Path(args.run)
-    if not run.is_dir():
-        run = outputs_root(cfg) / args.run
-    res = identity_stats(run, tuple(args.modes.split(",")))
-    print(format_stats(res))
-    print(f"metrics: {write_metrics(run / 'idstats', {'run': str(run), **res}, cfg)}")
-    return 0
 
 
 def _cmd_audit_sample(args: argparse.Namespace) -> int:
@@ -666,14 +616,6 @@ def main(argv: list[str] | None = None) -> int:
     vs.add_argument("--config", default=None)
     vs.set_defaults(func=_cmd_chg3_votestats)
 
-    sm = sub.add_parser("sam", help="SAM segment cache for co-segmentation (CHANGE 3 Part N)")
-    sms = sm.add_subparsers(dest="sam_cmd", required=True)
-    smc = sms.add_parser("cache", help="SAM label maps of every processed frame of a split's rescans")
-    smc.add_argument("--split", default="dev_tune", help="split name under splits/ or a pair file")
-    smc.add_argument("--pairs", type=int, default=None, help="only the first N pairs (timing)")
-    smc.add_argument("--device", default="cuda")
-    smc.add_argument("--config", default=None)
-    smc.set_defaults(func=_cmd_sam_cache)
 
     nf = sub.add_parser("newfunnel", help="where GT new objects are lost in perception (run with details)")
     nf.add_argument("--run", required=True, help="run dir or id under outputs/ (with details/ and candidates/)")
@@ -696,13 +638,6 @@ def main(argv: list[str] | None = None) -> int:
     pns.add_argument("--workers", type=int, default=None)
     pns.add_argument("--config", default=None)
     pns.set_defaults(func=_cmd_chg3_partn_seg)
-    pnr = c3s.add_parser("partn-ref", help="Part N (N2): reference explain-away variants on an N1 variant + selection")
-    pnr.add_argument("--seg", required=True, help="N1 variant name (chg3.part_n.segment.variants)")
-    pnr.add_argument("--run-id", default="chg3_partN_ref")
-    pnr.add_argument("--split", default="dev_tune", help="tuning split only (hard rule 4)")
-    pnr.add_argument("--workers", type=int, default=None)
-    pnr.add_argument("--config", default=None)
-    pnr.set_defaults(func=_cmd_chg3_partn_ref)
     pnn = c3s.add_parser("partn-noise", help="Part N (N5): noise rejection / thin-object confidence variants + selection")
     pnn.add_argument("--run-id", default="chg3_partN_noise")
     pnn.add_argument("--split", default="dev_tune", help="tuning split only (hard rule 4)")
@@ -721,11 +656,6 @@ def main(argv: list[str] | None = None) -> int:
     pe_.add_argument("--workers", type=int, default=None)
     pe_.add_argument("--config", default=None)
     pe_.set_defaults(func=_cmd_chg3_parte)
-    ids = c3s.add_parser("idstats", help="Part N: identity-check similarity of same / different pairs from details/")
-    ids.add_argument("--run", required=True, help="run directory (or id under outputs/) with details/<mode>/")
-    ids.add_argument("--modes", default="oracle,perception")
-    ids.add_argument("--config", default=None)
-    ids.set_defaults(func=_cmd_chg3_idstats)
 
     at = sub.add_parser("anytime", help="method runs on every snapshot during the walk; anytime curve (CHANGE 3 Part B)")
     at.add_argument("--split", default="dev_tune")

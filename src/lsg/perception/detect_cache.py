@@ -6,7 +6,7 @@ in the strided sequence, so observed-fraction chunks still hit the cache): the u
 first, then train labels by frequency, cut to the text-token limit) -> per query a score for every
 prompt label (mean sigmoid logit over the label's tokens), box score = the best label's score ->
 class-agnostic NMS -> **SAM 2** with the boxes as prompts -> one mask per box -> rotated back to the
-stored orientation and sampled at the depth pixel centres (`sam_cache.to_depth_grid`) ->
+stored orientation and sampled at the depth pixel centres (`to_depth_grid`) ->
 `<cache_root>/detect/<key>/<rescan>_<prompts>/<frame>.npz`: `boxes` (N, 4, upright colour pixels),
 `scores` (N,), `labels` (N, best label index into `prompts.json`), `label_scores` (N, n_prompts,
 float16), `masks` (N, H_d, W_d) bit-packed.
@@ -31,9 +31,18 @@ from typing import Any
 import numpy as np
 
 from lsg.config import cache_root
-from lsg.perception.sam_cache import to_depth_grid
 
 MAX_TEXT_TOKENS = 256  # Grounding DINO's text length, incl. [CLS] / [SEP]
+
+
+def to_depth_grid(lab_upright: np.ndarray, depth_wh: tuple[int, int]) -> np.ndarray:
+    """Upright colour-resolution label map -> stored orientation, sampled at depth pixel centres."""
+    stored = np.rot90(lab_upright, k=1)  # inverse of the viewing rotation rot90(k=-1)
+    Hc, Wc = stored.shape
+    Wd, Hd = depth_wh
+    v = np.minimum(((np.arange(Hd) + 0.5) * Hc / Hd).astype(int), Hc - 1)
+    u = np.minimum(((np.arange(Wd) + 0.5) * Wc / Wd).astype(int), Wc - 1)
+    return stored[np.ix_(v, u)]
 
 
 def det_cfg(cfg: Mapping[str, Any]) -> Mapping[str, Any]:
@@ -132,25 +141,11 @@ class DetectorRunner:
         self.device = dev
         self._gd_proc = AutoProcessor.from_pretrained(d["gdino_model"])
         self._gd = AutoModelForZeroShotObjectDetection.from_pretrained(d["gdino_model"]).to(dev).eval()
-        try:
-            from transformers import Sam2Model, Sam2Processor
+        from transformers import Sam2Model, Sam2Processor
 
-            self._sam_proc = Sam2Processor.from_pretrained(d["sam_model"])
-            self._sam = Sam2Model.from_pretrained(d["sam_model"]).to(dev).eval()
-            self.sam_kind = "sam2"
-        except Exception as e:  # pragma: no cover - SAM 1 fallback (Erik, 2026-11-21)
-            print(f"[detect] SAM 2 unavailable ({e}); falling back to SAM 1", flush=True)
-            from segment_anything import SamPredictor, sam_model_registry
-
-            from lsg.perception.sam_cache import WEIGHTS
-
-            fname, url = WEIGHTS["vit_b"]
-            path = cache_root(dict(self.cfg)) / "models" / fname
-            if not path.exists():
-                path.parent.mkdir(parents=True, exist_ok=True)
-                torch.hub.download_url_to_file(url, str(path))
-            self._sam = SamPredictor(sam_model_registry["vit_b"](checkpoint=str(path)).to(dev))
-            self.sam_kind = "sam1"
+        self._sam_proc = Sam2Processor.from_pretrained(d["sam_model"])
+        self._sam = Sam2Model.from_pretrained(d["sam_model"]).to(dev).eval()
+        self.sam_kind = "sam2"
 
     def token_ids(self, text: str) -> list[int]:
         """Grounding DINO tokens of a text, without special tokens."""
@@ -198,26 +193,20 @@ class DetectorRunner:
         B, S, LSk = B[ok], S[ok], LSk[ok]
         if len(S) == 0:
             return empty
-        masks_up = self._masks(up, img, B)
+        masks_up = self._masks(img, B)
         masks = np.stack([to_depth_grid(m.astype(np.int32), depth_wh) > 0 for m in masks_up])
         return {"boxes": B, "scores": S, "labels": LSk.argmax(axis=1).astype(np.int16),
                 "label_scores": LSk.astype(np.float16), "masks": masks}  # fmt: skip
 
-    def _masks(self, up: np.ndarray, img, B: np.ndarray) -> np.ndarray:
+    def _masks(self, img, B: np.ndarray) -> np.ndarray:
         """(N, H, W) bool masks of the boxes on the upright image."""
         import torch
 
-        if self.sam_kind == "sam2":
-            inp = self._sam_proc(images=img, input_boxes=[B.tolist()], return_tensors="pt").to(self.device)
-            with torch.no_grad():
-                out = self._sam(**inp, multimask_output=False)
-            m = self._sam_proc.post_process_masks(out.pred_masks.cpu(), inp["original_sizes"])[0]
-            return m[:, 0].numpy().astype(bool)
-        self._sam.set_image(up)  # pragma: no cover - SAM 1 fallback
-        tb = self._sam.transform.apply_boxes_torch(torch.as_tensor(B, device=self.device), up.shape[:2])
+        inp = self._sam_proc(images=img, input_boxes=[B.tolist()], return_tensors="pt").to(self.device)
         with torch.no_grad():
-            m, _, _ = self._sam.predict_torch(None, None, boxes=tb, multimask_output=False)
-        return m[:, 0].cpu().numpy().astype(bool)
+            out = self._sam(**inp, multimask_output=False)
+        m = self._sam_proc.post_process_masks(out.pred_masks.cpu(), inp["original_sizes"])[0]
+        return m[:, 0].numpy().astype(bool)
 
 
 def save_frame(path: Path, det: Mapping[str, np.ndarray]) -> None:

@@ -1,5 +1,5 @@
-"""Co-segmentation of candidate voxels (CHANGE 3 Part N, N1): geometric frame segments, SAM cache
-reader, majority segments, cluster linking, and the PerceptionSource wiring."""
+"""Co-segmentation of candidate voxels (CHANGE 3 Part N, N1): geometric frame segments, majority
+segments, cluster linking, the PerceptionSource wiring, and the label-map sampling of the detector cache."""
 
 import copy
 
@@ -8,8 +8,8 @@ import pytest
 
 from lsg.config import load_config
 from lsg.perception.cluster import cluster
-from lsg.perception.sam_cache import paint, rescan_dir, to_depth_grid
-from lsg.perception.segment import SamSegments, cosegment_cluster, seg_method, segment_frame, voxel_segments
+from lsg.perception.detect_cache import to_depth_grid
+from lsg.perception.segment import cosegment_cluster, seg_method, segment_frame, voxel_segments
 
 CFG = load_config()
 
@@ -56,34 +56,22 @@ def test_cosegment_cluster_splits_by_segments():
     assert len(cosegment_cluster(vi, co, pts, tie, 8, 1, 1)[0]) == 1
 
 
-def test_sam_label_map_rotation_and_sampling(tmp_path):
-    # upright 8 x 4 (H x W) image: two masks, the smaller one painted last (wins)
-    big = np.zeros((8, 4), bool)
-    big[:, :] = True
-    small = np.zeros((8, 4), bool)
-    small[0:2, 0:2] = True
-    lab_up = paint([{"segmentation": small, "area": 4}, {"segmentation": big, "area": 32}], (8, 4))
-    assert lab_up[0, 0] == 1 and lab_up[7, 3] == 0
+def test_label_map_rotation_and_sampling():
+    # upright 8 x 4 (H x W) label map -> stored orientation at depth resolution
+    lab_up = np.zeros((8, 4), np.int32)
+    lab_up[0:2, 0:2] = 1
     stored = to_depth_grid(lab_up, (8, 4))  # stored = 4 x 8 (H x W), depth grid equal size
     assert stored.shape == (4, 8)
     assert np.array_equal(np.rot90(stored, k=-1), lab_up)  # viewing rotation gives the upright map back
-    # reader: missing frame -> clear error; present frame -> per-pixel ids
-    sam = SamSegments(tmp_path)
-    with pytest.raises(FileNotFoundError, match="lsg sam cache"):
-        sam.labels(3)
-    np.savez_compressed(tmp_path / "000003.npz", labels=stored.astype(np.int16))
-    assert sam.segment(3, np.array([0, 31])).tolist() == [stored.ravel()[0], stored.ravel()[31]]
 
 
-def test_seg_method_and_cache_key():
+def test_seg_method():
     c = copy.deepcopy(CFG)
     assert seg_method(c) == "geometric"  # CHANGE 3 Part N default (N1 winner)
-    c["perception"]["segment"]["method"] = "kmeans"
-    with pytest.raises(ValueError):
-        seg_method(c)
-    c2 = copy.deepcopy(CFG)
-    c2["perception"]["segment"]["sam"]["points_per_side"] = 16
-    assert rescan_dir(CFG, "S") != rescan_dir(c2, "S") and rescan_dir(CFG, "S").name == "S"
+    for bad in ("kmeans", "sam"):  # sam lost the N1 selection and was removed
+        c["perception"]["segment"]["method"] = bad
+        with pytest.raises(ValueError):
+            seg_method(c)
 
 
 def test_geometric_cosegmentation_splits_two_touching_boxes():

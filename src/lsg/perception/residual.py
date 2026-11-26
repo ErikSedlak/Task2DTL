@@ -7,12 +7,6 @@ surfaces (walls, ceiling, doors, windows, ...). Floor and floor mat are not in t
 set, so objects standing on the floor survive; their bottom slice is already within
 `surf_dist` of the floor.
 
-Noise rejection (CHANGE 3 Part N, N5; `perception.noise`, each switch off by default until the dev_tune
-sweep decides): `edge` drops residual pixels next to a depth jump (flying pixels between foreground and
-background); `dscale` grows the `surf_dist` test with depth (sensor noise grows with range); `planes`
-extends reference walls / ceiling / doors (`struct_dist`) and the floor (`surf_dist`) as fitted planes
-over their extent + `margin`, so holes in the reference mesh stop producing residuals.
-
 Uses only reference data (mesh, reference labels via `RefContext`) and the rescan's depth +
 pose. Method side: no `oracle` / `eval` imports, no rescan annotations.
 """
@@ -53,19 +47,6 @@ class SurfaceFilter:
         )  # fmt: skip
         V, F = ref_ctx.faces_of(self.struct_oids)
         self.struct = Renderer(V, F) if len(F) else None
-        nc = pc.get("noise") or {}
-        ds = nc.get("dscale") or {}
-        self.surf_rel = float(ds.get("surf_rel", 0.0)) if ds.get("enabled", False) else 0.0
-        pl = nc.get("planes") or {}
-        self.planes: list[tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, float]] = []
-        if pl.get("enabled", False):
-            floors = sorted(oid for oid in scan.instances if ref_ctx.object_nyu40(oid) == 2)
-            for oids, thr in ((self.struct_oids, self.struct_dist), (floors, self.surf_dist)):
-                for oid in oids:
-                    p = fit_plane(ref_ctx, oid, int(pl.get("min_vertices", 200)), float(pl.get("max_rms", 0.03)),
-                                  float(pl.get("margin", 0.30)))  # fmt: skip
-                    if p is not None:
-                        self.planes.append((*p, thr))
 
     def keep_struct(self, pts: np.ndarray) -> np.ndarray:
         """Bool mask: points farther than `struct_dist` from structure (the surface test is skipped;
@@ -75,65 +56,14 @@ class SurfaceFilter:
             ok = self.struct.distance(pts) > self.struct_dist
         return ok
 
-    def keep(self, pts: np.ndarray, z: np.ndarray | None = None) -> np.ndarray:
-        """Bool mask: points farther than `surf_dist` (+ `surf_rel` · z with `noise.dscale`) from the mesh,
-        `struct_dist` from structure, and (with `noise.planes`) off the extended structure / floor planes."""
+    def keep(self, pts: np.ndarray) -> np.ndarray:
+        """Bool mask: points farther than `surf_dist` from the mesh and `struct_dist` from structure."""
         if len(pts) == 0:
             return np.zeros(0, bool)
-        thr = self.surf_dist + (self.surf_rel * np.asarray(z, float) if (self.surf_rel and z is not None) else 0.0)
-        ok = self.ref.distance(pts) > thr
+        ok = self.ref.distance(pts) > self.surf_dist
         if self.struct is not None and ok.any():
             ok[ok] = self.struct.distance(pts[ok]) > self.struct_dist
-        if self.planes and ok.any():
-            ok[ok] = ~on_planes(pts[ok], self.planes)
         return ok
-
-
-def fit_plane(ref_ctx: RefContext, oid: int, min_vertices: int, max_rms: float, margin: float):
-    """Plane of one reference instance (PCA of its mesh vertices) with its in-plane extent + `margin`.
-
-    Returns:
-        (centroid, normal, in-plane axes (2, 3), lower (2,), upper (2,)) or None if the instance has
-        fewer than `min_vertices` vertices or is not planar (rms distance to the plane > `max_rms`).
-    """
-    V, F = ref_ctx.faces_of([oid])
-    if not len(F):
-        return None
-    P = V[np.unique(F.ravel())]
-    if len(P) < min_vertices:
-        return None
-    c = P.mean(axis=0)
-    w, U = np.linalg.eigh(np.cov((P - c).T))
-    if np.sqrt(max(w[0], 0.0)) > max_rms:
-        return None
-    n, A = U[:, 0], U[:, 1:].T
-    uv = (P - c) @ A.T
-    return c, n, A, uv.min(axis=0) - margin, uv.max(axis=0) + margin
-
-
-def on_planes(pts: np.ndarray, planes) -> np.ndarray:
-    """Bool mask: points within a plane's distance threshold and inside its extended extent."""
-    hit = np.zeros(len(pts), bool)
-    for c, n, A, lo, hi, thr in planes:
-        d = np.abs((pts - c) @ n)
-        uv = (pts - c) @ A.T
-        hit |= (d <= thr) & np.all((uv >= lo) & (uv <= hi), axis=1)
-    return hit
-
-
-def depth_edges(depth: np.ndarray, cfg: Mapping[str, Any]) -> np.ndarray:
-    """(H, W) bool: valid pixels with a valid 4-neighbour more than `edge.abs` + `edge.rel` · z away in depth."""
-    ec = ((cfg["perception"].get("noise") or {}).get("edge")) or {}
-    d = np.asarray(depth, np.float64)
-    a, r = float(ec.get("abs", 0.05)), float(ec.get("rel", 0.03))
-    out = np.zeros(d.shape, bool)
-    for sl_a, sl_b in (((slice(None), slice(0, -1)), (slice(None), slice(1, None))),
-                       ((slice(0, -1), slice(None)), (slice(1, None), slice(None)))):  # fmt: skip
-        x, y = d[sl_a], d[sl_b]
-        jump = (x > 0) & (y > 0) & (np.abs(x - y) > a + r * np.minimum(x, y))
-        out[sl_a] |= jump
-        out[sl_b] |= jump
-    return out
 
 
 def nearer_mask(depth: np.ndarray, d_exp: np.ndarray, cfg: Mapping[str, Any], tau: float | None = None) -> np.ndarray:
@@ -147,10 +77,7 @@ def nearer_mask(depth: np.ndarray, d_exp: np.ndarray, cfg: Mapping[str, Any], ta
     tau = float(pc["tau_new"] if tau is None else tau)
     d_obs = np.asarray(depth, np.float64)
     d_e = np.asarray(d_exp, np.float64)
-    m = (d_obs > 0) & (d_obs <= float(pc["max_depth"])) & (d_e > 0) & (d_obs < d_e - tau)
-    if ((pc.get("noise") or {}).get("edge") or {}).get("enabled", False):
-        m &= ~depth_edges(d_obs, cfg)  # CHANGE 3 Part N: flying pixels at depth jumps
-    return m
+    return (d_obs > 0) & (d_obs <= float(pc["max_depth"])) & (d_e > 0) & (d_obs < d_e - tau)
 
 
 def nearer_points(
@@ -186,6 +113,6 @@ def nearer_points(
     pts_c = np.stack([(u - K[0, 2]) * z / K[0, 0], (v - K[1, 2]) * z / K[1, 1], z], axis=1)
     pts = apply(pose_ref, pts_c)
     if filt is not None:
-        ok = filt.keep(pts, z)
+        ok = filt.keep(pts)
         pts, pix = pts[ok], pix[ok]
     return pts, pix
