@@ -2,8 +2,8 @@
 // Compile:  uv run --with typst python -c "import typst; typst.compile('docs/report/report.typ', output='docs/report/report.pdf')"
 // Numbers: outputs/chg3_final (val, one run), outputs/chg3_final_anytime, outputs/chg3_audit.
 
-#set page(paper: "a4", margin: (x: 1.6cm, top: 1.4cm, bottom: 1.5cm), numbering: "1")
-#set text(font: "New Computer Modern", size: 9.3pt, lang: "en")
+#set page(paper: "a4", margin: (x: 1.5cm, top: 1.3cm, bottom: 1.4cm), numbering: "1")
+#set text(font: "New Computer Modern", size: 9pt, lang: "en")
 #set par(justify: true, leading: 0.5em, spacing: 0.6em, first-line-indent: 0pt)
 #set heading(numbering: "1.1")
 #show heading.where(level: 1): it => block(above: 0.9em, below: 0.45em, text(size: 12pt, weight: "bold", it))
@@ -107,14 +107,11 @@ Scored ground truth on validation: 235 moved, 73 removed, 171 new, 1,401 unchang
 
 == Preprocessing
 
-Units are metres, the reference mesh frame is the common frame, and `T_align` maps the rescan into it. The provided alignment is about 5 cm off, which is enough
-to confuse depth comparison at object borders. It is therefore refined during the walk: every 20 processed frames one point-to-plane ICP registers the depth of all frames
-so far to the reference walls, floor and ceiling, and the estimate is accepted only if it is close to the raw one and not degenerate (one wall cannot fix a shift along itself).
-No future frame is used.
-
+Units are metres and the reference mesh frame is the common frame; `T_align` maps the rescan into it. The provided alignment is about 5 cm off, enough
+to confuse depth comparison at object borders, so it is refined during the walk: every 20 processed frames one point-to-plane ICP registers the depth of all frames
+so far to the reference walls, floor and ceiling, and the estimate is accepted only if it is close to the raw one and not degenerate. No future frame is used.
 Every third frame is processed, in time order. For each frame the reference mesh is rendered at the rescan pose with Open3D ray casting
-(about 5 ms per frame, on the CPU), giving the depth the camera _would_ see if nothing had changed. Frozen CLIP and DINOv2 features are computed on the GPU (GTX 1650) and
-cached. 
+(about 5 ms on the CPU), giving the depth the camera _would_ see if nothing had changed. Frozen CLIP and DINOv2 features are computed on the GPU (GTX 1650) and cached.
 
 = Method
 
@@ -157,8 +154,8 @@ choose a new parent (an anchor, another thing, or the floor). The same method ru
 
 == Baselines and ablations
 
-Four methods build on each other: *B0* matches by class and position and deletes whatever is unmatched; *B1* adds the online votes (a node is removed only with free evidence, otherwise it is unknown); *B2* adds
-association and the ICP move test; *FULL* adds the old-place evidence, thin-object appearance, the measured confidence and the cleaner candidates. Each part can be switched off in an ablation row.
+Four methods build on each other: *B0* matches by class and position and deletes whatever is unmatched; *B1* adds the online votes; *B2* adds
+association and the ICP move test; *FULL* adds old-place evidence, thin-object appearance, the measured confidence and the cleaner candidates. Each part can be switched off in an ablation row.
 
 = Evaluation
 
@@ -199,12 +196,18 @@ The table says four things.
 == Visualization of the graph before and after
 
 #figure(
-  image("/figures/topdown_val_8eabc45f_perception.png", width: 100%),
-  caption: [Validation room 8eabc45f → 5341b7b3 (perception). Left: the reference graph. Middle: the updated graph, with boxes coloured by state (grey unchanged, dotted unknown, blue moved with an arrow, hatched red removed,
-    green new). Right: the ground truth. The two pillows removed from the sofa are deleted and some pillow moves are found, but the sofa stays _unknown_, the lamp is moved to a wrong place and two false new objects appear.],
+  image("/figures/topdown_val_8eabc45f_perception.png", width: 82%),
+  caption: [Validation room 8eabc45f → 5341b7b3 (perception), top-down. Left: reference graph. Middle: updated graph (grey unchanged, dotted unknown, blue moved, hatched red removed, green new). Right: ground truth.
+    The two pillows removed from the sofa are deleted and some pillow moves are found; the sofa stays _unknown_, the lamp is moved wrongly and two false new objects appear.],
 ) <fig-room>
 
-Figure 1 shows a room with many changes, chosen by a fixed rule (the most scored changes in the milestone subset), not by how it looks. The oracle run on the same room also finds the moved sofa. The repository also replays a pair as a time line in Rerun (`lsg viz rerun`).
+#figure(
+  image("/figures/graph_before_after.png", width: 72%),
+  caption: [The same room as a graph, changed part only, before and after the update. Arrows go from a thing to its support parent (solid `on`, dashed `in`). Removed pillows and a vase, moved pillows and a lamp,
+    and two new nodes ("clothes" in the sofa, "table lamp" in a cabinet; both false) appear; the sofa and a table stay unknown.],
+) <fig-graph>
+
+@fig-room and @fig-graph show a room with many changes, chosen by a fixed rule (the most scored changes in the milestone subset), not by how it looks. The oracle run on the same room also finds the moved sofa.
 
 == Ablations
 
@@ -228,17 +231,17 @@ Figure 1 shows a room with many changes, chosen by a fixed rule (the most scored
 
 *Deciding late is the clearest result.* Deleting a node as soon as its place looks empty removes objects that merely moved; their observations at the new place then become false new nodes. Removed precision falls from 58% to 17%
 (oracle), and oracle moved F1 from 57% to 24%. *Geometry versus geometry + appearance:* appearance has almost no effect on validation, because only 4 of the 73 scored removals are thin. In a synthetic test a 2 cm book removed from a
-table is kept by depth alone and deleted with appearance, and on a development pair it catches a real, unlisted removal (a robot vacuum); it is a targeted tool, not an overall gain. Alignment during the walk is as good as the offline
-pre-pass on validation (perception moved F1 42.6 vs 40.4%), although it was 7.6 points worse on the tuning set; the choice was made on principle, since a graph built during the walk may not use future frames.
+table is kept by depth alone and deleted with appearance, and on a development pair it catches a real, unlisted removal (a robot vacuum): a targeted tool, not an overall gain. Alignment during the walk is as good as the offline
+pre-pass on validation (perception moved F1 42.6 vs 40.4%), although it was 7.6 points worse on the tuning set; it was kept because a graph built during the walk may not use future frames.
 
 == How much of the room is observed
 
 #figure(
-  image("/figures/m7_fraction.png", width: 92%),
+  image("/figures/m7_fraction.png", width: 72%),
   caption: [FULL with only one contiguous chunk of 10 / 25 / 50% of the frames (mean ± sd over three chunk positions). Oracle blue, perception orange.],
 ) <fig-frac>
 
-With less observation the method says _unknown_ instead of guessing (Figure 2). From the full sequence down to 10% of the frames, the unknown share grows from 31 to 78% (oracle) and from 49 to 92% (perception), while the false deletion rate falls
+With less observation the method says _unknown_ instead of guessing (@fig-frac). From the full sequence down to 10% of the frames, the unknown share grows from 31 to 78% (oracle) and from 49 to 92% (perception), while the false deletion rate falls
 from 8.7 to 1.4% and from 7.3 to 1.4%: the intended behaviour, since less is seen through. During the walk (`lsg anytime`) perception moved F1 is 11 / 23 / 43% at 30 / 50 / 100% of the frames. 52% of the reference nodes change their
 state at least once; moved nodes settle last (median at 56% of the walk), since they need the late view of their new place. This is the partial-observation case of the assignment; poses are taken as given and only the alignment is estimated.
 
@@ -252,8 +255,7 @@ Keeping a parent that still supports the thing matters: without that rule moved 
 
 Because the annotation is incomplete, 60 false positives of FULL (10 per mode and change type) and 9 cases where the confidence kept an object that the ground truth lists as removed were checked by hand on photo panels.
 A fraction of 28% [19, 41] of the false positives are real changes the annotation lacks. Of the sampled false deletions of unlisted objects, 7 of 8 (oracle) and 3 of 4 (perception) really are gone, so the false deletion rates above are upper bounds.
-The false new objects, in contrast, are almost always method errors (1 of 20 real). In 8 of 9 veto cases the object really was gone, so the confidence rule costs real removals. The samples are small (10 per cell, one labeller). The method of Adam et al. @adam2023changed solves a different problem (offline, class-agnostic, regions instead of graph nodes); comparing with it would need a separate protocol at their box-IoU thresholds, which was not done.
-
+False new objects are almost always method errors (1 of 20 real). In 8 of 9 veto cases the object really was gone, so the confidence rule costs real removals. The samples are small (10 per cell, one labeller). Adam et al. @adam2023changed solve a different problem (offline, class-agnostic, regions instead of graph nodes); comparing with them would need a separate protocol at their box-IoU thresholds, which was not done.
 
 = Conclusion
 
@@ -262,10 +264,9 @@ and requires evidence at the old place before it calls an object moved. With the
 after thresholds were chosen on 33 training pairs.
 
 *Limitations.* New objects are the weak point: depth residuals mix real objects with static differences between the two scans, and no confidence separates them (3.5% precision). The detector raises recall but re-detected objects near emptied places take over removed nodes.
-The confidence rule trades removed recall for safety, small moves (under 30 cm) and swaps of identical objects are often missed, and relation changes in 3RScan are few, so their evaluation has small counts.
-Validation was looked at between early development steps; the decisions it influenced are listed in `docs/REPORT.md` (Section 8).
+The confidence rule trades removed recall for safety, small moves (under 30 cm) and swaps of identical objects are often missed, and relation changes are few. Validation was looked at between early development steps; the decisions it influenced are listed in `docs/REPORT.md` (Section 8).
 
-*Future work.* The most promising step is a better test for new objects: tracking detector masks and comparing them with the reference at the object level, instead of residual depth. A second step is a proper comparison with offline change detection
+*Future work.* A better test for new objects: tracking detector masks and comparing them with the reference at the object level, instead of residual depth. Also a comparison with offline change detection
 at the box-IoU thresholds of Adam et al., and estimating the rescan poses instead of using the given ones. Door swings, rotation-only moves and chains of several visits are out of scope.
 
 *Use of AI tools.* Claude Code (Anthropic) was used for code, experiments and drafting; it is logged per milestone in `docs/AI_USAGE.md`.
