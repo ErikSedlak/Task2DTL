@@ -163,8 +163,8 @@ steps.forEach(([n, h, b], i) => {
 s = pres.addSlide({ masterName: "CONTENT" });
 s.addText("Free-space evidence removes 90% of false deletions", { placeholder: "title" });
 s.addChart(pres.charts.BAR, [
-  { name: "oracle", labels: ["B0 naive", "B1 + votes", "B2 + association", "FULL"], values: [95.0, 9.5, 9.5, 9.1] },
-  { name: "perception", labels: ["B0 naive", "B1 + votes", "B2 + association", "FULL"], values: [83.6, 8.0, 7.9, 7.2] },
+  { name: "oracle", labels: ["B0 naive", "B1 + votes", "B2 + association", "FULL"], values: [95.0, 9.1, 9.1, 8.7] },
+  { name: "perception", labels: ["B0 naive", "B1 + votes", "B2 + association", "FULL"], values: [83.6, 7.9, 8.0, 7.3] },
 ], {
   x: M, y: 1.5, w: 7.4, h: 5.2, barDir: "col", barGrouping: "clustered", chartColors: [COL.blue, COL.orange],
   showValue: true, dataLabelPosition: "outEnd", dataLabelFontSize: 12, dataLabelColor: COL.ink2, dataLabelFontFace: "+mn-lt",
@@ -179,8 +179,8 @@ text(s, "Rule", { x: 8.5, y: 1.7, w: 4.2, h: 0.45, fontFace: HEAD, fontSize: 20,
 bullets(s, [
   "Only seeing through the place a node occupied lowers its confidence",
   "Occluded, out of view, invalid depth: no information → unknown",
-  "Removed precision 22 → 61% (oracle), 4 → 16% (perception) from B0 to B1, same matching",
-  "FULL keeps 93.4% of unchanged objects in perception, 90.9% in oracle",
+  "Removed precision 21 → 65% (oracle), 4 → 15% (perception) from B0 to B1, same matching",
+  "FULL keeps 93.4% of unchanged objects in perception, 90.3% in oracle",
 ], { x: 8.5, y: 2.25, w: 4.2, h: 4.3, fontSize: 15 });
 
 // 7 — results table
@@ -188,15 +188,15 @@ s = pres.addSlide({ masterName: "CONTENT" });
 s.addText("Results on val: both modes, every method", { placeholder: "title" });
 const hdr = ["method", "mode", "removed P / R", "false del. ↓", "unch. kept", "moved F1", "new P / R", "new, any label"];
 const rows = [
-  ["B0", "oracle", "21.5 / 71.2", "95.0", "80.7", "30.6", "85.0 / 59.6", "85.0 / 59.6"],
-  ["B1", "oracle", "60.8 / 42.5", "9.5", "92.4", "30.6", "85.0 / 59.6", "85.0 / 59.6"],
-  ["B2", "oracle", "55.6 / 41.1", "9.5", "85.7", "56.3", "82.1 / 59.1", "82.1 / 59.1"],
-  ["FULL", "oracle", "58.3 / 28.8", "9.1", "90.9", "56.5", "67.5 / 66.7", "67.5 / 66.7"],
-  ["B0", "perception", "4.0 / 74.0", "83.6", "6.3", "14.1", "5.6 / 7.6", "7.9 / 10.5"],
-  ["B1", "perception", "15.5 / 46.6", "8.0", "80.4", "14.1", "5.6 / 7.6", "7.9 / 10.5"],
-  ["B2", "perception", "18.5 / 46.6", "7.9", "86.2", "38.1", "3.4 / 3.5", "6.9 / 7.0"],
-  ["FULL", "perception", "24.3 / 37.0", "7.2", "93.4", "42.5", "3.1 / 3.5", "6.9 / 7.6"],
-  ["+ detector", "perception", "29.3 / 32.9", "7.1", "92.1", "45.2", "6.1 / 21.1", "10.1 / 34.5"],
+  ["B0", "oracle", "21.1 / 69.9", "95.0", "80.8", "31.2", "85.0 / 59.6", "85.0 / 59.6"],
+  ["B1", "oracle", "65.3 / 43.8", "9.1", "92.8", "31.2", "85.0 / 59.6", "85.0 / 59.6"],
+  ["B2", "oracle", "59.6 / 42.5", "9.1", "85.8", "55.8", "81.0 / 59.6", "81.0 / 59.6"],
+  ["FULL", "oracle", "58.5 / 32.9", "8.7", "90.3", "57.4", "68.3 / 65.5", "68.3 / 65.5"],
+  ["B0", "perception", "3.9 / 72.6", "83.6", "6.3", "12.3", "5.8 / 8.2", "7.6 / 10.5"],
+  ["B1", "perception", "14.7 / 45.2", "7.9", "80.7", "12.3", "5.8 / 8.2", "7.6 / 10.5"],
+  ["B2", "perception", "17.3 / 43.8", "8.0", "86.2", "38.6", "3.3 / 3.5", "5.6 / 5.8"],
+  ["FULL", "perception", "22.3 / 34.2", "7.3", "93.4", "42.6", "3.5 / 4.1", "5.6 / 6.4"],
+  ["+ detector", "perception", "28.9 / 32.9", "6.9", "91.9", "44.9", "6.2 / 21.6", "10.1 / 35.1"],
 ];
 const cell = (t, o = {}) => ({ text: t, options: { fontFace: BODY, fontSize: 14, color: COL.ink, valign: "middle", ...o } });
 const tbl = [hdr.map((h, j) => cell(h, { bold: true, color: COL.white, fill: { color: COL.slate }, align: j < 2 ? "left" : "right" }))].concat(
@@ -206,7 +206,7 @@ const tbl = [hdr.map((h, j) => cell(h, { bold: true, color: COL.white, fill: { c
 s.addTable(tbl, { x: M, y: 1.45, w: W - 2 * M, colW: [1.25, 1.45, 1.75, 1.35, 1.3, 1.25, 1.6, 2.18], rowH: 0.43,
   border: { type: "solid", pt: 0.5, color: COL.line } });
 text(s, "%, micro-averaged over 110 pairs. Support: 73 removed, 737 absent-unlisted, 1,401 unchanged, 235 moved, 171 new. " +
-  "95% bootstrap CIs in the report (e.g. FULL perception false deletion 7.2 [4.6, 10.8]). + detector = ablation (Grounding DINO + SAM 2).",
+  "95% bootstrap CIs in the report (e.g. FULL perception false deletion 7.3 [4.7, 10.9]). + detector = ablation (Grounding DINO + SAM 2).",
   { x: M, y: 6.05, w: W - 2 * M, h: 0.7, fontSize: 12, color: COL.muted, valign: "top" });
 
 // 8 — qualitative
@@ -214,38 +214,43 @@ s = pres.addSlide({ masterName: "CONTENT" });
 s.addText("One room, before and after (oracle)", { placeholder: "title" });
 image(s, "topdown_val_8eabc45f_oracle.png", M, 1.45, W - 2 * M, 2070, 720,
   "Top-down view of val pair 8eabc45f to 5341b7b3: reference graph, updated graph, ground truth");
-text(s, "Val pair chosen by rule (most GT changes in the 20-pair subset). The two pillows removed from the sofa and several moved " +
-  "pillows are found; the sofa and couch-table moves are missed and a bench is moved by mistake. Perception deletes the same pillows.",
+text(s, "Val pair chosen by rule (most GT changes in the 20-pair subset). The moved sofa, the two pillows removed from it and several moved " +
+  "pillows are found; the couch-table move is missed and a bench is moved by mistake. Perception deletes the same pillows.",
   { x: M, y: 5.85, w: W - 2 * M, h: 0.9, fontSize: 15, color: COL.ink2, valign: "top" });
 
 // 9 — ablations
 s = pres.addSlide({ masterName: "CONTENT" });
 s.addText("Deciding late matters most", { placeholder: "title" });
-stat(s, M, 1.5, 3.7, "58 → 16%", "oracle removed precision with immediate commitment (delete as soon as the place looks empty)", COL.orange);
-stat(s, M, 3.85, 3.7, "57 → 22%", "oracle moved F1: moved objects are deleted and reappear as false new nodes", COL.orange);
+stat(s, M, 1.5, 3.7, "58 → 17%", "oracle removed precision with immediate commitment (delete as soon as the place looks empty)", COL.orange);
+stat(s, M, 3.85, 3.7, "57 → 24%", "oracle moved F1: moved objects are deleted and reappear as false new nodes", COL.orange);
 image(s, "m7_fraction.png", M + 4.1, 1.55, 8.0, 1950, 480, "Observed-fraction ablation: metrics vs share of frames, both modes");
-text(s, "Less observation → more unknown (oracle 31 → 78% at 10% of frames), not more false deletions (9.1 → 1.4%).",
+text(s, "Less observation → more unknown (oracle 31 → 78% at 10% of frames), not more false deletions (8.7 → 1.4%).",
   { x: M + 4.1, y: 3.65, w: 8.0, h: 0.7, fontSize: 15, color: COL.ink2, valign: "top" });
 bullets(s, [
-  "A move needs evidence at the old place: false moves 4.3 → 1.9% (oracle), unchanged kept 85.9 → 90.9%",
+  "A move needs evidence at the old place: false moves 4.3 → 2.3% (oracle), unchanged kept 85.7 → 90.3%",
   "Appearance off: ≈ no change on val, only 4 scored removals are thin; catches the 2 cm book in the controlled test",
-  "τ_free 0.05–0.30 m: a monotone recall / false-deletion trade-off; 0.15 m kept",
+  "τ_free 0.05–0.30 m: a recall / false-deletion trade-off; 0.15 m kept",
 ], { x: M + 4.1, y: 4.45, w: 8.0, h: 2.3, fontSize: 15 });
 
 // 9b — the graph during the walk (anytime curve, val)
 s = pres.addSlide({ masterName: "CONTENT" });
 s.addText("The graph during the walk", { placeholder: "title" });
-image(s, "anytime_val.png", M, 1.45, 8.2, ANYTIME_W, ANYTIME_H, "Metrics of the tentative graph over the walk, val, both modes");
-bullets(s, ANYTIME_BULLETS, { x: M + 8.5, y: 1.6, w: 3.6, h: 5.0, fontSize: 15 });
+image(s, "anytime_val.png", M, 1.45, 8.2, 1320, 440, "Metrics of the tentative graph over the walk, val, both modes");
+bullets(s, [
+  "Perception moved F1 at 30 / 50 / 100% of the walk: 11 / 23 / 43% (oracle 22 / 41 / 57%)",
+  "False deletion grows with the walk: 1.2 / 3.3 / 7.3%; early graphs are mostly unknown",
+  "52% of nodes change state at least once (oracle 67%); moved nodes settle last, at 56% of the walk",
+  "The last snapshot is the final graph (= the FULL row)",
+], { x: M + 8.5, y: 1.6, w: 3.6, h: 5.0, fontSize: 15 });
 
 // 10 — relations
 s = pres.addSlide({ masterName: "CONTENT" });
 s.addText("Relations: keeping the old parent is a strong baseline", { placeholder: "title" });
 const rh = ["set (FULL, oracle)", "keep old (R0)", "geometric (R1)", "ours (update)"];
 const rr = [
-  ["val (a) all things, n = 995", "91.9", "79.7", "93.3"],
-  ["val (b) moved things, n = 168", "94.0", "63.7", "86.3"],
-  ["relchange (b) moved, n = 93", "48.4", "40.9", "47.3"],
+  ["val (a) all things, n = 996", "91.8", "79.8", "92.8"],
+  ["val (b) moved things, n = 168", "94.0", "66.7", "86.9"],
+  ["relchange (b) moved, n = 93", "48.4", "38.7", "47.3"],
   ["relchange (c) parent swapped, n = 14", "0.0", "42.9", "35.7"],
 ];
 s.addTable([rh.map((h, j) => cell(h, { bold: true, color: COL.white, fill: { color: COL.slate }, align: j ? "right" : "left" }))].concat(
@@ -256,7 +261,7 @@ card(s, 8.6, 1.55, 4.13, 4.6);
 bullets(s, [
   "Most moved things keep their parent: R0 is right 94% of the time on val",
   "Ours matches R0 overall and wins only where parents really change",
-  "Keeping a still-supporting parent: val (b) 73.8 → 86.3%",
+  "Keeping a still-supporting parent: val (b) 75.6 → 86.9%",
   "on / in type correct in 95–97% given the parent",
 ], { x: 8.9, y: 1.8, w: 3.6, h: 4.2, fontSize: 15 });
 
@@ -266,9 +271,9 @@ s.addText("Where perception fails, and what the GT misses", { placeholder: "titl
 image(s, "topdown_val_4a9a43d2_perception_failure.png", M, 1.4, 7.6, 2070, 676,
   "Perception failure case 4a9a43d2: large false new nodes, a moved stool deleted");
 bullets(s, [
-  "62 depth-residual candidates per pair, 29% match any GT object; no signal separates them → 6 of 171 new objects",
-  "Detector ablation (Grounding DINO + SAM 2): new R 3.5 → 21%, moved F1 42.5 → 45.2, but loses removals on the tuning set",
-  "Moved F1 42.5 vs 56.5% (oracle): small moves and same-label swaps are missed",
+  "56 depth-residual candidates per pair, 29% match any GT object; no signal separates them → 7 of 171 new objects",
+  "Detector ablation (Grounding DINO + SAM 2): new R 4.1 → 22%, moved F1 42.6 → 44.9, but loses removals on the tuning set",
+  "Moved F1 42.6 vs 57.4% (oracle): small moves and same-label swaps are missed",
 ], { x: M, y: 4.05, w: 7.6, h: 2.6, fontSize: 15 });
 card(s, 8.6, 1.4, 4.13, 5.3, "E8F0FA");
 text(s, "GT audit (§7.4)", { x: 8.9, y: 1.6, w: 3.6, h: 0.45, fontFace: HEAD, fontSize: 18, bold: true, color: COL.slate });

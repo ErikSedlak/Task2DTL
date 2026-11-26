@@ -6,10 +6,10 @@ Handoff file between milestone sessions: each milestone is done in a fresh chat.
 
 DESIGN.md (the spec) and DECISIONS.md (the dated log, with the reasons) stay the source of truth. This file is the to-do view on top of them.
 
-## Current state (2026-11-22)
-- **The final method is CHANGE 1 + 2 + 3** (DESIGN, DECISIONS). **The final val run is done:** `outputs/chg3_final` (`lsg m7 --run-id chg3_final`, git 4a4ba76, acceptance all PASS; DECISIONS 2026-11-22). REPORT, README, slides and figures describe it. Val FULL (oracle | perception): removed P / R 58.3 / 28.8 | 24.3 / 37.0, false deletion 9.1 | 7.2, unchanged kept 90.9 | 93.4, moved F1 56.5 | 42.5, new P / R 67.5 / 66.7 | 3.1 / 3.5. The detector (CHANGE 3 Part E) is the ablation row `FULL+detector` (lost its dev_tune rule).
+## Current state (2026-11-26)
+- **The final method is CHANGE 1 + 2 + 3** (DESIGN, DECISIONS). **The final val run is done:** `outputs/chg3_final` (`lsg m7 --run-id chg3_final`, git eced83b, run after the alignment fix of 2026-11-22 and resumed once; acceptance all PASS; DECISIONS 2026-11-26). REPORT, README, slides and figures describe it, and `outputs/chg3_final_anytime` is its anytime curve. Val FULL (oracle | perception): removed P / R 58.5 / 32.9 | 22.3 / 34.2, false deletion 8.7 | 7.3, unchanged kept 90.3 | 93.4, moved F1 57.4 | 42.6, new P / R 68.3 / 65.5 | 3.5 / 4.1. The first final run (`outputs/chg3_final_firstrun_oraclebug`) is superseded. The detector (CHANGE 3 Part E) is the ablation row `FULL+detector` (lost its dev_tune rule).
 - **Erik, to finish:**
-  1. Label the audit: `outputs/chg3_audit/audit.csv` (60 rows) and `audit_veto.csv` (11 rows), columns `verdict` (`gt_missing | method_error | unclear`) and `note`, looking at `outputs/chg3_audit/panels/`. Then Claude runs `uv run lsg audit summarize --run-id chg3_audit` and fills REPORT §6 and slide 11.
+  1. Label the audit: `outputs/chg3_audit/audit.csv` (60 rows) and `audit_veto.csv` (9 rows), columns `verdict` (`gt_missing | method_error | unclear`) and `note`, looking at `outputs/chg3_audit/panels/`. Then Claude runs `uv run lsg audit summarize --run-id chg3_audit` and fills REPORT §6 and slide 11.
   2. Acceptance check from a clean clone (README §3; expected result updated for the final method).
   3. The "Erik: (fill in)" lines in `docs/AI_USAGE.md`; push (nothing pushed since `b237be2`).
   4. Open choices: keep or remove the unused `segment-anything` dependency (SAM 1, Part N variant; Part E uses SAM 2 via `transformers`); delete the old SAM timing cache `cache/sam/1ec391361533/`.

@@ -22,9 +22,9 @@ all ablations in [docs/REPORT.md](docs/REPORT.md)):
 
 | mode | removed P / R | false deletion ↓ | unchanged kept | moved F1 | new P / R | new P / R, any label |
 |---|---|---|---|---|---|---|
-| oracle | 58.3 / 28.8 | 9.1 | 90.9 | 56.5 | 67.5 / 66.7 | 67.5 / 66.7 |
-| perception | 24.3 / 37.0 | 7.2 | 93.4 | 42.5 | 3.1 / 3.5 | 6.9 / 7.6 |
-| perception + detector (ablation) | 29.3 / 32.9 | 7.1 | 92.1 | 45.2 | 6.1 / 21.1 | 10.1 / 34.5 |
+| oracle | 58.5 / 32.9 | 8.7 | 90.3 | 57.4 | 68.3 / 65.5 | 68.3 / 65.5 |
+| perception | 22.3 / 34.2 | 7.3 | 93.4 | 42.6 | 3.5 / 4.1 | 5.6 / 6.4 |
+| perception + detector (ablation) | 28.9 / 32.9 | 6.9 | 91.9 | 44.9 | 6.2 / 21.6 | 10.1 / 35.1 |
 
 - *False deletion* = share of reference objects that are missing from the rescan annotation but not listed as
   removed, which the method deletes.
@@ -147,7 +147,7 @@ uv run lsg viz rerun --run demo --pair <REF> <RESCAN> --mode perception --spawn 
 | `uv run lsg eval --split eval_val_small --obs perception,oracle --method FULL` | the 20-pair milestone subset of val | ~1 min |
 | `uv run lsg ablate --list` / `--names FULL-appearance,FULL+immediate` | single ablation rows (DESIGN §8) | ~6–7 min per val row |
 | `uv run lsg detect cache --split eval_val` | Grounding DINO + SAM 2 detections for the row `FULL+detector` (once) | ~2 h (GPU) |
-| `uv run lsg m7 --run-id chg3_final` | every results table, ablation and plot of the report (after the detect cache) | 4.3 h |
+| `uv run lsg m7 --run-id chg3_final` | every results table, ablation and plot of the report (after the detect cache) | ≈ 4 h |
 | `uv run lsg anytime --split eval_val` | the method at every snapshot: metrics over the walk, state flips | ~20 min |
 | `uv run lsg audit sample` → label `audit.csv` → `uv run lsg audit summarize` | §7.4 GT audit, sampled from `chg3_final/val/FULL` | ~10 min + labelling |
 | `uv run pytest -q -m slow` | slow tests (real data, models) | ~3 min |
