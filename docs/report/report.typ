@@ -1,5 +1,5 @@
 // Living Scene Graphs, Subproject D: short report. Sections 2 and 3 follow the points of the assignment.
-// Compile:  uv run --with typst python docs/report/build.py
+// Compile:  uv run --with typst python docs/report/build.py   (or Tinymist / typst CLI with the project root at the repo or docs/: typst compile --root . docs/report/report.typ)
 // Numbers: outputs/chg3_final (val, one run), outputs/chg3_final_anytime, outputs/chg3_audit.
 
 #set page(paper: "a4", margin: (x: 1.5cm, top: 1.3cm, bottom: 1.4cm), numbering: "1")
@@ -212,7 +212,7 @@ not an overall gain.
 == How much of the room has to be seen?
 
 #figure(
-  image("/figures/m7_fraction.png", width: 60%),
+  image("../figures/m7_fraction.png", width: 60%),
   caption: [FULL with only one contiguous piece of 10 / 25 / 50% of the frames (mean ± sd over three positions in the walk). Oracle blue, perception orange.],
 ) <fig-frac>
 
@@ -254,14 +254,14 @@ false new objects: removed precision falls from 58% to 17% (oracle), and oracle 
 
 #figure(
   placement: auto,
-  image("/figures/topdown_val_8eabc45f_perception.png", width: 76%),
+  image("../figures/topdown_val_8eabc45f_perception.png", width: 76%),
   caption: [Validation room 8eabc45f → 5341b7b3 (perception), top-down. Left: reference graph. Middle: updated graph (grey unchanged, dotted unknown, blue moved, hatched red removed, green new). Right: ground truth.
     The two pillows removed from the sofa are deleted and some pillow moves are found; the sofa stays _unknown_, the lamp is moved to a wrong place and two false new objects appear.],
 ) <fig-room>
 
 #figure(
   placement: auto,
-  image("/figures/graph_before_after.png", width: 66%),
+  image("../figures/graph_before_after.png", width: 66%),
   caption: [The same room as a graph, changed part only, before and after the update. Arrows go from a thing to its support parent (solid `on`, dashed `in`). Removed pillows and a vase, moved pillows and a lamp,
     and two new nodes ("clothes" in the sofa, "table lamp" in a cabinet; both false) appear; the sofa and a table stay unknown.],
 ) <fig-graph>
@@ -296,4 +296,4 @@ moves and chains of several visits are out of scope.
 
 #show bibliography: set text(size: 8pt)
 #set par(leading: 0.4em, spacing: 0.4em)
-#bibliography("/report/refs.bib", style: "ieee", title: "Bibliography")
+#bibliography("refs.bib", style: "ieee", title: "Bibliography")
