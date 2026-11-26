@@ -1,4 +1,4 @@
-"""Metric unit tests on a 5-object toy pair (DESIGN §9 M2), incl. the perception matching rule."""
+"""Metric unit tests on a 5-object toy pair, incl. the perception matching rule."""
 
 import numpy as np
 import pytest
@@ -137,7 +137,7 @@ def test_gt_object_without_node_is_counted_not_scored(gt):
     assert c["ref_no_node"] == 4 and c["ref_n"] == 1
 
 
-# ---- perception matching rule (§5) ------------------------------------------------------------
+# ---- perception matching rule ------------------------------------------------------------
 
 
 def test_perception_rule(gt):

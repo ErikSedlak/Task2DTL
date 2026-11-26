@@ -1,4 +1,4 @@
-"""Seen votes need contrast (M7, DECISIONS 2026-11-15): second-surface depth, the frame-vote
+"""Seen votes need contrast (M7): second-surface depth, the frame-vote
 rule, and the synthetic acceptance scenes (pillow against a backrest removed: old rule `seen`,
 new rule `noinfo`; an object 1 m in front of a wall: `seen` under both)."""
 

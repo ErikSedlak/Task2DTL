@@ -1,4 +1,4 @@
-"""ICP moved test and final states (DESIGN §6.10, M5)."""
+"""ICP moved test and final states (M5)."""
 
 import numpy as np
 

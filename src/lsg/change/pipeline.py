@@ -27,7 +27,7 @@ from lsg.obs.base import RefContext, SeqInfo
 
 
 def select_frames(frame_ids: list[int], stride: int, frac: float = 1.0, seed: int = 0, key: str = "") -> list[int]:
-    """Processed frames: every `stride`-th frame, then one contiguous chunk (DESIGN §7.3).
+    """Processed frames: every `stride`-th frame, then one contiguous chunk.
 
     Args:
         frame_ids: All frame ids of the sequence, in time order.

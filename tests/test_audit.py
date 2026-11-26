@@ -1,4 +1,4 @@
-"""§7.4 audit (M8): per-object details, FP pools, sampling, veto set, verdict summary."""
+"""GT audit (M8): per-object details, FP pools, sampling, veto set, verdict summary."""
 
 import json
 

@@ -1,5 +1,5 @@
 # 20 pairs: 20 references of eval_val.txt, one rescan each, seed 0
-# written by `lsg splits subset`; milestone val checks only (DECISIONS M6)
+# written by `lsg splits subset`; milestone val checks only
 # reference_scan rescan
 095821f7-e2c2-2de1-9568-b9ce59920e29 095821fb-e2c2-2de1-94df-20f2cb423bcb
 0988ea72-eb32-2e61-8344-99e2283c2728 9766cbf5-6321-2e2f-8131-78c4e204635d

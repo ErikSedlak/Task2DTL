@@ -1,7 +1,7 @@
-"""M4 acceptance checks (`uv run lsg m4`, DESIGN §9): perception end-to-end on the dev pairs.
+"""M4 acceptance checks (`uv run lsg m4`): perception end-to-end on the dev pairs.
 
 1. B0 and B1 on dev in perception + oracle mode (`run_eval`), with the candidate diagnostics:
-   candidate recall vs GT new / moved-to objects, class-agnostic and with the §5 label rule
+   candidate recall vs GT new / moved-to objects, class-agnostic and with the label matching rule
    (reported, no threshold).
 2. Overlay PNGs of candidate clusters on 3 dev frames (one per dev pair: the processed frame
    with the largest total candidate mask), with projected GT new / moved-to centroids.

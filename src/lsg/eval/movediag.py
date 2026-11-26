@@ -5,7 +5,7 @@ Reads the per-object rows of a run with details (`run_eval(details=True)` ->
 
 - GT status: `moved` (TP) / `unchanged` / `absent_unlisted` / `removed` / `dont_care` (incl. nonrigid);
 - old-place evidence from its counted votes (the classes the Part A rules act on):
-  `net_seen` (seen > free + free-like, checked first), `free_ev` (§3 free evidence), `unobserved` (no counted
+  `net_seen` (seen > free + free-like, checked first), `free_ev` (free evidence), `unobserved` (no counted
   vote), `mixed` (anything else);
 - association: `own` (the matched observation is the node's own rescan instance), `other`, `none`
   (no GT instance behind the observation);

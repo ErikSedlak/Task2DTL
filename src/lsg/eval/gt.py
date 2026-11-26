@@ -1,9 +1,9 @@
-"""Change ground truth per (reference R, rescan S) pair (DESIGN §5).
+"""Change ground truth per (reference R, rescan S) pair.
 
 Lives in `eval/`: reads rescan annotations (semseg / PLY labels / 3DSSG) and the
 `rigid / removed / nonrigid` lists, which hard rule 1 allows only here and in `oracle/`.
 
-Status precedence per reference object (things + anchors only; DECISIONS M1):
+Status precedence per reference object (things + anchors only):
 1. listed `removed` -> `removed`, or `dont_care` ("removed_but_present") if it is still in O_S;
 2. `nonrigid` -> `dont_care` ("nonrigid");
 3. in `rigid` -> `moved`; `dont_care` ("small_move") if its displacement < τ_eval_move;
@@ -37,7 +37,7 @@ class GTObject:
     label: str
     nyu40: int
     level: str
-    size: str  # "small" | "large" (DESIGN §5)
+    size: str  # "small" | "large"
     status: str
     reason: str | None = None  # why dont_care
     in_rigid: bool = False
@@ -72,10 +72,10 @@ class GTLabels:
     rescan: str
     objects: dict[int, GTObject]
     new: dict[int, GTNew]
-    n_rigid_raw: int  # len(rigid list), as in §2.2
+    n_rigid_raw: int  # len(rigid list)
     n_removed_raw: int
     n_nonrigid_raw: int
-    n_new_raw: int  # |O_S \ O_R| incl. structure, as in §2.2
+    n_new_raw: int  # |O_S \ O_R| incl. structure
     n_rigid_bare: int = 0
     extra: dict[str, Any] = field(default_factory=dict)
 
@@ -84,7 +84,7 @@ class GTLabels:
         return sorted(i for i, o in self.objects.items() if o.status == status)
 
     def counts(self) -> dict[str, int]:
-        """Per-status counts plus the raw §2.2 counts."""
+        """Per-status counts plus the raw counts."""
         out = {s: len(self.by_status(s)) for s in STATUSES}
         for r in ("removed_but_present", "nonrigid", "small_move"):
             out[f"dont_care_{r}"] = sum(o.reason == r for o in self.objects.values())
@@ -101,7 +101,7 @@ class GTLabels:
 
 
 def size_class(level: str, aabb_min: np.ndarray, aabb_max: np.ndarray, small_max_extent: float) -> str:
-    """`small` = thing whose largest AABB extent < `small_max_extent`; else `large` (§5)."""
+    """`small` = thing whose largest AABB extent < `small_max_extent`; else `large`."""
     if level == "thing" and float(np.max(aabb_max - aabb_min)) < small_max_extent:
         return "small"
     return "large"
@@ -129,7 +129,7 @@ def gt_changes(
     objs_S: Mapping[int, Mapping[str, Any]],
     cfg: Mapping[str, Any],
 ) -> GTLabels:
-    """Change GT of one pair (DESIGN §5; precedence in the module docstring).
+    """Change GT of one pair (precedence in the module docstring).
 
     Args:
         sm: The rescan's metadata (`meta[S]`): raw `T_align` and the change lists.
@@ -249,8 +249,8 @@ def gt_parent_changes(
 ) -> dict[int, str]:
     """Parent-change kind for every moved **thing** (all `rigid` ids, before τ_eval_move).
 
-    This reproduces the §2.2 count of "parent-changed moved things" (= gained + lost + swapped)
-    and breaks it down; the §7.2(c) definition is fixed at M5 (DECISIONS M1).
+    This reproduces the expected count of "parent-changed moved things" (= gained + lost + swapped)
+    and breaks it down; the parent-changed definition is fixed at M5.
     """
     out = {}
     for e in sm.rigid:

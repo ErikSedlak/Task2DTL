@@ -1,4 +1,4 @@
-"""Association (DESIGN §6.9, M5): label terms, Hungarian with gate, confirmed-node absorption."""
+"""Association (M5): label terms, Hungarian with gate, confirmed-node absorption."""
 
 import copy
 import math

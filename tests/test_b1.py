@@ -1,4 +1,4 @@
-"""Baseline B1 (DESIGN §8): B0 matching + visibility removal rule, on synthetic votes."""
+"""Baseline B1: B0 matching + visibility removal rule, on synthetic votes."""
 
 import copy
 

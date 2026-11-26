@@ -1,4 +1,4 @@
-"""Graph data model and its JSON form (DESIGN §4).
+"""Graph data model and its JSON form.
 
 Node ids: reference nodes `"r<objectId>"`, new nodes `"n<k>"`, one `"room"` node per scan.
 `"floor"` is a pseudo-parent id for support edges and is **not** a node.
@@ -39,7 +39,7 @@ def _vec(x: Any) -> list[float] | None:
 
 @dataclass
 class Node:
-    """One graph node (DESIGN §4). Geometry in the reference frame, metres."""
+    """One graph node. Geometry in the reference frame, metres."""
 
     id: str
     level: str
@@ -57,7 +57,7 @@ class Node:
     obs_token: str | None = None
 
     def to_json(self) -> dict[str, Any]:
-        """Plain-JSON dict in the §4 field order."""
+        """Plain-JSON dict in the schema's field order."""
         return asdict(self)
 
 
@@ -85,7 +85,7 @@ class Graph:
     @staticmethod
     def new_meta(scan_ref: str, scan_obs: str | None = None, obs_mode: str | None = None,
                  frame_idx: int | None = None, tentative: bool = False) -> dict[str, Any]:  # fmt: skip
-        """The §4 `meta` block."""
+        """The `meta` block."""
         return {
             "scan_ref": scan_ref,
             "scan_obs": scan_obs,
@@ -113,7 +113,7 @@ class Graph:
         return {e.source: (e.target, e.type) for e in self.edges if e.type in SUPPORT_TYPES}
 
     def to_json(self) -> dict[str, Any]:
-        """The full §4 JSON object."""
+        """The full JSON object."""
         return {
             "meta": dict(self.meta),
             "nodes": [n.to_json() for n in self.nodes],
@@ -147,7 +147,7 @@ def bbox_dict(aabb_min: Any, aabb_max: Any) -> dict[str, list[float]]:
 
 
 def validate(g: Graph) -> list[str]:
-    """Light schema check of a graph (DESIGN §4). Returns a list of problems (empty = valid).
+    """Light schema check of a graph. Returns a list of problems (empty = valid).
 
     Checks: meta keys and version; node ids unique, level / state values legal, bbox and
     centroid shapes; edge types legal and endpoints exist (`floor` allowed as support target);

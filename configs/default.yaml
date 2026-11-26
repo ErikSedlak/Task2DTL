@@ -1,13 +1,13 @@
-# Thresholds live here, not in code (CLAUDE.md hard rule 3). Values marked (tune) in DESIGN.md
+# Thresholds live here, not in code (CLAUDE.md hard rule 3). Values marked (tune)
 # are starting points and may only be tuned on splits/dev_train.txt.
 data_root: ./data          # overridden by env LSG_DATA
 outputs_root: ./outputs
 cache_root: ./cache        # refined alignments etc. (git-ignored)
 
 frames:
-  stride: 3                # DESIGN §3 (tune)
+  stride: 3                # (tune)
 
-alignment:                 # T_align refinement, label-free ICP (DECISIONS 2026-11-05/M0)
+alignment:                 # T_align refinement, label-free ICP
   refine: true
   frame_step: 10           # every 10th frame builds the source cloud
   voxel: 0.02              # [m] source voxel downsampling
@@ -17,7 +17,7 @@ alignment:                 # T_align refinement, label-free ICP (DECISIONS 2026-
   max_delta_t: 0.20        # [m] reject corrections larger than this, keep raw T_align
   max_delta_rot_deg: 5.0
   online:                  # CHANGE 3 Part B: one cumulative estimate during the walk from the frames seen so far
-    enabled: true          # Erik 2026-11-21: online default (no future frames) despite the perception cost (DECISIONS);
+    enabled: true          # Erik 2026-11-21: online default (no future frames) despite the perception cost;
                            # false = the pre-pass over all processed frames (row FULL-offlinealign, M7)
     every: 20              # re-estimate every this many processed frames (= online.snapshot_every)
     min_cloud_frames: 3    # cloud frames (every frame_step-th processed frame) before the first estimate; raw T_align until then
@@ -25,30 +25,30 @@ alignment:                 # T_align refinement, label-free ICP (DECISIONS 2026-
     min_normal_spread: 0.05  # smallest eigenvalue of the mean n n^T of the matched target normals (degeneracy check)
     min_target_points: 500 # target structure: fewer vertices -> all surfaces
 
-visibility:                # DESIGN §3 frame votes (tune on dev only)
+visibility:                # frame votes (tune on dev only)
   tau_near: 0.10           # [m] |d_obs - d_exp| <= tau_near -> present
   tau_free: 0.15           # [m] d_obs > d_exp + tau_free -> free (seen through)
   min_mask_px: 15          # node needs >= this many first-hit pixels (else unobserved) and
-                           # >= this many valid ones (else noinfo) to vote (DECISIONS M3)
+                           # >= this many valid ones (else noinfo) to vote
   vote_frac: 0.5           # share of valid pixels for a seen / free vote
   erode_px: 0              # erode each node's first-hit mask by this many px (silhouette guard; M3 knob)
-  seen_needs_contrast: true  # FULL only (M7, Erik, DECISIONS 2026-11-15): seen only from pixels whose next
+  seen_needs_contrast: true  # FULL only (M7, Erik): seen only from pixels whose next
                            # reference surface behind (other label) is > tau_free farther; false = M6 FULL (ablation)
   contrast_eps: 0.001      # [m] other-label hits this far in front of the first hit still count (coincident faces)
 
-decorrelation:             # DESIGN §3 viewpoint decorrelation (tune)
-  enabled: true            # false = every vote counts (ablation, §8)
+decorrelation:             # viewpoint decorrelation (tune)
+  enabled: true            # false = every vote counts (ablation)
   d_dec: 0.30              # [m] camera centre moved this far since the last counted vote ...
   theta_dec_deg: 20.0      # [deg] ... or the optical axis turned this much
 
-states:                    # DESIGN §3 state rules (tune)
+states:                    # state rules (tune)
   k_free: 2                # counted free votes needed for removed
   k_seen: 3                # counted seen votes (and no counted free / free-like) -> confirmed in place
-  k_free_like: 3           # appearance alone (no depth free vote) needs this many counted free-like votes (§3, M6)
-  commitment: deferred     # deferred (§3) | immediate (ablation, M7): `removed` final at the first frame with a
+  k_free_like: 3           # appearance alone (no depth free vote) needs this many counted free-like votes (M6)
+  commitment: deferred     # deferred | immediate (ablation, M7): `removed` final at the first frame with a
                            # tentative removed state (B2 / FULL), even if the node is matched or seen later
 
-online:                    # DESIGN §6.7 online loop
+online:                    # online loop
   snapshot_every: 20       # write a tentative snapshot every N processed frames (if enabled)
 
 m0:
@@ -64,7 +64,7 @@ m0:
   accept_rigid_min_objects: 2    # (3) objects below the Chamfer threshold
 
 splits:
-  texture_sources:         # pair lists whose references need textures (DESIGN §2.3)
+  texture_sources:         # pair lists whose references need textures
     - splits/dev_train.txt
     - splits/eval_val.txt
     - splits/eval_relchange_train.txt
@@ -86,7 +86,7 @@ splits:
     n_refs: 20             # references, one rescan each
     seed: 0
 
-relations:                 # geometric support rules, DESIGN §6.3 (tune on dev refs only)
+relations:                 # geometric support rules (tune on dev refs only)
   bottom_slice: 0.03       # [m] child's lowest slice used for contact
   contact_xy: 0.05         # [m] horizontal radius for a supporting point
   contact_dz: 0.10         # [m] supporting point lies 0..contact_dz below the slice point
@@ -98,28 +98,28 @@ relations:                 # geometric support rules, DESIGN §6.3 (tune on dev 
   next_to_gap: 0.15        # [m] AABB gap for geometric next_to (exported only)
   floor_fallback_percentile: 1.0   # floor_z if no floor-labelled vertices: this percentile of z
 
-eval:                      # evaluation protocol (DESIGN §5, §7) - definitions, not method tunables
+eval:                      # evaluation protocol - definitions, not method tunables
   tau_eval_move: 0.10      # [m] GT moves below this are dont_care for moved/unchanged (fixed M1)
   small_max_extent: 0.5    # [m] thing with largest AABB extent below this = "small"
   disp_buckets: [0.1, 0.3, 1.0]    # [m] moved-recall buckets [0.1,0.3), [0.3,1), >=1
-  match_new_dist: 0.30     # [m] perception new matching: centroid distance gate (§5)
-  match_new_iou: 0.25      # perception new matching: 3D AABB IoU gate (§5)
-  bootstrap_n: 1000        # resamples over pairs for 95% CIs (§7.1)
+  match_new_dist: 0.30     # [m] perception new matching: centroid distance gate
+  match_new_iou: 0.25      # perception new matching: 3D AABB IoU gate
+  bootstrap_n: 1000        # resamples over pairs for 95% CIs
   bootstrap_seed: 0
   workers: 4               # processes for `lsg eval` (one reference group per task)
   save_graphs: true        # write G_upd per pair to outputs/<run>/graphs/
 
-oracle:                    # OracleSource, DESIGN §6.5 (upper bound)
+oracle:                    # OracleSource (upper bound)
   min_points: 50           # drop instances with fewer observed mesh vertices (tune)
   seed: 0                  # token permutation seed (mixed with the rescan id)
   crops: false             # colour crops (not used by the change logic before M4/M6)
   crop_k: 5
 
-train_meta:                # train-split metadata for vocabulary / priors (DESIGN §2.3)
+train_meta:                # train-split metadata for vocabulary / priors
   exclude_splits: [splits/dev_train.txt, splits/eval_relchange_train.txt, splits/dev_tune.txt]   # their rooms never
                            # count (dev_tune: CHANGE 3, Erik; the M7 list is pinned in ablations.M7_OVERRIDES)
 
-perception:                # PerceptionSource, DESIGN §3 candidate + §6.6 (tune on dev only)
+perception:                # PerceptionSource (tune on dev only)
   tau_new: 0.10            # [m] nearer pixel: d_obs < d_exp - tau_new (step 1)
   max_depth: 4.0           # [m] ignore far, noisy depth
   surf_dist: 0.05          # [m] drop residual points this close to the reference mesh (step 2)
@@ -127,7 +127,7 @@ perception:                # PerceptionSource, DESIGN §3 candidate + §6.6 (tun
   struct_exclude_nyu40: [2, 20]   # floor, floor mat: objects stand on them (handled by surf_dist)
   voxel: 0.04              # [m] voxel size (step 3)
   min_views: 3             # decorrelated viewpoints per kept voxel (step 4; `decorrelation` block); also the thin-object grid, and the depth grid when `relaxed.enabled` is false
-  relaxed:                 # CHANGE 1 (docs/CHANGE_candidate_detection.md, Erik 2026-11-19): size-dependent candidate rules
+  relaxed:                 # CHANGE 1 (Erik 2026-11-19): size-dependent candidate rules
     enabled: true          # false = the M7 method (every cluster needs `min_views` views at `tau_new`); ablation row FULL-relaxed
     min_views_small: 2     # strict tier: voxels hit at `tau_new` need this many decorrelated views (was 3)
     min_views_large: 1     # lenient tier: voxels hit at `tau_new_large` need this many
@@ -141,7 +141,7 @@ perception:                # PerceptionSource, DESIGN §3 candidate + §6.6 (tun
   segment:                 # CHANGE 3 Part N (N1): co-segmentation; adjacent voxels link only if the frames seeing both
                            # mostly put them in one image segment (perception/segment.py)
     method: geometric      # none (link by space only, as before; M7 / CHANGE 3 Part C) | geometric (depth-edge + crease
-                           # components; N1 winner on dev_tune, DECISIONS 2026-11-21; the losing SAM variant was removed)
+                           # components; N1 winner on dev_tune; the losing SAM variant was removed)
     depth_edge_abs: 0.03   # [m] geometric: neighbouring residual pixels are cut if |d1 - d2| > abs + rel * z
     depth_edge_rel: 0.02
     concave_deg: 30        # geometric: pixels on a concave crease (neighbour normals differ by more, surfaces meet
@@ -151,8 +151,8 @@ perception:                # PerceptionSource, DESIGN §3 candidate + §6.6 (tun
                            # different segments (0 = any disagreement; 0.5 = majority)
     bridge_unseen: 0       # pairs never seen in one frame link only up to this Chebyshev distance [voxels] (null = link_voxels)
   detector:                # CHANGE 3 Part E: open-vocabulary detector (Grounding DINO + SAM 2, `lsg detect cache`;
-                           # perception/detect_cache.py, perception/detector.py; DECISIONS 2026-11-21)
-    enabled: false         # off by the pre-written dev_tune rule (`lsg chg3 parte`, DECISIONS): ablation row FULL+detector
+                           # perception/detect_cache.py, perception/detector.py)
+    enabled: false         # off by the pre-written dev_tune rule (`lsg chg3 parte`): ablation row FULL+detector
     mode: replace          # replace: detector tracks (+ thin-object candidates) instead of residual candidates;
                            # union: also residual candidates that overlap no track
     frame_every: 2         # detect on every 2nd processed frame (Erik), by position in the strided sequence
@@ -190,9 +190,9 @@ perception:                # PerceptionSource, DESIGN §3 candidate + §6.6 (tun
 
 baselines:
   b0:
-    near_dist: 0.5         # [m] same-label obs within this -> unchanged, farther -> moved (§8)
+    near_dist: 0.5         # [m] same-label obs within this -> unchanged, farther -> moved
 
-association:               # DESIGN §6.9, B2 (tune on dev only)
+association:               # B2 (tune on dev only)
   w_g: 1.0                 # weight of the size term (mean |log| ratio of sorted AABB extents)
   w_p: 1.0                 # weight of the position term min(d / pos_scale, 1) (weak)
   pos_scale: 3.0           # [m]
@@ -207,7 +207,7 @@ association:               # DESIGN §6.9, B2 (tune on dev only)
     min_frac: 0.5          # share of obs points inside the node AABB + margin
     margin: 0.10           # [m]
   old_place:               # CHANGE 3 Part A (FULL only): a move needs consistent evidence at the old place; values = the
-                           # dev_tune sweep row a_u_c02 (Erik 2026-11-20; no row passed the pre-written rule, DECISIONS)
+                           # dev_tune sweep row a_u_c02 (Erik 2026-11-20; no row passed the pre-written rule)
     enabled: true          # false = ablation row FULL-moveev (association ignores votes, as before CHANGE 3)
     inside_frac: 0.5       # "inside its own place": share of obs points inside the node AABB + margin (= absorb)
     margin: 0.10           # [m]
@@ -215,30 +215,30 @@ association:               # DESIGN §6.9, B2 (tune on dev only)
     max_dist_unseen: null  # [m] or null: a node without counted votes only matches obs within this centroid distance
     tau_move_seen: 0.2     # [m] or null: a net-seen node needs ICP displacement > this (instead of classify.tau_move)
 
-classify:                  # DESIGN §6.10 ICP moved test (tune on dev only)
-  tau_move: 0.10           # [m] ICP-refined centroid displacement above this -> moved (§3)
+classify:                  # ICP moved test (tune on dev only)
+  tau_move: 0.10           # [m] ICP-refined centroid displacement above this -> moved
   icp_schedule: [0.20, 0.10, 0.05]   # [m] max correspondence distance per stage
   icp_max_iter: 30
   min_fitness: 0.3         # share of obs points with a correspondence; below -> centroid offset
   fit_tie: 0.02            # two ICP inits (centroid offset, identity): fitness within this -> lower RMSE wins
   max_points: 4000         # random subsample (seeded) of each cloud for speed
 
-confidence:                # DESIGN §6.11 log-odds confidence, FULL only (M6, Erik: rescaled; tune on dev only)
+confidence:                # log-odds confidence, FULL only (M6, Erik: rescaled; tune on dev only)
   class_priors: false      # CHANGE 2 Part A (Erik 2026-11-20): no dataset prior; true = l0 = logit(p_persist(label))
                            # from train metadata (M7 FULL, ablation row FULL+classprior with p_del 0.2)
   prior_p: 0.9             # l0 = logit(prior_p) without class priors, flat for every reference node (CHANGE 3, Erik
                            # 2026-11-20; CHANGE 2 had 0.5 / p_del 0.027: same decisions, untouched node reported 0.5)
   prior_kappa: 20          # Beta smoothing of per-class rates toward the parent (nyu40 -> global) rate
   L_hit: 0.63              # per counted seen vote: ln P(seen|unchanged) / P(seen|removed) on dev_tune [0.46, 0.82]
-                           # (CHANGE 3 Part C, `lsg chg3 votestats`, DECISIONS 2026-11-20; M6-M7 and CHANGE 2: 2.5)
+                           # (CHANGE 3 Part C, `lsg chg3 votestats`; M6-M7 and CHANGE 2: 2.5)
   L_miss: 1.47             # per counted free vote: ln P(free|removed) / P(free|unchanged) on dev_tune [1.20, 1.86]
   L_free_like: 2.5         # per counted free-like vote: kept (fallback, 7 free-like votes of removed objects < 20)
   clip: 8.0                # per-visit clip of the total log-odds change, [-clip, +clip]
-  p_del: 0.4               # removed needs p < p_del (plus the §3 free-evidence rule); margin logit(0.9) - logit(0.4)
+  p_del: 0.4               # removed needs p < p_del (plus the free-evidence rule); margin logit(0.9) - logit(0.4)
                            # = 2.60 at the learned weights: 2 free delete (-2.94), 1 seen + 2 free do not (-2.31),
-                           # 1 seen + 3 free do (-3.78). CHANGE 3 Part C sweep on dev_tune (`lsg chg3 pdel`, DECISIONS);
+                           # 1 seen + 3 free do (-3.78). CHANGE 3 Part C sweep on dev_tune (`lsg chg3 pdel`);
                            # 0.2 with the equal weights 2.5 before Part C (= M7 FULL-priors)
-  candidates:              # CHANGE 2 Part B (docs/CHANGE_confidence_unified.md): per-voxel log-odds of perception candidates
+  candidates:              # CHANGE 2 Part B: per-voxel log-odds of perception candidates
     enabled: true          # false = CHANGE 1 view counts (ablation row FULL-candconf)
     L_vox_hit: 2.5         # per decorrelated voxel hit (CHANGE 3: own key; was confidence.L_hit, the node weight)
     L_vox_free: 2.5        # per decorrelated see-through vote on a voxel (was confidence.L_miss)
@@ -251,7 +251,7 @@ confidence:                # DESIGN §6.11 log-odds confidence, FULL only (M6, E
     l_keep_large: 2.5      # lenient tier (clusters >= relaxed.large_min_voxels)
     p_new_min: 0.517493    # a candidate becomes a `new` node only with confidence >= this (else dropped, Erik). CHANGE 3
                            # Part N: best perception new F1 on the dev_tune curve with geometric co-segmentation (`lsg
-                           # newcurve`, DECISIONS 2026-11-21) = sigmoid(7 * L_seen): >= 7 decorrelated cluster seen votes and
+                           # newcurve`) = sigmoid(7 * L_seen): >= 7 decorrelated cluster seen votes and
                            # no see-through vote (Part C: 0.514996 = 3 votes at L_seen 0.02; CHANGE 2: 0.92)
     track:                 # CHANGE 3 Part C: candidate confidence from cluster-level votes over the cluster's voxel history
       enabled: true        # false = CHANGE 2's sigmoid(median voxel lv) (ablation row FULL-candtrack)
@@ -260,12 +260,12 @@ confidence:                # DESIGN §6.11 log-odds confidence, FULL only (M6, E
                            # the unsplit candidates; `lsg chg3 votestats`; start value 2.5)
       L_free: 0.52         # per counted cluster see-through vote [0.10, 1.01] (Part N; Part C 0.50; start value 2.5)
       min_vox: 5           # a frame votes only with >= this many history voxels hit / seen through (= min_voxels)
-      vote_frac: 0.5       # ... and >= this share of the informative history voxels (§3 vote_frac)
+      vote_frac: 0.5       # ... and >= this share of the informative history voxels (the node rule's vote_frac)
       appearance: true     # CHANGE 3 Part N (N5, winner of the dev_tune rule): thin-object (appearance) candidates get the same cluster-vote
                            # confidence (seen votes on their own grid; no see-through votes) and face p_new_min
                            # (false = confidence None, always emitted, as before)
 
-appearance:                # DESIGN §3 / §6.6 appearance residual, FULL only (M6)
+appearance:                # appearance residual, FULL only (M6)
   enabled: true            # false = depth-only FULL (the brief's ablation)
   features: dinov2         # dinov2 | color (normalised-colour fallback)
   model: vit_small_patch14_dinov2.lvd142m   # timm name, frozen
@@ -289,21 +289,21 @@ models:                    # frozen-model weights (DINOv2, CLIP) from the Huggin
   hub_offline: auto        # auto: no Hub requests once both repos are cached (HF_HUB_OFFLINE=1); true / false;
                            # an HF_HUB_OFFLINE in the environment wins
 
-update:                    # DESIGN §6.12 graph update
+update:                    # graph update
   relations: update        # update (method) | stale (R0) | geometric (R1); saved / scored graph
   keep_supported_parent: true   # update: a re-checked thing keeps its old parent if it still supports it (M5, Erik)
-  children_follow_parent: false # FULL (ablation, M7, §6.12): an unknown thing without counted votes whose
+  children_follow_parent: false # FULL (ablation, M7): an unknown thing without counted votes whose
                                 # support parent is a moved anchor gets the anchor's T_move
 
-m7:                        # `lsg m7` / `lsg ablate` (DESIGN §8, §9): every val row reported once, nothing tuned
+m7:                        # `lsg m7` / `lsg ablate`: every val row reported once, nothing tuned
   val_split: splits/eval_val.txt              # final tables: all 110 pairs (CLAUDE.md)
   relchange_split: splits/eval_relchange_train.txt
   dev_rows: [B0, B1, B2, FULL, FULL-m7]
   regression_refs:                            # dev runs whose metrics must be unchanged (thin keys excluded)
     FULL-m7: outputs/m7_final/dev/FULL        # CHANGE 3: the M7 method still = m7_final (the M5 / M6 refs held at M7)
-  details_rows: [FULL]                        # val rows that also write per-object details (§7.4 audit input)
+  details_rows: [FULL]                        # val rows that also write per-object details (GT audit input)
   tau_free_sweep: [0.05, 0.10, 0.20, 0.30]    # [m] the default 0.15 is the FULL row
-  fracs: [0.5, 0.25, 0.1]                     # §7.3 observed fraction (100% = the FULL row)
+  fracs: [0.5, 0.25, 0.1]                     # observed fraction (100% = the FULL row)
   frac_seeds: [0, 1, 2]
   p_new_sweep: [0.95, 0.99, 0.999]            # `lsg newcurve`: new P / R at these p_new_min (plus the default)
   relchange_rows: [B2, FULL, FULL+follow, FULL-keepparent]
@@ -311,15 +311,15 @@ m7:                        # `lsg m7` / `lsg ablate` (DESIGN §8, §9): every va
 
 m1:
   count_split: splits/eval_val.txt
-  expected_counts: {rigid: 390, removed: 96, new_raw: 224}   # DESIGN §2.2
+  expected_counts: {rigid: 390, removed: 96, new_raw: 224}   # expected val raw counts
   hist_splits: [splits/eval_val.txt, splits/dev_train.txt]
   meta_only_splits: [splits/eval_relchange_train.txt]        # tier 2 meshes not downloaded
   rule_tune_split: splits/dev_train.txt                      # reference-rule sanity, tuning
   rule_report_split: splits/eval_val.txt                     # reference-rule sanity, report only
   expected_texture_refs: 72
 
-chg3:                      # CHANGE 3 dev_tune sweeps (`lsg chg3 parta`; docs/CHANGE_online_graph.md; tuning set only)
-  part_a:                  # §3: a move needs consistent old-place evidence; variants listed simple -> complex
+chg3:                      # CHANGE 3 dev_tune sweeps (`lsg chg3 parta`; tuning set only)
+  part_a:                  # a move needs consistent old-place evidence; variants listed simple -> complex
     variants:
       "off": {association.old_place.enabled: false}
       a: {association.old_place.enabled: true, association.old_place.unobserved_inside_only: false,
@@ -334,17 +334,17 @@ chg3:                      # CHANGE 3 dev_tune sweeps (`lsg chg3 parta`; docs/CH
                 association.old_place.max_dist_unseen: null, association.old_place.tau_move_seen: 0.2}
       a_u_c03: {association.old_place.enabled: true, association.old_place.unobserved_inside_only: true,
                 association.old_place.max_dist_unseen: null, association.old_place.tau_move_seen: 0.3}
-    criterion:             # written before the sweep (DECISIONS 2026-11-20): pass in both modes
+    criterion:             # written before the sweep: pass in both modes
       false_move_frac: 0.5 # false-move rate <= 0.5 x the `off` row's
       f1_drop: 0.02        # moved F1 >= the `off` row's - 0.02; winner = highest mean moved F1 of passing rows
-  part_b:                  # CHANGE 3 Part B (DECISIONS 2026-11-21), rules written before the runs
+  part_b:                  # CHANGE 3 Part B, rules written before the runs
     align:                 # B3 (`lsg chg3 partb-align`): offline pre-pass (reference) vs online cumulative estimates
       variants:
         offline: {alignment.online.enabled: false}
         online_all: {alignment.online.enabled: true, alignment.online.target: all}
         online_struct: {alignment.online.enabled: true, alignment.online.target: structure}
       criterion: {tie: 0.005, f1_drop: 0.02, rate_drop: 0.01}   # Erik: online default unless the loss exceeds this
-  part_e:                  # CHANGE 3 Part E (detector; DECISIONS 2026-11-21), rule written before the runs (`lsg chg3 parte`)
+  part_e:                  # CHANGE 3 Part E (detector), rule written before the runs (`lsg chg3 parte`)
     common: {perception.detector.enabled: true, perception.detector.mode: replace}
     step1:                 # perception only, detector `replace`, p_new_min 0: every combination below, then the
       labels: [gdino, clip]   # newness threshold with the best labelled new F1 (ties: earlier combination, lower threshold)
@@ -352,10 +352,10 @@ chg3:                      # CHANGE 3 dev_tune sweeps (`lsg chg3 parta`; docs/CH
       min_views: [1, 2]
     thresholds: [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 0.95]
     criterion: {tie: 0.005, f1_drop: 0.02, rate_drop: 0.01}   # step 2 guards vs `residual` (perception)
-  part_n:                  # CHANGE 3 Part N (new objects; DECISIONS 2026-11-20), rules written before the runs
+  part_n:                  # CHANGE 3 Part N (new objects), rules written before the runs
     segment:               # N1 blob splitting (`lsg chg3 partn-seg`), list order = simplicity order (ties)
       common: {confidence.candidates.p_new_min: 0.0}   # emit every candidate: the F1 guard sees the fragments
-      variants:            # the sam / sam_add variants lost and were removed with their code (DECISIONS 2026-11-26)
+      variants:            # the sam / sam_add variants lost and were removed with their code
         none: {perception.segment.method: none}
         none_add: {perception.segment.method: none, perception.relaxed.merge: add}
         geometric: {perception.segment.method: geometric}
@@ -364,16 +364,16 @@ chg3:                      # CHANGE 3 dev_tune sweeps (`lsg chg3 parta`; docs/CH
     noise:                 # N5 (`lsg chg3 partn-noise`): each variant at p_new_min 0, then its own best threshold
       common: {confidence.candidates.p_new_min: 0.0}
       variants:            # list order = simplicity order (ties); the losing noise filters (edge, dscale, planes, all)
-        base: {}           # were removed with their code (DECISIONS 2026-11-26)
+        base: {}           # were removed with their code
         app: {confidence.candidates.track.appearance: true}
       criterion: {f1_drop: 0.01, fd_up: 0.01, hits_drop: 5, tie_f1: 0.005}
-  part_c:                  # §5: confidence policy from sensor statistics (lsg chg3 votestats; DECISIONS 2026-11-20)
+  part_c:                  # confidence policy from sensor statistics (lsg chg3 votestats)
     votestats:             # vote weights as likelihood ratios (eval/votestats.py), written before the run
       min_votes: 20        # a vote kind with fewer counted votes in either class keeps `fallback`
       fallback: 2.5
       n_boot: 1000
       seed: 0
-    p_del:                 # sweep at the learned weights (`lsg chg3 pdel`), rule written before the run (DECISIONS)
+    p_del:                 # sweep at the learned weights (`lsg chg3 pdel`), rule written before the run
       values: [0.05, 0.1, 0.2, 0.3, 0.4]
       ref_run: chg3_partA_final/FULL   # the Part A default (equal weights 2.5)
       criterion: {fd_margin: 0.01, tie_target: 0.2}   # false deletion <= ref + 1 point in both modes; best mean removed F1

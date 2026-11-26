@@ -1,6 +1,6 @@
 """CHANGE 3 dev_tune sweeps (`lsg chg3 parta`): variants of a rule, both modes, a pre-written selection rule.
 
-Part A (docs/CHANGE_online_graph.md §3, DECISIONS 2026-11-20): every variant in `chg3.part_a.variants`
+Part A: every variant in `chg3.part_a.variants`
 is one `run_eval` of FULL on `splits/dev_tune.txt` (both modes) into `outputs/<run>/<variant>`. The
 variant `off` (rule disabled) is the baseline of the selection rule (`chg3.part_a.criterion`):
 
@@ -42,7 +42,7 @@ def _pick(summary: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def select(rows: Mapping[str, Mapping[str, Mapping[str, Any]]], crit: Mapping[str, Any], base: str = "off") -> dict[str, Any]:
-    """Apply the selection rule (module docstring) to `{variant: {mode: picked metrics}}`."""
+    """Apply the selection rule to `{variant: {mode: picked metrics}}`."""
     b = rows[base]
     frac, drop = float(crit["false_move_frac"]), float(crit["f1_drop"])
     verdict: dict[str, Any] = {}
@@ -121,7 +121,7 @@ def format_part_a(res: Mapping[str, Any]) -> str:
 
 def select_p_del(rows: Mapping[str, Mapping[str, Mapping[str, Any]]], values: Mapping[str, float],
                  ref: Mapping[str, Mapping[str, Any]], crit: Mapping[str, Any]) -> dict[str, Any]:  # fmt: skip
-    """Pre-written rule (DECISIONS 2026-11-20): false deletion <= ref + `fd_margin` in both modes; then the
+    """Pre-written rule: false deletion <= ref + `fd_margin` in both modes; then the
     highest mean removed F1 (oracle, perception); ties to the value nearest `tie_target`; None if none qualifies."""
     margin, target = float(crit["fd_margin"]), float(crit["tie_target"])
     verdict: dict[str, Any] = {}
@@ -177,7 +177,7 @@ def format_part_c_pdel(res: Mapping[str, Any]) -> str:
 
 def select_segment(rows: Mapping[str, Mapping[str, Mapping[str, Any]]], crit: Mapping[str, Any],
                    order: list[str], base: str = "none") -> dict[str, Any]:  # fmt: skip
-    """Pre-written N1 rule (DECISIONS 2026-11-20, CHANGE 3 Part N): primary = perception class-agnostic candidate
+    """Pre-written N1 rule (CHANGE 3 Part N): primary = perception class-agnostic candidate
     hits on change targets (`diag_cand_new_hit + diag_cand_moved_hit`); guards (perception): moved F1 and
     class-agnostic new F1 (at `p_new_min` 0) >= base - `f1_drop`; ties within `tie_objects` -> earlier in `order`."""
     b = rows[base]["perception"]
@@ -264,7 +264,7 @@ def best_threshold(cfg: dict[str, Any], run_dir) -> dict[str, Any]:
 
 def select_noise(rows: Mapping[str, Mapping[str, Mapping[str, Any]]], curves: Mapping[str, Mapping[str, Any]],
                  crit: Mapping[str, Any], order: list[str], base: str = "base") -> dict[str, Any]:  # fmt: skip
-    """Pre-written N5 rule (DECISIONS 2026-11-21): guards (perception) moved F1 and removed F1 >= base - `f1_drop`,
+    """Pre-written N5 rule: guards (perception) moved F1 and removed F1 >= base - `f1_drop`,
     false deletion <= base + `fd_up`, class-agnostic candidate hits (new + moved) >= base - `hits_drop`; primary =
     best labelled new F1 on the variant's own curve; ties within `tie_f1` -> earlier in `order`."""
     b = rows[base]["perception"]
@@ -326,7 +326,7 @@ ALIGN_PRIMARY = ("moved_F1", "removed_F1", "new_F1")
 
 def select_align(rows: Mapping[str, Mapping[str, Mapping[str, Any]]], crit: Mapping[str, Any], order: list[str],
                  ref: str = "offline") -> dict[str, Any]:  # fmt: skip
-    """Pre-written B3 rule (DECISIONS 2026-11-21): among the online variants, the highest mean of moved / removed /
+    """Pre-written B3 rule: among the online variants, the highest mean of moved / removed /
     new F1 over both modes wins (ties within `tie` -> earlier in `order`); it is flagged `ask` (Erik decides) if it
     loses more than `f1_drop` moved or removed F1, or more than `rate_drop` on false deletion / unchanged kept,
     against `ref` in either mode."""
@@ -406,7 +406,7 @@ def format_part_b_align(res: Mapping[str, Any]) -> str:
     return "\n".join(lines)
 
 
-# ---- Part E: open-vocabulary detector (DECISIONS 2026-11-21, rule written before the runs) ----------------------
+# ---- Part E: open-vocabulary detector (rule written before the runs) ----------------------
 
 
 def part_e_grid(pe: Mapping[str, Any]) -> dict[str, dict[str, Any]]:

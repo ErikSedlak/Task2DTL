@@ -1,4 +1,4 @@
-"""Frame votes (DESIGN §3) on hand-built depth / label maps, and the viewpoint decorrelator."""
+"""Frame votes on hand-built depth / label maps, and the viewpoint decorrelator."""
 
 import copy
 

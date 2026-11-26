@@ -1,4 +1,4 @@
-"""M0 acceptance checks (DESIGN §9). Lives in `eval/` because it reads rescan labels and `rigid`.
+"""M0 acceptance checks. Lives in `eval/` because it reads rescan labels and `rigid`.
 
 (1) rendered vs. observed depth on dev rescans (gate: reference mesh at refined T_align @ pose)
 (2) aligned rescan structure vs. reference structure: point-to-surface distance per hypothesis

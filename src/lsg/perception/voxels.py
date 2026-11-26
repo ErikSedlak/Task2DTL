@@ -1,4 +1,4 @@
-"""Voxel evidence with viewpoint decorrelation (DESIGN §3 candidate steps 3-4; CHANGE 2).
+"""Voxel evidence with viewpoint decorrelation (candidate steps 3-4; CHANGE 2).
 
 Residual points are accumulated in a voxel grid. A voxel's hit in a frame **counts** as a new
 view only if the camera centre moved >= `d_dec` or the optical axis turned >= `theta_dec`
@@ -6,7 +6,7 @@ since the voxel's last counted view: the `change.visibility.Decorrelator` rule, 
 over all voxels of a frame. Kept voxels have >= `min_views` counted views; this filters
 people walking through, sensor noise and one-off artefacts.
 
-Per-voxel log-odds (CHANGE 2 Part B, `confidence.candidates`, docs/CHANGE_confidence_unified.md):
+Per-voxel log-odds (CHANGE 2 Part B, `confidence.candidates`):
 every voxel also carries `lv = clip(hit_sum - free_sum, ±clip)`.
 - hit: a decorrelated hit adds `L_hit`; a correlated one adds `L_corr`, the correlated additions
   since the voxel's last decorrelated hit capped at `corr_cap`;
@@ -219,7 +219,7 @@ class VoxelEvidence:
         self, dmin: np.ndarray, K: np.ndarray, cam_pose: np.ndarray, skip: np.ndarray | None = None,
         frame_idx: int | None = None,
     ) -> int:
-        """See-through votes of one frame on every tracked voxel (module docstring).
+        """See-through votes of one frame on every tracked voxel.
 
         Args:
             dmin: Window-minimum depth image of the frame (`window_min_depth`), [m].

@@ -46,7 +46,7 @@ def write_metrics(
     Args:
         run_dir: Output folder of this run (created if missing).
         metrics: Results; numpy scalars/arrays and Paths are converted automatically. This
-            block must be identical for the same config + seed (DESIGN §7.5).
+            block must be identical for the same config + seed.
         cfg: The config used, stored in full together with its hash.
         extra: Run information that may differ between reruns (wall time, cache hits),
             stored next to `metrics` under `"run"`.

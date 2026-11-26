@@ -1,4 +1,4 @@
-"""Depth residual points (DESIGN §3 candidate steps 1-2).
+"""Depth residual points (candidate steps 1-2).
 
 Step 1: nearer pixels = valid observed depth in front of the rendered reference surface by
 more than `tau_new`. Step 2: back-project them into the reference frame, drop points within

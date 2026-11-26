@@ -1,16 +1,16 @@
-"""§7.4 ground-truth audit (M8): sample false positives, draw one panel each, summarise verdicts.
+"""Ground-truth audit (M8): sample false positives, draw one panel each, summarise verdicts.
 
 Flow (`lsg audit sample`, then `lsg audit summarize`):
 1. A val FULL run with `details=True` (both modes) writes per-object outcomes to
    `details/<mode>/<pair>.json`. Since CHANGE 3 (Part D) this is the final run's own FULL row
    (`lsg m7` writes details for `m7.details_rows`), passed as `from_run`, so the audited
    predictions are exactly the reported ones. A fresh FULL run must reproduce `compare`.
-2. **Pools** per mode (DECISIONS M8):
+2. **Pools** per mode:
    - `moved`: predicted moved, GT unchanged / removed / absent-unlisted (false move);
    - `removed`: predicted removed, GT unchanged / moved / absent-unlisted (false deletion);
-   - `new`: predicted new node that the mode's §5 rule leaves unmatched (`fp`).
+   - `new`: predicted new node that the mode's matching rule leaves unmatched (`fp`).
    Each row keeps its GT status, so "scored FP" and "absent-unlisted" can be reported apart.
-   **Veto set** (STATUS M7): GT-removed objects that B2 deletes and FULL keeps `unknown`.
+   **Veto set**: GT-removed objects that B2 deletes and FULL keeps `unknown`.
 3. Seeded sample (`n_per_cat` per mode and category), one PNG panel per row, `audit.csv` and
    `audit_veto.csv` with a `question` column and empty `answer` / `note` columns. Each panel asks one plain
    question about the object ("did this chair really move?"); Erik answers `yes` / `no` / `unsure`. The
@@ -128,7 +128,7 @@ def _row(d: Mapping[str, Any], cat: str, o: Mapping[str, Any]) -> dict[str, Any]
 
 
 def pools(details: Sequence[Mapping[str, Any]]) -> dict[str, list[dict[str, Any]]]:
-    """False-positive pools of one mode (module docstring), in pair / node order."""
+    """False-positive pools of one mode, in pair / node order."""
     out: dict[str, list[dict[str, Any]]] = {c: [] for c in CATS}
     for d in details:
         for o in d["objects"]:
@@ -291,7 +291,7 @@ def _ref_box(R: Scan, oid: int | None):
 
 def render_panel(row: Mapping[str, Any], root: Path, R: Scan, renderer: Renderer, T_align: np.ndarray,
                  frame_ids: Sequence[int], out: Path, ref_stride: int = 5) -> Path:  # fmt: skip
-    """One audit panel (DESIGN §7.4): reference photo | rescan at the old place | rescan at the new place | top-down."""
+    """One audit panel: reference photo | rescan at the old place | rescan at the new place | top-down."""
     import matplotlib
 
     matplotlib.use("Agg")
@@ -578,7 +578,7 @@ def run_audit_summarize(cfg: dict[str, Any], run_id: str) -> dict[str, Any]:
     out_dir = outputs_root(cfg) / run_id if not Path(run_id).is_dir() else Path(run_id)
     prev = json.loads((out_dir / "metrics.json").read_text(encoding="utf-8"))["metrics"]
     summ = {"fp": summarize_rows(read_csv(out_dir / "audit.csv"))}
-    md = format_summary_md(summ["fp"], "False positives (§7.4), FULL on val")
+    md = format_summary_md(summ["fp"], "False positives, FULL on val")
     vp = out_dir / "audit_veto.csv"
     if vp.is_file() and read_csv(vp):
         summ["veto"] = summarize_rows(read_csv(vp))

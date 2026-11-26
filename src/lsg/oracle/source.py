@@ -1,8 +1,8 @@
-"""`OracleSource`: rescan GT instances as observations (DESIGN §6.5, upper bound).
+"""`OracleSource`: rescan GT instances as observations (upper bound).
 
 Renders the rescan's own labelled mesh at each processed frame (its own frame, its own pose),
 so it reports exactly the instances, pixels and mesh vertices that these frames see. A pixel
-counts only where the sensor has valid depth (DECISIONS M2), i.e. where perception could see
+counts only where the sensor has valid depth, i.e. where perception could see
 something too. Instance ids are hidden behind tokens from a seeded permutation; the mapping
 (`token_map`) is for `lsg.eval` only and is never handed to the method.
 

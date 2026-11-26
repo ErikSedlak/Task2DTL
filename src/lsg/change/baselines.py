@@ -1,8 +1,8 @@
-"""Baselines (DESIGN §8). M2: B0 naive; M3: B1 + visibility; M5: B2 + Hungarian; M6: FULL.
+"""Baselines. M2: B0 naive; M3: B1 + visibility; M5: B2 + Hungarian; M6: FULL.
 
 B0: nearest same-label observation within `near_dist` -> unchanged; same label farther ->
 moved; unmatched reference node -> removed; unmatched observation -> new. No visibility, no
-confidence. Matching is greedy one-to-one by centroid distance (DECISIONS M2), so one observed
+confidence. Matching is greedy one-to-one by centroid distance, so one observed
 chair cannot explain two reference chairs.
 
 B1: B0's matching; an unmatched reference node is `removed` only with >= k_free counted
@@ -13,7 +13,7 @@ B2: confirmed-in-place nodes are `unchanged` and absorb their observations; the 
 matched by Hungarian assignment on label + size + position (`change.association`); matched
 nodes get the ICP moved test, unmatched ones B1's removal rule (`change.classify`).
 
-FULL: B2 + log-odds confidence with class priors (§6.11, `change.confidence`): an unmatched
+FULL: B2 + log-odds confidence with class priors (`change.confidence`): an unmatched
 node with free evidence is `removed` only if its confidence p < p_del, else `unknown`; every
 node gets `confidence`. With appearance on, the votes it reads already contain the thin nodes'
 appearance verdicts (`change.online`), and perception observations include thin-object
@@ -23,7 +23,7 @@ Ablations (M7): `states.commitment: immediate` (B2 / FULL) makes `removed` final
 frame where a node's tentative state was removed (`NodeVotes.commit_removed_frame`): such nodes
 skip absorption, matching and FULL's veto, so a node seen later (or matched at a new place)
 stays removed and its observation may become a `new` node. `update.children_follow_parent`
-(FULL, §6.12): an `unknown` thing without counted votes whose reference support parent is a
+(FULL): an `unknown` thing without counted votes whose reference support parent is a
 moved anchor moves with it (`follow_parent`).
 
 Every method has the signature `method(G_ref, obs, cfg, rescan_id=None, obs_mode=None,
@@ -189,7 +189,7 @@ def b0(
     obs_views: Mapping[str, int] | None = None,
     priors: Any = None,
 ) -> Graph:
-    """Naive baseline B0 (DESIGN §8). Returns the updated graph G_upd.
+    """Naive baseline B0. Returns the updated graph G_upd.
 
     Args:
         G_ref: Reference graph (not modified).
@@ -223,7 +223,7 @@ def b1(
     obs_views: Mapping[str, int] | None = None,
     priors: Any = None,
 ) -> Graph:
-    """Baseline B1 = B0 matching + visibility removal rule (DESIGN §8). Returns G_upd.
+    """Baseline B1 = B0 matching + visibility removal rule. Returns G_upd.
 
     Matched nodes are unchanged / moved exactly as in B0. An unmatched node is `removed` only
     if it has >= `states.k_free` counted free votes, else `unknown` (kept, not deleted).
@@ -266,7 +266,7 @@ def b2(
     obs_views: Mapping[str, int] | None = None,
     priors: Any = None,
 ) -> Graph:
-    """Baseline B2 = confirmed-in-place skip + Hungarian + ICP moved test (DESIGN §8, §6.9-10).
+    """Baseline B2 = confirmed-in-place skip + Hungarian + ICP moved test.
 
     1. Nodes confirmed in place (>= k_seen counted seen, no counted free) are `unchanged` and
        absorb compatible observations lying inside their AABB (stage 0, M5).
@@ -343,7 +343,7 @@ def _b2_core(G_ref, obs, cfg, rescan_id, obs_mode, votes, ref_ctx, method):
 
 
 def follow_parent(G: Graph, votes: Mapping[str, NodeVotes], ref_ctx: RefContext | None) -> int:
-    """Children follow parent (§6.12 optional rule, M7 ablation); modifies G in place.
+    """Children follow parent (optional rule, M7 ablation); modifies G in place.
 
     A thing in state `unknown` without counted votes (seen / free / free-like all 0) whose
     reference support parent is an anchor in state `moved` gets the anchor's `T_move` (points,
@@ -380,9 +380,9 @@ def full(
     obs_views: Mapping[str, int] | None = None,
     priors: Any = None,
 ) -> Graph:
-    """FULL = B2 + log-odds confidence with class priors (DESIGN §8, §6.11).
+    """FULL = B2 + log-odds confidence with class priors.
 
-    B2's association and ICP moved test; an unmatched node with §3 free evidence is `removed`
+    B2's association and ICP moved test; an unmatched node with free evidence is `removed`
     only if p = sigmoid(l) < `confidence.p_del`, else `unknown` (kept). Every reference and new
     node gets `confidence` (`change.confidence`): unmatched / confirmed nodes from their counted
     votes, matched nodes from their observation's decorrelated views (`obs_views`; free votes at

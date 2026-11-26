@@ -1,4 +1,4 @@
-"""M7: all ablations (DESIGN §8) on val + relchange, both modes; final results tables (`uv run lsg m7`).
+"""M7: all ablations on val + relchange, both modes; final results tables (`uv run lsg m7`).
 
 Steps (each run is one `run_eval`, see `eval.ablations`; nothing is tuned, val rows are
 reported once):
@@ -8,9 +8,9 @@ reported once):
    (`m7.regression_refs`; since CHANGE 3: FULL-m7 = `m7_final/dev/FULL`): identical `metrics` on
    shared keys, thin keys excluded (M7 thin-metric fix). Stops here with `dev_only`.
 3. Val (`m7.val_split`, all of `eval_val`): methods, component ablations, variants. Rows in
-   `m7.details_rows` (FULL) also write per-object details, the input of the §7.4 audit.
-4. τ_free sweep (`m7.tau_free_sweep`) and observed fraction (`m7.fracs` × `m7.frac_seeds`, §7.3).
-5. Relchange (`m7.relchange_split`): `m7.relchange_rows`, for the relation tables (§7.2).
+   `m7.details_rows` (FULL) also write per-object details, the input of the GT audit.
+4. τ_free sweep (`m7.tau_free_sweep`) and observed fraction (`m7.fracs` × `m7.frac_seeds`).
+5. Relchange (`m7.relchange_split`): `m7.relchange_rows`, for the relation tables.
 6. Determinism: FULL on one dev pair twice -> identical `metrics`.
 7. `outputs/<run_id>/results.md` (tables with 95% bootstrap CIs and support), three plots,
    `metrics.json` with every row's summary and an `acceptance` block.
@@ -218,7 +218,7 @@ def frac_table(val: Mapping[str, Any], cfg: Mapping[str, Any]) -> dict[str, Any]
 
 
 def acceptance(res: Mapping[str, Any], cfg: Mapping[str, Any]) -> dict[str, Any]:
-    """DESIGN §9 M7: results table with CIs, plots, determinism on one pair, valid graphs, dev regressions."""
+    """M7: results table with CIs, plots, determinism on one pair, valid graphs, dev regressions."""
     acc: dict[str, Any] = {}
     regs = res["regressions"]
     bad = {k: v["n_diff"] for k, v in regs.items() if v["n_diff"] not in (0, None)}
@@ -259,7 +259,7 @@ def write_results(res: Mapping[str, Any], cfg: Mapping[str, Any], path: Path) ->
     L = ["# Results (M7 tables)", "",
          "Values in %, 95% bootstrap CI over pairs in brackets (1,000 resamples). Val rows are reported once; "
          "nothing was tuned on them. `unknown` counts as neither removed nor moved. New P / R twice: labelled "
-         "(the mode's §5 rule) and class-agnostic (`ag`: geometry only, any label), so detection and naming "
+         "(the mode's matching rule) and class-agnostic (`ag`: geometry only, any label), so detection and naming "
          "losses show apart.", ""]  # fmt: skip
     L += _section_rows("Dev (`dev_train`, 3 pairs)", res["dev"], MAIN_KEYS)
     if res["regressions"]:

@@ -29,7 +29,7 @@ def test_render_own_mesh_matches_depth(real_data_root):
 
 @pytest.mark.slow
 def test_val_gt_counts_reproduce_design(real_data_root):
-    """DESIGN §2.2 / M1 acceptance (1): 390 rigid / 96 removed / 224 new raw (171 scored)."""
+    """M1 acceptance (1): 390 rigid / 96 removed / 224 new raw (171 scored)."""
     from collections import Counter
 
     from lsg.config import REPO_ROOT, load_config

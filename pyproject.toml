@@ -46,5 +46,5 @@ markers = ["slow: needs local 3RScan data or takes > 1 s (deselect with -m 'not 
 addopts = "-m 'not slow' -p no:dash"
 
 [tool.uv]
-# pyarrow (pulled in by rerun-sdk) >= 22 needs NumPy 2; this project pins NumPy < 2 (DECISIONS M8)
+# pyarrow (pulled in by rerun-sdk) >= 22 needs NumPy 2; this project pins NumPy < 2
 constraint-dependencies = ["pyarrow<22"]

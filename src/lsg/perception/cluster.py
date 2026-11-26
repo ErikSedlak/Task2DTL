@@ -1,4 +1,4 @@
-"""Clustering kept voxels into candidates, and the door swing-region filter (DESIGN §3 step 5).
+"""Clustering kept voxels into candidates, and the door swing-region filter.
 
 Kept voxels are grouped by connected components (M4, Erik: no scikit-learn): two voxels are
 linked if their Chebyshev distance is <= `link_voxels` (1 = 26-connectivity; the default 2
@@ -6,7 +6,7 @@ bridges the one-voxel gaps that sparse, grazing-angle sampling leaves inside one
 Clusters below `min_voxels` are dropped. Candidates are ordered
 deterministically (size descending, then centroid), which fixes their tokens `c<k>`.
 
-Door swings (DECISIONS M4): the reference mesh has each door in its reference position, so a
+Door swings: the reference mesh has each door in its reference position, so a
 swung door leaf leaves "nearer" residuals up to a door width away from the closed-door
 surface. A cluster is dropped if >= `door_frac` of its voxels lie inside a reference door's
 swing region: a vertical cylinder of radius door width + `door_margin` around each of the

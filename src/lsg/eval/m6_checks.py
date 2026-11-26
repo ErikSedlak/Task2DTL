@@ -1,6 +1,6 @@
-"""M6 acceptance checks and report (`uv run lsg m6`, DESIGN §9).
+"""M6 acceptance checks and report (`uv run lsg m6`).
 
-1. OBJ <-> PLY correspondence (§2.1) over all references of `splits/download_textures.txt`:
+1. OBJ <-> PLY correspondence over all references of `splits/download_textures.txt`:
    vertex / face counts, max vertex distance in the same order, identical faces.
 2. Texture render check on the dev references' *own* sequences (T_align = I): 3 overlay PNGs
    per reference (observed | rendered | 50 % blend, upright), median patch similarity (DINOv2
@@ -13,7 +13,7 @@
    candidates off / on); readouts incl. `free_ev_removed` before / after.
 4. Optional dev sweep: FULL `confidence.L_hit` in {0.5, 1, 2.5}.
 5. Val (reported once, nothing tuned): FULL in both modes. Default: the milestone val subset
-   (`splits/eval_val_small.txt`); `full_val=True` for all of `eval_val` (DECISIONS M6).
+   (`splits/eval_val_small.txt`); `full_val=True` for all of `eval_val`.
 
 The synthetic acceptance check (2 cm textured book removed from a table: missed by depth-only,
 caught by depth + appearance) is `tests/test_appearance.py` (colour features, fast) and its
@@ -84,7 +84,7 @@ def _objply_one(args: tuple[str, str]) -> dict[str, Any]:
 
 
 def check_obj_ply(cfg: dict[str, Any], workers: int = 4) -> dict[str, Any]:
-    """OBJ <-> PLY correspondence over the texture references (§2.1 open item)."""
+    """OBJ <-> PLY correspondence over the texture references."""
     refs = [l.strip() for l in (REPO_ROOT / cfg["splits"]["texture_list"]).read_text().splitlines() if l.strip()]
     root = str(data_root(cfg))
     with ProcessPoolExecutor(max_workers=workers) as ex:
@@ -153,7 +153,7 @@ def _overlays(runner: AppearanceRunner, seq, frames: list[int], out_dir: Path, t
 
 
 def render_check(cfg: dict[str, Any], out_dir: Path, frame_step: int = 15) -> dict[str, Any]:
-    """§9 M6 texture render check on the dev references' own sequences + tau_app calibration."""
+    """M6 texture render check on the dev references' own sequences + tau_app calibration."""
     root = data_root(cfg)
     pairs = read_pairs(REPO_ROOT / "splits" / "dev_train.txt")
     meta = load_meta(root)

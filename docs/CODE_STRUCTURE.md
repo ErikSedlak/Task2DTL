@@ -1,6 +1,6 @@
 # Code structure — what is where and what it does
 
-State: milestone M8 (2026-11-18). Covers everything in `src/lsg/`, `tests/` and `configs/`. For *why* things are done this way, see `DESIGN.md` (the spec) and `DECISIONS.md` (the log); this file only explains *what* the code does.
+State: milestone M8 (2026-11-18). Covers everything in `src/lsg/`, `tests/` and `configs/`. This file explains *what* the code does; the report (`docs/report/`) explains the method and the results.
 
 ## 1. The project in one paragraph
 
@@ -13,7 +13,7 @@ M0 built the foundation: reading the data, drawing ("rendering") a scanned room 
 ```
 Task2/
 ├── configs/default.yaml     all tunable numbers (thresholds, ICP, relation rules, eval definitions, gates)
-├── docs/                    DESIGN (spec), DECISIONS (log), STATUS (finished / open items), AI_USAGE, this file
+├── docs/                    this file, the report, the slides and their figures
 ├── splits/                  lists of scan ids / (reference, rescan) pairs to use
 ├── src/lsg/                 the Python package (run as `uv run lsg …`)
 │   ├── cli.py               the `lsg` command
@@ -50,7 +50,7 @@ Task2/
 │   │   ├── gt_stats.py      M1 checks: GT counts, displacement histogram, rule sanity
 │   │   ├── metrics.py       scoring: matching rules, per-pair counts, averages + bootstrap CIs
 │   │   ├── harness.py      `lsg eval` / `lsg run`: method + observations + GT -> metrics.json
-│   │   ├── relations.py     relation scoring (§7.2): parent / type accuracy per subset
+│   │   ├── relations.py     relation scoring: parent / type accuracy per subset
 │   │   ├── m4_checks.py     `lsg m4`: perception on dev, candidate recall, overlay PNGs, sweep
 │   │   ├── m5_checks.py     `lsg m5`: B0 / B1 / B2 on dev, sweep, B2 on val + relation table
 │   │   ├── m6_checks.py     `lsg m6`: OBJ/PLY check, texture render check, FULL variants on dev, val
@@ -80,7 +80,7 @@ Task2/
 │       ├── labeler.py       CLIP zero-shot labels from colour crops (cached)
 │       ├── appearance.py    rendered texture vs photo, DINOv2 patch features (cached) (M6)
 │       └── source.py        PerceptionSource: the above as an ObsSource
-├── docs/REPORT.md, docs/slides.pptx, docs/figures/   the write-up, the slides (built by docs/slides/build_deck.js) and their figures
+├── docs/report/, docs/slides.pptx, docs/figures/   the report (Typst source + PDF), the slides (built by docs/slides/build_deck.js) and their figures
 ├── README.md                setup, data for one pair, run it end-to-end, evaluation commands
 ├── tests/                   automated tests (`uv run pytest -q`)
 ├── data/      (git-ignored) the downloaded dataset
@@ -186,7 +186,7 @@ The big JSON files are parsed only once per run and then reused.
 - `write_texture_list(split_files, out)`: writes `splits/download_textures.txt` (the 72 references whose textures are needed; rescans never need them).
 
 ### `graph/model.py` — the scene graph and its JSON
-- `Node`, `Edge`, `Graph`: exactly the fields of DESIGN §4. Ids: `r<objectId>` for reference objects, `n<k>` for new ones, `room` for the room. `floor` is only a parent name, not a node.
+- `Node`, `Edge`, `Graph`: the fields of the graph JSON. Ids: `r<objectId>` for reference objects, `n<k>` for new ones, `room` for the room. `floor` is only a parent name, not a node.
 - `Graph.save(path)` / `Graph.load(path)` write and read the JSON; `support_parent()` gives `{child: (parent, "on"|"in")}`.
 - `validate(graph)` lists schema problems (missing keys, more than one support edge per thing, edges to unknown nodes, ...). Empty list = valid.
 
@@ -205,7 +205,7 @@ The big JSON files are parsed only once per run and then reused.
 - `gt_parent_changes(...)`: for moved things, did their support parent change between the two visits (same / swapped / gained / lost)?
 
 ### `eval/gt_stats.py` — the M1 checks (`uv run lsg m1`)
-- Counts per split (must reproduce DESIGN §2.2), a histogram of how far objects moved (`outputs/<run>/gt_displacement_hist.png`), and how often the geometric relation rules agree with 3DSSG on the reference scans.
+- Counts per split (must reproduce the expected raw counts), a histogram of how far objects moved (`outputs/<run>/gt_displacement_hist.png`), and how often the geometric relation rules agree with 3DSSG on the reference scans.
 
 ### `obs/base.py` — the observation interface
 - `ObsInstance`: one object seen in the rescan. It has an opaque `token`, a label (+ `label_topk`), a class id, its observed 3D points in the **reference** frame, and a mask per frame showing where it was seen.
@@ -302,7 +302,7 @@ The rule: no imports from `oracle/` / `eval/`, and no rescan annotations. Inputs
 ### `perception/segment.py` — CHANGE 3 Part N (co-segmentation)
 - `segment_frame`: one frame's residual pixels form a graph of neighbouring pixels; it is cut where the depth jumps and on concave creases (`normals_from_depth`, `concave_band`), and its connected parts are the frame's segments.
 - `cosegment_cluster`: kept voxels next to each other are joined only if no frame that sees both puts them in different segments; voxels never seen in one frame are not joined across gaps. Used by both candidate tiers in `source.py` when `perception.segment.method` is `geometric`.
-- Removed 2026-11-26 (lost their dev_tune selections, no reported row used them): the SAM segment source and `lsg sam cache`, the N2 reference explain-away, the N3 identity check (`lsg chg3 idstats`, `partn-ref`) and the N5 noise filters (DECISIONS).
+- Removed 2026-11-26 (lost their dev_tune selections, no reported row used them): the SAM segment source and `lsg sam cache`, the N2 reference explain-away, the N3 identity check (`lsg chg3 idstats`, `partn-ref`) and the N5 noise filters.
 
 ### `perception/detect_cache.py`, `perception/detector.py` — CHANGE 3 Part E (detector, off by default)
 - `DetectorRunner.detect`: Grounding DINO on the upright colour frame with the vocabulary as one prompt (`fit_prompts`, `ordered_prompts`: reference labels first), a score per label from the token logits (`label_scores`), NMS, then SAM 2 masks from the boxes at depth resolution; `cache_rescan` writes one `.npz` per frame and `done.json`.
@@ -346,7 +346,7 @@ The rule: no imports from `oracle/` / `eval/`, and no rescan annotations. Inputs
 ### `eval/harness.py` — `lsg eval` and `lsg run`
 - For every pair: load the GT, prepare the pair, run the online loop with the oracle, run the method with the observations and votes, recompute relations with all three policies (`update_graph`), score changes and relations, check the graph with `validate`, and save the updated graph to `outputs/<run>/graphs/<mode>/` (snapshots to `outputs/<run>/snapshots/<mode>/` if asked).
 - Besides the scores it reports *evidence diagnostics* that do not depend on the method: how many truly unchanged / removed / absent objects got free (seen-through) evidence.
-- Perception mode: the frames also go to a hidden `OracleSource` (only to know which GT objects were visible, for the association score; the method never sees it). Candidates are matched to GT objects with the §5 rule (same label or class, and close). The candidate lists are saved to `outputs/<run>/candidates/`.
+- Perception mode: the frames also go to a hidden `OracleSource` (only to know which GT objects were visible, for the association score; the method never sees it). Candidates are matched to GT objects with the matching rule (same label or class, and close). The candidate lists are saved to `outputs/<run>/candidates/`.
 - Pairs of the same reference run in one worker process (4 in parallel by default). Results are sorted back into a fixed order, so the `metrics` block of metrics.json is identical across reruns; timings go into a separate `run` block.
 
 ### `cli.py` — the command line
@@ -402,12 +402,12 @@ These may only be read inside `eval/` (scoring, checks) and `oracle/` (the upper
 | `test_audit.py` | (M8) Per-object details do not change any count; which predictions land in which false-positive pool; the veto set; seeded sampling; the CSV round trip and the verdict summary (incl. a missing verdict being refused); Wilson interval; comparing two `metrics` blocks. |
 | `test_confidence.py` | Class-prior counting and smoothing; the worked examples (chair 2 free → deleted, bed 2 free → kept, 3 → deleted, mixed evidence kept); cap; matched / new objects; priors off; FULL vs B2 on a small room (FULL keeps the bed and the mixed-evidence item). |
 | `test_relations_eval.py` | Relation counts on a hand-made pair: subsets a / b / c / c-broad, floor split, GT vs associated universe, new-node parents, several GT parents; aggregation. |
-| `test_real_data.py` | *(slow, needs `data/`)* Renders a real dev frame and compares with its depth; val GT counts reproduce DESIGN §2.2; one dev pair end-to-end with oracle + B0, twice, with identical `metrics`; one dev pair with B1: deterministic, no more false deletions than B0, snapshots valid; one dev pair in perception mode (B1) twice: identical `metrics`, candidate files, valid graphs; B2 on one dev pair in both modes twice (identical `metrics`, valid graphs, relation counts); real CLIP on two crops. |
+| `test_real_data.py` | *(slow, needs `data/`)* Renders a real dev frame and compares with its depth; val GT counts reproduce the expected raw counts; one dev pair end-to-end with oracle + B0, twice, with identical `metrics`; one dev pair with B1: deterministic, no more false deletions than B0, snapshots valid; one dev pair in perception mode (B1) twice: identical `metrics`, candidate files, valid graphs; B2 on one dev pair in both modes twice (identical `metrics`, valid graphs, relation counts); real CLIP on two crops. |
 
 Run with `uv run pytest -q` (195 tests, ~20 s); the slow ones with `uv run pytest -q -m slow` (10 tests, a few minutes; `test_real_data.py` also runs FULL on one dev pair twice and real DINOv2 on a reference frame).
 
 ## 8. What is not built yet
 
-Everything planned in DESIGN §6 and §9 is built. Optional items that were not done: the DINOv2 term in association (old B3), a door open / closed diagnostic (Erik: skipped).
+Everything planned is built. Optional items that were not done: the DINOv2 term in association (old B3), a door open / closed diagnostic (Erik: skipped).
 
 Since spec v2 there are two **observation modes**. `perception` (the headline) finds rescan objects from the rescan's own depth and colour. `oracle` (upper bound) uses the rescan's ground-truth objects. Both feed the same change logic.

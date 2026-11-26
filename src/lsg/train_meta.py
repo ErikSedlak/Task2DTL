@@ -1,6 +1,6 @@
 """Train-split metadata for the method: the CLIP vocabulary (M4) and class priors (M6).
 
-DESIGN §2.3: both come from train-split metadata (3RScan.json + 3DSSG `objects.json`),
+Both come from train-split metadata (3RScan.json + 3DSSG `objects.json`),
 **excluding** the scenes of `dev_train.txt` and `eval_relchange_train.txt` (reference and all
 its rescans). Only scans with `split == "train"` are read, so validation / test scans never
 contribute. This is training data of *other* rooms, not the rescan under evaluation.
@@ -83,7 +83,7 @@ def clip_vocab_table(root: str | Path, cfg: Mapping[str, Any]) -> list[tuple[str
 def perception_vocab(
     G_ref: Graph, table: Sequence[tuple[str, int, int]], top_n: int
 ) -> tuple[list[str], dict[str, int]]:
-    """CLIP vocabulary = reference-graph labels ∪ the `top_n` most frequent train labels (§6.6).
+    """CLIP vocabulary = reference-graph labels ∪ the `top_n` most frequent train labels.
 
     Returns:
         (sorted labels, label -> nyu40). nyu40 comes from the reference graph node with that
@@ -99,7 +99,7 @@ def perception_vocab(
 
 
 # --------------------------------------------------------------------------------------------
-# Class priors (DESIGN §6.11, M6)
+# Class priors (M6)
 # --------------------------------------------------------------------------------------------
 
 
@@ -109,7 +109,7 @@ class PriorTable:
 
     `present`: the object is in the rescan's 3DSSG objects (unchanged or moved); `removed`:
     listed in the rescan's `removed`. Absent-unlisted objects are not counted (their fate is
-    unknown, as in the eval universe, DECISIONS M2). Rates are Beta-smoothed toward the parent
+    unknown, as in the eval universe). Rates are Beta-smoothed toward the parent
     level: label -> nyu40 -> global (`p_persist`).
     """
 

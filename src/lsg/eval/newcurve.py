@@ -4,7 +4,7 @@ A finished perception run saves its graphs (`graphs/perception/<ref>_<rescan>.js
 candidate confidence on, every `new` node carries the confidence of its candidate. Raising
 `p_new_min` only removes `new` nodes, so the curve is scored from the saved graphs without
 rerunning perception: for each threshold, the new nodes with confidence >= threshold are
-matched to the pair's GT new objects with the §5 perception rule (`metrics.match_new`) and the
+matched to the pair's GT new objects with the perception matching rule (`metrics.match_new`) and the
 TP / FP / FN are summed over pairs (micro P / R, as the `new` row of the results tables).
 
 Caveat: the association step is not rerun. A candidate that was emitted at the run's threshold

@@ -1,4 +1,4 @@
-"""Refinement of 3RScan's rescan->reference alignment (DECISIONS 2026-11-05/M0, DESIGN risk #4).
+"""Refinement of 3RScan's rescan->reference alignment.
 
 Method side: uses only rescan depth + poses and the reference mesh. No rescan labels.
 Robust point-to-plane ICP (Tukey loss, coarse-to-fine) from `T_align`. Moved objects are outliers;
@@ -130,7 +130,7 @@ def refine_from_sequence(
         T_init: 3RScan's `T_align` for this rescan.
         cfg: The `alignment` config block (uses `frame_step`, `voxel`, `max_depth` and the
             ICP settings).
-        frame_ids: Frames of the processed chunk (§7.3: the pre-pass sees only the chunk);
+        frame_ids: Frames of the processed chunk (the pre-pass sees only the chunk);
             every `frame_step`-th of them builds the cloud. Default: the whole sequence.
 
     Returns:

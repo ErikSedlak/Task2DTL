@@ -1,4 +1,4 @@
-"""Frame votes from render-and-compare, and viewpoint decorrelation (DESIGN §3, §6.8).
+"""Frame votes from render-and-compare, and viewpoint decorrelation.
 
 Per processed frame, the reference mesh is rendered at the rescan camera's aligned pose. For a
 node i, P_i = pixels whose first hit is i. Comparing observed depth d_obs with the rendered
@@ -9,7 +9,7 @@ depth d_exp on P_i gives one frame vote:
 - `noinfo`: anything else (occluded / nearer pixels, mixed evidence, too few valid pixels);
 - `unobserved`: |P_i| < `min_mask_px` (out of frustum or hidden behind other reference geometry).
 
-Seen votes need contrast (FULL, DECISIONS 2026-11-15): with `d_behind` (depth of the next
+Seen votes need contrast (FULL): with `d_behind` (depth of the next
 reference surface behind the pixel's first hit with another label), only *contrastive* pixels,
 d_behind > d_exp + tau_free, can support `seen`: there, depth would show the difference if the
 node were gone. `seen` then needs >= `min_mask_px` valid contrastive pixels, >= `vote_frac` of
@@ -77,7 +77,7 @@ def frame_votes(
     cfg: Mapping[str, Any],
     d_behind: np.ndarray | None = None,
 ) -> dict[int, FrameVote]:
-    """§3 frame votes of the given reference objects in one frame.
+    """Frame votes of the given reference objects in one frame.
 
     Args:
         node_oids: Reference objectIds to vote on (anchor / thing nodes).
@@ -87,7 +87,7 @@ def frame_votes(
         cfg: Full config; uses `cfg["visibility"]`.
         d_behind: (H, W) depth of the next reference surface behind the first hit with another
             label (`Renderer.depth_behind`, inf = none), or None for the M3 rule. Given: `seen`
-            only from contrastive pixels (module docstring; DECISIONS 2026-11-15).
+            only from contrastive pixels.
 
     Returns:
         `{objectId: FrameVote}` for every id in `node_oids` (`unobserved` included).
@@ -190,7 +190,7 @@ def thin_votes(
 
 
 class Decorrelator:
-    """Counts an event only from a new enough viewpoint (DESIGN §3).
+    """Counts an event only from a new enough viewpoint.
 
     Per key (e.g. `(node_id, "free")` or a voxel), the camera pose of the last *counted* event
     is stored. A new event counts if the camera centre moved >= `d_dec` or the viewing
@@ -280,7 +280,7 @@ class NodeVotes:
 
 
 def has_free_evidence(v: NodeVotes | None, cfg: Mapping[str, Any]) -> bool:
-    """§3 removed / unknown split: >= k_free counted free + free-like votes, where appearance
+    """Removed / unknown split: >= k_free counted free + free-like votes, where appearance
     alone (no counted depth free vote) needs >= `k_free_like` free-like votes (M6).
 
     Without free-like votes (appearance off) this is the M3 rule `free >= k_free`.
@@ -300,7 +300,7 @@ def old_place_class(v: NodeVotes | None, cfg: Mapping[str, Any]) -> str:
     - `net_seen`: L_hit·seen > L_miss·free + L_free_like·free_like with the node weights of
       `confidence` (CHANGE 3 Part C, Erik: the same weighted evidence as FULL's confidence, so a node
       the removal veto keeps is never moved away and vice versa); checked first;
-    - `free_ev`: §3 free evidence (`has_free_evidence`);
+    - `free_ev`: free evidence (`has_free_evidence`);
     - `mixed`: everything else.
     """
     if v is None or v.seen == v.free == v.free_like == 0:
@@ -315,5 +315,5 @@ def old_place_class(v: NodeVotes | None, cfg: Mapping[str, Any]) -> str:
 
 
 def confirmed_in_place(v: NodeVotes | None, cfg: Mapping[str, Any]) -> bool:
-    """§3: >= k_seen counted seen votes and no counted free or free-like vote."""
+    """Confirmed: >= k_seen counted seen votes and no counted free or free-like vote."""
     return v is not None and v.seen >= int(cfg["states"]["k_seen"]) and v.free == 0 and v.free_like == 0

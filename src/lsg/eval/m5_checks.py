@@ -1,4 +1,4 @@
-"""M5 acceptance checks (`uv run lsg m5`, DESIGN §9): association, ICP moved test, relations.
+"""M5 acceptance checks (`uv run lsg m5`): association, ICP moved test, relations.
 
 1. Dev (`splits/dev_train.txt`): B0, B1, B2 in perception + oracle mode. Acceptance per mode:
    B2 association accuracy (strict) >= B0's, B2 moved F1 >= B1's.
@@ -6,9 +6,9 @@
 3. Dev diagnostics of B2: confirmed / absorbed / matched counts; GT-unchanged objects with
    free evidence that B2 turns into `removed`.
 4. Optional dev sweep (B2, both modes): `association.tau_assoc` x `association.w_p`.
-5. Val (reported once, nothing tuned): B2 in both modes with the §7.2 relation table R0
+5. Val (reported once, nothing tuned): B2 in both modes with the relation table R0
    (stale) / R1 (geometric) / update. Default: the milestone val subset
-   (`splits/eval_val_small.txt`); `full_val=True` for all of `eval_val` (DECISIONS M6).
+   (`splits/eval_val_small.txt`); `full_val=True` for all of `eval_val`.
 
 The unit / synthetic checks are pytest tests (`test_association.py`, `test_classify.py`,
 `test_b2.py`, `test_update.py`, `test_relations_eval.py`). Lives in `eval/` (reads GT).

@@ -78,7 +78,7 @@ def label_to_nyu40(root: str | Path) -> dict[str, int]:
     """Most frequent nyu40 id per object label over all scans of `3DSSG/objects.json`.
 
     A class-vocabulary mapping (no instance data), used by the perception matching rule
-    (DESIGN §5) when a prediction carries a label but no nyu40. Ties go to the smaller id.
+    when a prediction carries a label but no nyu40. Ties go to the smaller id.
     """
     from collections import Counter
 

@@ -1,4 +1,4 @@
-"""Baseline B0 (DESIGN §8) on a synthetic reference graph + observations."""
+"""Baseline B0 on a synthetic reference graph + observations."""
 
 import numpy as np
 

@@ -1,4 +1,4 @@
-"""Appearance residual (DESIGN §3, §6.6; M6): rendered reference texture vs observed colour.
+"""Appearance residual (M6): rendered reference texture vs observed colour.
 
 Per processed frame the reference texture is rendered at the rescan camera's aligned pose
 (`geom.render.TextureRenderer`, colour intrinsics scaled to `render_w`), and both images are
@@ -24,7 +24,7 @@ feed (i) thin-node votes (`change.visibility.thin_votes`: the node's *mean* rela
 over its comparable pixels against `tau_node`, M6 dev finding: a per-patch threshold at the
 same false rate almost never fires on a whole node) and (ii) thin-object voxels in
 `PerceptionSource` (per-pixel `mismatch_px`, threshold `tau_app`). Similarities are cached per (rescan, frame, aligned
-pose, reference, features, render size) in `cache/appearance/`, rounded to 1e-3 (§7.5).
+pose, reference, features, render size) in `cache/appearance/`, rounded to 1e-3.
 
 Method side: reads only the reference texture and the rescan's colour frames + poses.
 """
@@ -55,7 +55,7 @@ class FeatureExtractor(Protocol):
 
 
 class ColorFeatures:
-    """Exposure-normalised colour per patch (fallback, DESIGN §3).
+    """Exposure-normalised colour per patch (fallback).
 
     Each image is normalised per channel by its own mean / std (removes global exposure and
     white-balance differences); a patch's feature is the mean of each 7 x 7 cell (2 x 2 cells x
@@ -214,7 +214,7 @@ def mismatch(
     cfg: Mapping[str, Any],
     render_wh: tuple[int, int],
 ) -> AppearanceMap:
-    """Depth-resolution comparable / mismatch maps from a per-patch similarity (module docstring)."""
+    """Depth-resolution comparable / mismatch maps from a per-patch similarity."""
     ac = cfg["appearance"]
     H, W = d_obs.shape
     gh, gw = sim.shape
@@ -270,7 +270,7 @@ class SimilarityCache:
 
 
 class AppearanceRunner:
-    """Per-frame appearance maps for `change.online.run_online` (DESIGN §6.7 step 1).
+    """Per-frame appearance maps for `change.online.run_online` (step 1 of the frame loop).
 
     Holds the reference `TextureRenderer`, the feature extractor and the similarity cache.
     `begin(seq_info, seq)` binds a rescan; `frame(frame, pose_ref, d_exp)` returns the frame's

@@ -1,4 +1,4 @@
-"""Perception pipeline (DESIGN §3 candidate steps, §6.6; M4 acceptance: box added -> exactly one
+"""Perception pipeline (candidate steps; M4 acceptance: box added -> exactly one
 candidate, centroid error < 5 cm).
 
 Synthetic room with real ray casting: floor (z = 0) and four walls at ±4 m, a basket r11 in
@@ -118,7 +118,7 @@ def test_box_added_gives_exactly_one_candidate(cfg):
     o = res.obs[0]
     # GT centroids in eval are means of mesh vertices, i.e. of the reconstructed surface: an
     # object's bottom is never observed. Reference = area-weighted centroid of the cube's top +
-    # 4 side faces (z = 0.18 m); the solid centre is z = 0.15 m (DECISIONS M4).
+    # 4 side faces (z = 0.18 m); the solid centre is z = 0.15 m.
     lo, hi = np.array(NEW_BOX[0]), np.array(NEW_BOX[1])
     surf_c = np.array([*(0.5 * (lo + hi))[:2], (hi[2] + 4 * 0.5 * (lo[2] + hi[2])) / 5])
     err = float(np.linalg.norm(o.centroid - surf_c))

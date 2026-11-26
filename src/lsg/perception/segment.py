@@ -10,7 +10,7 @@ Segment sources (`perception.segment.method`):
   depth jumps by more than `depth_edge_abs + depth_edge_rel * z` (`segment_frame`);
 - `none`: no co-segmentation (today's `cluster.cluster`).
 
-(A third source, cached SAM masks, lost the dev_tune selection and was removed, DECISIONS 2026-11-26.)
+(A third source, cached SAM masks, lost the dev_tune selection and was removed.)
 Segment id -1 = unknown (crease pixel); unknown pixels give no vote. Method side: uses only the
 rescan's depth frames (hard rules 1-2).
 """
@@ -169,7 +169,7 @@ def cosegment_cluster(
     cut_frac: float = 0.5,
     bridge_unseen: int | None = None,
 ) -> tuple[list[Candidate], dict[str, int]]:
-    """Clusters of kept voxels linked by space and agreeing image segments (module docstring).
+    """Clusters of kept voxels linked by space and agreeing image segments.
 
     Args:
         voxel_idx: (N,) kept voxel indices into the grid.

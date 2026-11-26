@@ -1,4 +1,4 @@
-"""Log-odds node confidence (DESIGN §6.11; M6, values rescaled by Erik; CHANGE 2).
+"""Log-odds node confidence (M6, values rescaled by Erik; CHANGE 2).
 
 l0 = logit(`prior_p`) with `class_priors: false` (default since CHANGE 2 Part A: no dataset prior;
 CHANGE 3: a flat `prior_p` 0.9 with `p_del` 0.2, so an untouched reference node reports 0.9), or logit(p_persist(class))
@@ -13,11 +13,11 @@ from train metadata (`train_meta.class_priors`; label -> nyu40 -> global back-of
 - New node: l = clip(L_hit·views) from l = 0 (no prior for a newly observed object); a perception
   candidate with its own confidence (CHANGE 2 Part B, per-voxel log-odds) keeps that one.
 
-Removal (FULL): unmatched, §3 free evidence, and p = sigmoid(l) < p_del.
+Removal (FULL): unmatched, free evidence, and p = sigmoid(l) < p_del.
 
 With the spec's L = 0.4 and clip ±3, train priors of 0.91-1.0 could never reach p_del = 0.2;
 L_miss = 2.5 makes 2 counted free votes delete a median-prior thing (chair: p = 0.17), while a
-bed (p_persist ~0.996) needs 3 and mixed seen / free evidence protects a node (DECISIONS M6).
+bed (p_persist ~0.996) needs 3 and mixed seen / free evidence protects a node.
 Without priors: flat 0.9 / p_del 0.2 (margin 3.58; CHANGE 3, = M7 `FULL-priors`) -> 2 net free votes
 delete any class, 1 cannot; CHANGE 2's l0 = 0 / p_del 0.027 (margin 3.6) made the same decisions.
 """
@@ -61,7 +61,7 @@ def node_logodds(
     matched: bool = False,
     views: int | None = None,
 ) -> float:
-    """Final log-odds of a reference node (module docstring).
+    """Final log-odds of a reference node.
 
     Args:
         l0: Prior log-odds.

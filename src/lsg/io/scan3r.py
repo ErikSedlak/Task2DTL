@@ -69,12 +69,11 @@ class Meta:
 def _parse_rigid(entry) -> RigidEntry:
     """One item of a rescan's `rigid` list: a dict with a transform, or a bare object id.
 
-    The transform maps reference-frame instance points into the rescan frame (verified at M0,
-    DESIGN §2.1).
+    The transform maps reference-frame instance points into the rescan frame (verified at M0).
     """
     if isinstance(entry, dict):
         ir, ires = int(entry["instance_reference"]), int(entry["instance_rescan"])
-        if ir != ires:  # never observed (DESIGN §2.1); fail loudly if it happens
+        if ir != ires:  # never observed; fail loudly if it happens
             raise ValueError(f"rigid entry with instance_reference {ir} != instance_rescan {ires}")
         t = entry.get("transform")
         return RigidEntry(ir, mat4_from_colmajor(t) if t is not None else None)
@@ -381,8 +380,8 @@ def iter_frames(
 
     Args:
         seq: An open sequence.
-        stride: Take every `stride`-th frame (DESIGN §3 uses 3).
-        idx: Explicit frame ids; overrides `stride` (used for contiguous chunks, §7.3).
+        stride: Take every `stride`-th frame (the method uses 3).
+        idx: Explicit frame ids; overrides `stride` (used for contiguous chunks).
 
     Yields:
         `Frame` objects in order.
@@ -446,7 +445,7 @@ def load_scan(root: str | Path, scan_id: str, with_intrinsics: bool = True) -> S
     Returns:
         `Scan` with vertices/faces, objectId and NYU40 per vertex and per face (face = majority
         of its 3 vertices), `instances` for every objectId > 0 with vertices, and
-        `semseg_labels` = all objectIds of `semseg.v2.json` (the O_R / O_S of DESIGN §5).
+        `semseg_labels` = all objectIds of `semseg.v2.json` (O_R / O_S).
     """
     d = Path(root) / scan_id
     ply = read_ply(d / "labels.instances.annotated.v2.ply")
@@ -570,7 +569,7 @@ def read_obj(path: str | Path) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
 def load_textured_mesh(root: str | Path, scan_id: str) -> TexturedMesh:
     """Load `mesh.refined.v2.obj` + `mesh.refined_0.png` of a **reference** scan (~3 s).
 
-    The texture is reference-scan data (method input, DESIGN §1); rescans have no textures here.
+    The texture is reference-scan data (method input); rescans have no textures here.
     """
     from PIL import Image
 

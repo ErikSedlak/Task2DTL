@@ -1,5 +1,5 @@
 """Depth + label rendering, and reference-texture colour rendering, with Open3D RaycastingScene
-(CPU; DECISIONS 2026-11-05, M6)."""
+(CPU; M6)."""
 
 from __future__ import annotations
 
@@ -114,7 +114,7 @@ class Renderer:
     ) -> np.ndarray:
         """Depth of the nearest surface along each pixel's ray whose label differs from the first hit's.
 
-        For "seen votes need contrast" (DECISIONS 2026-11-15). All intersections of the active
+        For "seen votes need contrast". All intersections of the active
         pixels' rays are listed (`RaycastingScene.list_intersections`); hits with the first
         hit's label are skipped (the node's own front / back / side faces), the nearest other
         hit at t >= first-hit depth - `eps` wins. A surface coincident with the node's back face
@@ -173,7 +173,7 @@ class Renderer:
 
 
 class TextureRenderer:
-    """Renders the reference texture as seen from a camera (DESIGN §6.2, M6).
+    """Renders the reference texture as seen from a camera (M6).
 
     Own `RaycastingScene` on the OBJ geometry (so it is correct even if OBJ and PLY differed;
     they are checked to be identical at M6). Per pixel: first face hit (`primitive_ids`),

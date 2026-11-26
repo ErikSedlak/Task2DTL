@@ -1,4 +1,4 @@
-"""`PerceptionSource`: rescan objects from depth residuals + CLIP labels (DESIGN §3, §6.6).
+"""`PerceptionSource`: rescan objects from depth residuals + CLIP labels.
 
 Per processed frame (`observe`, called by `change.online.run_online` with the reference render
 at the frame's aligned pose): nearer residual points (steps 1-2, `residual`) go into the
@@ -12,14 +12,14 @@ swing-region filter -> one `ObsInstance` per candidate:
 - `label_topk` from the labeller (CLIP), `label` = top-1, `nyu40` from the vocabulary table;
 - token `c<k>` (k = rank by size).
 
-Relaxed candidate rules (CHANGE 1, `perception.relaxed`, docs/CHANGE_candidate_detection.md): size
+Relaxed candidate rules (CHANGE 1, `perception.relaxed`): size
 decides how much evidence a candidate needs. *Strict tier* = the steps above with
 `relaxed.min_views_small` (2) views at `tau_new`. *Lenient tier* = a second voxel grid filled at
 `relaxed.tau_new_large` (0.05 m) with `relaxed.min_views_large` (1) view; only its clusters with
 >= `large_min_voxels` voxels (and `large_min_extent`) are kept, and they replace the strict clusters
 inside them. `relaxed.enabled: false` = the M7 method (`min_views` views at `tau_new`, no lenient tier).
 
-Candidate confidence (CHANGE 2 Part B, `confidence.candidates`, docs/CHANGE_confidence_unified.md):
+Candidate confidence (CHANGE 2 Part B, `confidence.candidates`):
 both depth grids carry per-voxel log-odds (`voxels`): hits raise a voxel, see-through votes of
 later frames lower it (`VoxelEvidence.observe_free`, every frame on every tracked voxel). The
 view-count rules become thresholds: strict voxels need `lv >= l_keep_small` (relaxed off:
@@ -33,7 +33,7 @@ every frame's residual pixels get image-segment ids (depth-edge components), and
 both depth tiers cluster their kept voxels with `segment.cosegment_cluster` (adjacent voxels link only
 if the frames seeing both mostly put them in one segment) instead of `cluster.cluster`.
 
-Thin-object candidates (M6, DESIGN §6.6 output ii; `appearance.thin_candidates`): when the
+Thin-object candidates (M6, `appearance.thin_candidates`): when the
 online loop passes an `AppearanceMap` in `RefRender`, mismatching pixels whose depth agrees with
 the reference (|d_obs - d_exp| <= tau_near) and whose first hit is a support surface (a non-thin
 anchor / thing or the floor, face |normal z| >= `support_min_normal_z`) are back-projected into
@@ -504,7 +504,7 @@ class PerceptionSource:
 
         Per processed frame, h = history voxels hit and f = history voxels seen through. The frame votes
         `seen` if h >= `min_vox` and h >= `vote_frac`·(h + f), `free` if f >= `min_vox` and
-        f >= `vote_frac`·(h + f): the node rule of DESIGN §3 applied to voxels. Votes count per kind
+        f >= `vote_frac`·(h + f): the node vote rule applied to voxels. Votes count per kind
         only from a new viewpoint (the `decorrelation` rule: moved >= d_dec or turned >= theta_dec).
         """
         tc = self.cfg["confidence"]["candidates"]["track"]

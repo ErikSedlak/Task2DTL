@@ -1,4 +1,4 @@
-"""Rerun timeline of one pair's online walk (DESIGN §6.14, M8).
+"""Rerun timeline of one pair's online walk (M8).
 
 Input = a run directory written by `lsg run` (snapshots are on by default):
 `snapshots/<mode>/<ref>_<rescan>/frame_XXXXXX.json` + `seq_info.json`, and `graphs/<mode>/<ref>_<rescan>.json`.

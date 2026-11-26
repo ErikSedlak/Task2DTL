@@ -1,7 +1,7 @@
-"""Build the reference scene graph G_ref from a reference scan (DESIGN §6.3, §4).
+"""Build the reference scene graph G_ref from a reference scan.
 
 Two relation modes:
-- `gt`: support parents from the reference's 3DSSG relations (§5 predicate mapping);
+- `gt`: support parents from the reference's 3DSSG relations (predicate mapping);
 - `geometric`: support parents from `relations.infer_support` on the reference mesh (R1).
 
 Only reference-scan data is used (mesh, semseg/PLY labels, 3DSSG of the reference), which is
@@ -73,7 +73,7 @@ def build_reference_graph(
     M6), `anchor` = first anchor up the support chain (None for anchors themselves).
 
     Edges: `hierarchy` room -> every anchor/thing; at most one support edge (`on`/`in`) per
-    **thing** (anchors carry none, DECISIONS M1), target an anchor, a thing or `floor`;
+    **thing** (anchors carry none), target an anchor, a thing or `floor`;
     undirected `next_to` (GT: `close by`; geometric: AABB gap <= `next_to_gap`), exported only.
 
     Args:

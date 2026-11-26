@@ -1,4 +1,4 @@
-"""B2 (DESIGN §8, M5): confirmed-in-place skip + absorption, Hungarian, ICP moved test."""
+"""B2 (M5): confirmed-in-place skip + absorption, Hungarian, ICP moved test."""
 
 import numpy as np
 

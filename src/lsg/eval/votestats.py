@@ -37,7 +37,7 @@ WEIGHTS = (("L_hit", "seen", "present"), ("L_miss", "free", "gone"), ("L_free_li
 
 
 def kind_rates(units: Sequence[Mapping[str, int]]) -> dict[str, float]:
-    """Smoothed P(kind | class) from units' counted votes (module docstring)."""
+    """Smoothed P(kind | class) from units' counted votes."""
     sh = np.zeros(len(KINDS))
     n = 0
     for u in units:
@@ -97,7 +97,7 @@ def bootstrap(per_pair: Mapping[str, Mapping[str, Sequence[Mapping[str, int]]]],
 
 
 def node_vote_weights(run_dir: str | Path, cfg: Mapping[str, Any], mode: str = "oracle") -> dict[str, Any]:
-    """The reference-node weights of one run (module docstring), with CIs."""
+    """The reference-node weights of one run, with CIs."""
     vc = cfg["chg3"]["part_c"]["votestats"]
     per = node_units(Path(run_dir) / "details" / mode)
     pres = [u for p in per.values() for u in p["present"]]

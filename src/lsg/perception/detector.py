@@ -68,7 +68,7 @@ def backproject(pix: np.ndarray, z: np.ndarray, K: np.ndarray, pose: np.ndarray,
 
 
 class DetectorTracks:
-    """Fuses per-frame detections into 3D tracks (module docstring)."""
+    """Fuses per-frame detections into 3D tracks."""
 
     def __init__(self, cache, filt, cfg: Mapping[str, Any], K: np.ndarray, wh: tuple[int, int], doors=()):
         """

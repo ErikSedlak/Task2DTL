@@ -1,10 +1,10 @@
-"""Zero-shot candidate labelling with CLIP (DESIGN §6.6; frozen ViT-B/32, `open_clip_torch`).
+"""Zero-shot candidate labelling with CLIP (frozen ViT-B/32, `open_clip_torch`).
 
 `CLIPLabeler.topk(crops)` encodes the upright colour crops of one candidate (up to K = 5),
 averages their normalised image embeddings, and scores the average against the text
 embeddings of the vocabulary (`prompt.format(label)`): softmax over the vocabulary, top-k
 `(label, score)`. Scores are rounded to 1e-4 and ties broken by label, and results are cached
-on disk per (crops, model, vocabulary), so reruns read identical labels (§7.5).
+on disk per (crops, model, vocabulary), so reruns read identical labels.
 
 torch / open_clip are imported lazily: importing `lsg.perception` stays cheap, and tests use
 `StubLabeler`.

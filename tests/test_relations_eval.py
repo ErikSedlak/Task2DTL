@@ -1,4 +1,4 @@
-"""Relation scoring (DESIGN §7.2, M5) on a hand-made pair."""
+"""Relation scoring (M5) on a hand-made pair."""
 
 from lsg.config import load_config
 from lsg.eval.gt import GTLabels, GTNew, GTObject

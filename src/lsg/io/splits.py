@@ -1,4 +1,4 @@
-"""Split-file helpers (DESIGN §2.3). `lsg splits textures` writes `splits/download_textures.txt`."""
+"""Split-file helpers. `lsg splits textures` writes `splits/download_textures.txt`."""
 
 from __future__ import annotations
 
@@ -26,8 +26,8 @@ def reference_ids(split_files: Iterable[str | Path]) -> list[str]:
 def write_texture_list(split_files: Iterable[str | Path], out: str | Path) -> list[str]:
     """Write the reference scans whose textures are needed (one id per line).
 
-    Only reference scans need textures (appearance residual renders the reference texture,
-    DESIGN §6.6); rescans never do.
+    Only reference scans need textures (appearance residual renders the reference texture);
+    rescans never do.
 
     Args:
         split_files: Pair lists to collect references from (dev + val + relchange).
@@ -42,7 +42,7 @@ def write_texture_list(split_files: Iterable[str | Path], out: str | Path) -> li
 
 
 def subset_pairs(pairs: Iterable[tuple[str, str]], n_refs: int, seed: int = 0) -> list[tuple[str, str]]:
-    """Seeded subset: `n_refs` references, one rescan each (DECISIONS M6, Erik: milestone val subset).
+    """Seeded subset: `n_refs` references, one rescan each (Erik: milestone val subset).
 
     References are drawn without replacement from the sorted reference list, then one rescan
     per drawn reference, both with `numpy.random.default_rng(seed)`; the result keeps the

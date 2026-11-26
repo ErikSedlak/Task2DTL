@@ -1,4 +1,4 @@
-"""Graph update after the change states are decided (DESIGN §6.12): support relations.
+"""Graph update after the change states are decided: support relations.
 
 `update_graph(G_states, ref_ctx, obs, cfg, policy)` takes a method's output (node states,
 moved geometry, new nodes; reference relations still in place) and recomputes the support
@@ -14,7 +14,7 @@ edges according to `policy`:
 Support candidates are the anchor/thing nodes that are not removed: reference nodes with their
 reference mesh points (moved nodes: `T_move` applied), new nodes with the points of their
 observation (`obs_token`). Removed nodes keep their old edge in the file (deletion is a view
-filter, §4) but never act as a parent. After the edges, the `anchor` field is recomputed up
+filter) but never act as a parent. After the edges, the `anchor` field is recomputed up
 the chain, and `next_to` edges touching moved / new nodes are recomputed (AABB gap).
 
 Method side: imports only `geom`, `graph`, `obs`.
@@ -70,7 +70,7 @@ def update_graph(
     cfg: Mapping[str, Any],
     policy: str = "update",
 ) -> Graph:
-    """Recompute support relations of a method's output graph (module docstring).
+    """Recompute support relations of a method's output graph.
 
     Args:
         G_states: Output of a change method (not modified).

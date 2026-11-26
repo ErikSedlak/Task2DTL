@@ -1,4 +1,4 @@
-"""Perception mode (headline, DESIGN §6.6): rescan objects from depth residuals (M4).
+"""Perception mode (headline): rescan objects from depth residuals (M4).
 
 Modules: `residual` (nearer points + surface / structure filter), `voxels` (decorrelated
 multi-view voxel evidence), `cluster` (connected components + door swing filter), `labeler`

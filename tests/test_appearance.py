@@ -1,4 +1,4 @@
-"""Appearance residual (DESIGN §3 / §6.6, M6): patch similarity, mismatch maps, thin-node votes,
+"""Appearance residual (M6): patch similarity, mismatch maps, thin-node votes,
 the synthetic book acceptance check, and thin-object candidates.
 
 Scene: floor, two walls, a table (anchor r20, top at z = 0.75) and a flat striped book (thing

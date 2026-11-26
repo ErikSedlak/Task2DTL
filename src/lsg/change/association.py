@@ -1,8 +1,8 @@
-"""Association of reference nodes with observed instances (DESIGN §6.9, B2).
+"""Association of reference nodes with observed instances (B2).
 
 Two stages, both at the end of the sequence (deferred commitment):
 
-0. **Absorption** (M5, Erik): a node confirmed in place (§3) does not enter the matching, but
+0. **Absorption** (M5, Erik): a node confirmed in place does not enter the matching, but
    it claims the observations that belong to it, so that its oracle instance (or a perception
    candidate from a mesh hole / moving foliage inside it) does not become a false `new` node or
    a false `moved` match for another same-label node. An observation is absorbed by a confirmed
@@ -55,7 +55,7 @@ def label_p(node: Node, o: ObsInstance) -> float:
 
 
 def label_cost(node: Node, o: ObsInstance, mode: str, cfg: Mapping[str, Any]) -> float:
-    """§6.9 label term. Oracle: hard gate with nyu40 fallback; perception: soft top-k term."""
+    """Label term. Oracle: hard gate with nyu40 fallback; perception: soft top-k term."""
     a = _acfg(cfg)
     if mode == "oracle":
         if o.label == node.label:
@@ -97,7 +97,7 @@ def pos_cost(node: Node, o: ObsInstance, cfg: Mapping[str, Any]) -> float:
 
 
 def pair_cost(node: Node, o: ObsInstance, mode: str, cfg: Mapping[str, Any]) -> float:
-    """Full §6.9 cost of one (node, observation) pair (+inf if the label gate fails)."""
+    """Full cost of one (node, observation) pair (+inf if the label gate fails)."""
     lc = label_cost(node, o, mode, cfg)
     if lc == INF:
         return INF
@@ -133,7 +133,7 @@ class Absorption:
 def absorb_confirmed(
     confirmed: Sequence[Node], obs: Sequence[ObsInstance], mode: str, cfg: Mapping[str, Any]
 ) -> Absorption:
-    """Stage 0: confirmed-in-place nodes claim compatible observations (module docstring)."""
+    """Stage 0: confirmed-in-place nodes claim compatible observations."""
     ab = _acfg(cfg)["absorb"]
     min_frac, margin = float(ab["min_frac"]), float(ab["margin"])
     absorbed: dict[str, str] = {}
@@ -163,7 +163,7 @@ Gate = Callable[[Node, ObsInstance], bool]
 
 
 def old_place_gate(votes: Mapping[str, NodeVotes] | None, cfg: Mapping[str, Any]) -> Gate | None:
-    """The Part A pair gate (module docstring); None if `association.old_place.enabled` is false."""
+    """The Part A pair gate; None if `association.old_place.enabled` is false."""
     oc = _acfg(cfg).get("old_place") or {}
     if not oc.get("enabled", False):
         return None
@@ -187,7 +187,7 @@ def old_place_gate(votes: Mapping[str, NodeVotes] | None, cfg: Mapping[str, Any]
 def associate(
     nodes: Sequence[Node], obs: Sequence[ObsInstance], mode: str, cfg: Mapping[str, Any], gate: Gate | None = None
 ) -> tuple[list[tuple[Node, ObsInstance, float]], list[Node], list[ObsInstance]]:
-    """Stage 1: Hungarian assignment with gate `tau_assoc` (DESIGN §6.9).
+    """Stage 1: Hungarian assignment with gate `tau_assoc`.
 
     Costs are clipped at tau (= "leave unmatched" costs tau), so the assignment is optimal
     among gated pairs; assigned pairs with cost >= tau are dropped. Inputs are sorted by node

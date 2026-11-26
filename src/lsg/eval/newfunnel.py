@@ -5,8 +5,8 @@ of a pair gets one fate (first that applies):
 - `not visible`: the oracle of the same run saw no instance of it (neither a correct new node nor an observation
   taken by a reference node);
 - `no candidate`: no perception observation is assigned to it (`perception_obs_truth`, the candidate file's `gt`);
-- `new node, correct`: a new node scored TP (labelled §5 rule);
-- `new node, scored fp`: its observation became a new node, but the §5 rule did not match it (label / box);
+- `new node, correct`: a new node scored TP (labelled matching rule);
+- `new node, scored fp`: its observation became a new node, but the matching rule did not match it (label / box);
 - `taken by a reference node -> <state>`: its observation was associated to a reference node;
 - `below p_new_min`: its observation was not emitted (candidate confidence / detector newness);
 - `other`: absorbed by a confirmed node or dropped.
@@ -28,7 +28,7 @@ def _load(p: Path) -> dict[str, Any]:
 
 
 def new_funnel(run_dir: str | Path) -> dict[str, Any]:
-    """Fate counts of GT new objects (perception) and observation classes of a run (module docstring)."""
+    """Fate counts of GT new objects (perception) and observation classes of a run."""
     run_dir = Path(run_dir)
     seen_oracle: set[tuple[str, str, int]] = set()
     have_oracle = (run_dir / "details" / "oracle").is_dir()

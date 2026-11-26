@@ -1,4 +1,4 @@
-"""Tuning set `splits/dev_tune.txt` (CHANGE 3 Part 0, docs/CHANGE_online_graph.md §2).
+"""Tuning set `splits/dev_tune.txt` (CHANGE 3 Part 0).
 
 `dev_train` (3 pairs, 1 GT-removed, 3 GT-new objects) cannot tune anything. `dev_tune` adds train
 rooms chosen from metadata only (3RScan.json + 3DSSG `objects.json`, no downloads):
@@ -10,7 +10,7 @@ rooms chosen from metadata only (3RScan.json + 3DSSG `objects.json`, no download
 - then the `include` pairs (`dev_train`), which stay the 3-pair regression set.
 
 Lives in `eval/` because it reads train rescans' `removed` / `rigid` lists (hard rule 1). Counts are
-metadata estimates of the §5 GT: things and anchors only; a listed removal still present in the
+metadata estimates of the change GT: things and anchors only; a listed removal still present in the
 rescan is dont_care and not counted; `rigid` includes moves below τ_eval_move (centroids need the PLY).
 """
 

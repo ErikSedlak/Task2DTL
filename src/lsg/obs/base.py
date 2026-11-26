@@ -1,4 +1,4 @@
-"""The observation interface (DESIGN §6.4): what the change logic sees of a rescan.
+"""The observation interface: what the change logic sees of a rescan.
 
 Two implementations exist behind `ObsSource`: `lsg.oracle.OracleSource` (upper bound, rescan GT
 instances) and `lsg.perception.PerceptionSource` (headline, from M4). The change logic depends
@@ -66,7 +66,7 @@ class PackedMasks(Mapping[int, np.ndarray]):
 
 @dataclass
 class ObsInstance:
-    """One observed rescan object (DESIGN §6.4). Geometry in the **reference** frame.
+    """One observed rescan object. Geometry in the **reference** frame.
 
     `token` is opaque to the method: oracle `o<k>` (shuffled id), perception `c<k>`.
     """
@@ -117,7 +117,7 @@ class RefContext:
         return int(inst.nyu40) if inst is not None else None
 
     def thin_oids(self, max_extent: float) -> set[int]:
-        """objectIds of thin nodes: things whose smallest AABB extent is < `max_extent` (§3, M6)."""
+        """objectIds of thin nodes: things whose smallest AABB extent is < `max_extent` (M6)."""
         out = set()
         for n in self.graph.nodes:
             oid = object_id_of(n.id)
@@ -131,7 +131,7 @@ class RefContext:
     def faces_of(self, oids) -> tuple[np.ndarray, np.ndarray]:
         """Sub-mesh (vertices, faces) of the reference faces labelled with one of `oids`.
 
-        Reference annotations are allowed method input (DESIGN §1); this accessor lets
+        Reference annotations are allowed method input; this accessor lets
         `perception/` use them without touching per-face label arrays itself.
         """
         keep = np.isin(self.scan.face_labels, np.asarray(sorted(int(o) for o in oids), np.int64))
@@ -140,7 +140,7 @@ class RefContext:
 
 @dataclass
 class SeqInfo:
-    """What the method knows about the rescan besides its frames (DESIGN §1)."""
+    """What the method knows about the rescan besides its frames."""
 
     rescan_id: str
     root: Path

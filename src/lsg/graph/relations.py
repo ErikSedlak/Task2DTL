@@ -1,4 +1,4 @@
-"""Support relations: 3DSSG predicate mapping (DESIGN §5) and geometric rules (DESIGN §6.3).
+"""Support relations: 3DSSG predicate mapping and geometric rules.
 
 One support parent per thing: an anchor, a thing, or the pseudo-parent `"floor"`; relation
 type `on` or `in`. Thresholds come from `cfg["relations"]` (tune on dev reference scans only).
@@ -21,7 +21,7 @@ from lsg.graph.model import FLOOR_ID
 
 FLOOR = FLOOR_ID
 
-# DESIGN §5 - spec definitions, not tunables
+# Spec definitions, not tunables
 ON_PREDICATES = frozenset({"standing on", "lying on", "supported by", "hanging on"})
 IN_PREDICATES = frozenset({"standing in", "lying in", "hanging in", "inside", "build in"})
 NEXT_TO_PREDICATES = frozenset({"close by"})
@@ -49,7 +49,7 @@ class GTSupport:
     `parents[child] = {parent: "on"|"in"}` with parent = objectId or `FLOOR`. `excluded` holds
     children whose only support parents are structure other than the floor (wall, ceiling,
     window, ...): such a thing has no representable parent and is excluded from relation
-    metrics (§5). `next_to` holds undirected `close by` pairs (sorted tuples).
+    metrics. `next_to` holds undirected `close by` pairs (sorted tuples).
     """
 
     parents: dict[int, dict[Any, str]] = field(default_factory=dict)
@@ -60,7 +60,7 @@ class GTSupport:
 def gt_support(
     relations: Iterable[tuple[int, int, str]], objects: Mapping[int, Mapping[str, Any]]
 ) -> GTSupport:
-    """Map a scan's 3DSSG relationships to support parents (DESIGN §5).
+    """Map a scan's 3DSSG relationships to support parents.
 
     Args:
         relations: `(child_id, parent_id, predicate)` from `lsg.io.dssg.load_relations`.
@@ -99,7 +99,7 @@ _LEVEL_RANK = {"anchor": 0, "thing": 1}
 
 
 def pick_parent(parents: Mapping[Any, str], level_of: Callable[[Any], str]) -> tuple[Any, str]:
-    """Choose one parent when the GT gives several (deterministic, DECISIONS M1).
+    """Choose one parent when the GT gives several (deterministic).
 
     Order: anchor > thing > floor, then `on` before `in`, then the smallest id.
 
@@ -170,7 +170,7 @@ def contact_fraction(
     A slice point is supported if some candidate point lies within `contact_xy` horizontally
     and 0..`contact_dz` below it. With `floor_z`, candidate points lower than
     `floor_z + support_min_height` do not count: at floor level the floor carries the child,
-    not a neighbour's bottom edge (DECISIONS M1).
+    not a neighbour's bottom edge.
     """
     nb = cand.tree_xy.query_ball_point(slice_pts[:, :2], r=cfg["contact_xy"])
     lens = np.fromiter((len(x) for x in nb), dtype=np.int64, count=len(nb))
@@ -200,7 +200,7 @@ def infer_support(
     cfg: Mapping[str, Any],
     child_id: Hashable | None = None,
 ) -> tuple[Hashable | None, str | None, float]:
-    """Geometric support parent of one thing (DESIGN §6.3).
+    """Geometric support parent of one thing.
 
     Rules: contact (>= `contact_min_frac` of the bottom-slice points rest on a candidate, whose
     supporting points lie >= `support_min_height` above the floor) ->

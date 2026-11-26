@@ -1,4 +1,4 @@
-"""Textured mesh loading and texture rendering (DESIGN §6.1 / §6.2, M6)."""
+"""Textured mesh loading and texture rendering (M6)."""
 
 import numpy as np
 from PIL import Image

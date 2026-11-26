@@ -1,6 +1,6 @@
-"""M1 acceptance (DESIGN §9): GT statistics, displacement histogram, reference-rule sanity.
+"""M1 acceptance: GT statistics, displacement histogram, reference-rule sanity.
 
-(1) val counts reproduce §2.2 (rigid 390 / removed 96 / new 224 raw; 171 scored);
+(1) val counts reproduce the expected raw counts (rigid 390 / removed 96 / new 224 raw; 171 scored);
 (2) GT displacement histogram (val + dev) saved, τ_eval_move from the config;
 (3) geometric support rules vs. reference 3DSSG on **reference** scans: dev refs (tuning)
     and val refs (report only);
@@ -199,7 +199,7 @@ def _meta_pass(root, meta: Meta, pairs) -> dict[str, Any]:
 
 
 def displacement_summary(values: list[float | None], tau: float, buckets: list[float]) -> dict[str, Any]:
-    """Counts below τ_eval_move, per §7.1 bucket, bare entries (None), and quantiles."""
+    """Counts below τ_eval_move, per displacement bucket, bare entries (None), and quantiles."""
     d = np.array([v for v in values if v is not None], float)
     edges = [tau, *[b for b in buckets if b > tau]]
     out: dict[str, Any] = {"n": len(values), "n_no_transform": sum(v is None for v in values)}
@@ -214,7 +214,7 @@ def displacement_summary(values: list[float | None], tau: float, buckets: list[f
 def plot_displacements(by_split: dict[str, list[float]], tau: float, buckets: list[float], out: Path) -> Path:
     """Small-multiple histograms (one panel per split, shared log-x) of GT displacement.
 
-    A dashed line marks τ_eval_move, dotted lines the §7.1 bucket edges; each bucket is
+    A dashed line marks τ_eval_move, dotted lines the displacement bucket edges; each bucket is
     labelled with its count.
     """
     import matplotlib
@@ -312,7 +312,7 @@ def run_m1(cfg: dict[str, Any], run_id: str | None = None) -> dict[str, Any]:
     exp = m1["expected_counts"]
     got = {"rigid": vc.get("rigid_raw"), "removed": vc.get("removed_raw"), "new_raw": vc.get("new_raw")}
     acc["1_counts"] = {
-        "gate": f"{_name(m1['count_split'])} raw counts == DESIGN 2.2 {exp}",
+        "gate": f"{_name(m1['count_split'])} raw counts == expected {exp}",
         "values": {**got, "new_scored (things+anchors)": vc.get("new")},
         "pass": all(got[k] == v for k, v in exp.items()),
     }

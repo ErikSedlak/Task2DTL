@@ -1,10 +1,10 @@
-"""Top-down before/after figure of a reference graph and its updated graph (DESIGN §6.14).
+"""Top-down before/after figure of a reference graph and its updated graph.
 
 Panels: reference graph | updated graph | (optional) GT. Every node is its AABB footprint in the
 reference frame (xy, metres), coloured by state. The room outline comes from the reference
 mesh's structure vertices.
 
-Colours (dataviz palette; blue / orange / aqua validated all-pairs, light surface, DECISIONS M8):
+Colours (dataviz palette; blue / orange / aqua validated all-pairs, light surface):
 moved = blue, removed = orange (dashed, hatched), new = aqua (labelled: aqua is < 3:1 on the
 surface, so it never carries meaning alone), unchanged = grey fill, unknown = grey dotted outline.
 """

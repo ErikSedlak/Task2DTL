@@ -1,9 +1,9 @@
-"""Final per-node states at the end of the sequence (DESIGN §6.10): the ICP moved test.
+"""Final per-node states at the end of the sequence: the ICP moved test.
 
-- confirmed in place (§3) -> `unchanged` (no match needed);
+- confirmed in place -> `unchanged` (no match needed);
 - matched -> ICP gives T_move (motion of the object in the reference frame); the ICP-refined
   centroid displacement ‖T_move·c_R − c_R‖ > `tau_move` -> `moved`, else `unchanged`;
-- unmatched -> `removed` with >= k_free counted free votes (§3), else `unknown`.
+- unmatched -> `removed` with >= k_free counted free votes, else `unknown`.
 
 ICP direction: the observation is usually a *partial* view (oracle: vertices of the faces
 hit in the processed frames; perception: residual voxels), so the partial observed points
@@ -80,7 +80,7 @@ def icp_move(ref_pts: np.ndarray, obs_pts: np.ndarray, cfg: Mapping[str, Any]) -
         assert res is not None
         return T, float(res.fitness), float(res.inlier_rmse)
 
-    # two inits: the centroid offset (§6.10) and "no motion". A partial view biases the
+    # two inits: the centroid offset and "no motion". A partial view biases the
     # centroid offset, and ICP from it can slide along planar faces into a local minimum;
     # for an unchanged object the identity init converges to zero motion. Best fitness wins,
     # near ties (< fit_tie) go to the lower inlier RMSE.
@@ -112,7 +112,7 @@ def classify(
     cfg: Mapping[str, Any],
     old_place: bool = False,
 ) -> dict[str, Decision]:
-    """Final states of all scored reference nodes (module docstring).
+    """Final states of all scored reference nodes.
 
     Args:
         pairs: Matched (node, observation, cost) from `association.associate`.

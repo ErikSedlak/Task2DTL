@@ -67,7 +67,7 @@ class _TeeSource:
     """Eval-side wiring: one online loop feeds the method's source and a visibility-only oracle.
 
     The oracle's visible instances define the GT-matchable set of the association metric in
-    perception mode (DECISIONS M2/M4). `finish` returns only the method's observations; the
+    perception mode. `finish` returns only the method's observations; the
     oracle never reaches the method.
     """
 
@@ -131,7 +131,7 @@ def appearance_on(cfg: dict[str, Any], method: str) -> bool:
 
 
 def contrast_on(cfg: dict[str, Any], method: str) -> bool:
-    """Seen votes need contrast: FULL with `visibility.seen_needs_contrast` (M7, DECISIONS 2026-11-15)."""
+    """Seen votes need contrast: FULL with `visibility.seen_needs_contrast` (M7)."""
     return method == "FULL" and bool(cfg["visibility"].get("seen_needs_contrast", False))
 
 
@@ -194,7 +194,7 @@ def _eval_group(task: dict[str, Any]) -> list[dict[str, Any]]:
         if (cfg["perception"].get("detector") or {}).get("enabled"):  # CHANGE 3 Part E
             det_prompts = pair_prompts(cfg, root, ref, G_ref)
         labeler = make_labeler(cfg, vocab, task.get("clip_threads"))
-        label_nyu = label_to_nyu40(root)  # eval's class mapping for the §5 rule (all of objects.json)
+        label_nyu = label_to_nyu40(root)  # eval's class mapping for the matching rule (all of objects.json)
     out = []
     for s in rescans:
         t0 = time.time()
@@ -320,7 +320,7 @@ def _eval_group(task: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def _write_details(path: Path, ref: str, rescan: str, mode: str, info: Any, sc: dict[str, Any]) -> None:
-    """Per-object outcomes of one pair and mode (§7.4 audit, M8): `details/<mode>/<pair>.json`."""
+    """Per-object outcomes of one pair and mode (GT audit, M8): `details/<mode>/<pair>.json`."""
     path.parent.mkdir(parents=True, exist_ok=True)
     blob = {"ref": ref, "rescan": rescan, "mode": mode, "T_align": [[float(v) for v in r] for r in info.T_align],
             "frame_ids": [int(i) for i in info.frame_ids], "objects": sc["objects"], "new": sc["new"],
@@ -349,14 +349,14 @@ def run_eval(
         pairs: (reference, rescan) pairs.
         obs_modes: Subset of ("oracle", "perception").
         method: Key of `lsg.change.baselines.METHODS`.
-        frac, seed: Observation fraction and chunk seed (§7.3); the seed also shifts the
+        frac, seed: Observation fraction and chunk seed; the seed also shifts the
             oracle token permutation.
         workers: Processes (default `cfg["eval"]["workers"]`; 1 = in-process).
         run_id: Output folder name (default timestamped).
         split_name: Recorded in the metrics.
         snapshots: Write tentative snapshots to `outputs/<run_id>/snapshots/<mode>/<ref>_<rescan>/`.
         details: Write per-object outcomes to `outputs/<run_id>/details/<mode>/<ref>_<rescan>.json`
-            (§7.4 audit, M8). A run argument, not config: the config hash and `metrics` do not change.
+            (GT audit, M8). A run argument, not config: the config hash and `metrics` do not change.
 
     Returns:
         The `metrics` block plus `"metrics_path"` and `"wall_time_s"`.
@@ -472,7 +472,7 @@ def format_summary(res: dict[str, Any]) -> str:
         if mode == "perception":
             for name, keys in (("candidates per pair", ["cand_per_pair"]),
                                ("cand. recall new / moved-to", ["cand_recall_new", "cand_recall_moved"]),
-                               ("  same, labelled (§5 rule)", ["cand_recall_new_labelled", "cand_recall_moved_labelled"]),
+                               ("  same, labelled (matching rule)", ["cand_recall_new_labelled", "cand_recall_moved_labelled"]),
                                ("cand. explained by any GT", ["cand_explained"])):  # fmt: skip
                 L.append(f"    {name:28s} " + " | ".join(f(M[k], pct=k != "cand_per_pair") for k in keys))
         if any(M[f"rel_{p}_a_gt_all_parent_acc"]["n"] for p in REL_POLICIES.values()):

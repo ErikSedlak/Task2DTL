@@ -1,4 +1,4 @@
-"""No-leak test (CLAUDE.md hard rules 1-2, DESIGN §9 M2).
+"""No-leak test (CLAUDE.md hard rules 1-2).
 
 Method-side code must not import `lsg.oracle` / `lsg.eval` (absolute or relative imports), and
 `perception/` must not read rescan annotations. The method side is every package except

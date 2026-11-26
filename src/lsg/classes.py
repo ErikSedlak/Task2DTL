@@ -1,4 +1,4 @@
-"""Node classes by 3DSSG / PLY nyu40 id (DESIGN §3). Spec definitions, not tunables."""
+"""Node classes by 3DSSG / PLY nyu40 id. Spec definitions, not tunables."""
 
 from __future__ import annotations
 

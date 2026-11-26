@@ -1,12 +1,12 @@
-"""Relation scoring (DESIGN §7.2): support parent and type of things vs. the rescan's 3DSSG.
+"""Relation scoring: support parent and type of things vs. the rescan's 3DSSG.
 
-GT = `gt_support` of the **rescan** relations (§5 predicate mapping; things whose only parents
+GT = `gt_support` of the **rescan** relations (predicate mapping; things whose only parents
 are non-floor structure are excluded; several GT parents -> any one counts).
 
 Scored things (Erik, M5):
 - **GT-defined universe** (headline): reference things present in the rescan (GT status
   unchanged / moved, or `dont_care` small move) with a GT rescan parent, plus GT-new things
-  matched to a predicted new node (mode's §5 rule). The node's current support edge is scored
+  matched to a predicted new node (mode's matching rule). The node's current support edge is scored
   whatever its predicted state;
 - **associated only** (`as`): the subset the method associated (predicted unchanged / moved;
   matched new nodes always count).
@@ -72,7 +72,7 @@ def score_relations(
     obs_truth: Mapping[str, tuple[int, str]] | None,
     prefix: str,
 ) -> dict[str, int]:
-    """Relation counts of one pair under one relation policy (module docstring).
+    """Relation counts of one pair under one relation policy.
 
     Args:
         G: Predicted graph (after `update_graph` with the policy).

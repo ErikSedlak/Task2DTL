@@ -1,7 +1,7 @@
-"""Ablation registry and runner (DESIGN §8, M7): `lsg ablate`, used by `lsg m7`.
+"""Ablation registry and runner (M7): `lsg ablate`, used by `lsg m7`.
 
 An ablation is one `run_eval` call: a method, config overrides (dotted keys, e.g.
-`{"appearance.enabled": False}`), and an observed fraction + chunk seed (§7.3). Every run
+`{"appearance.enabled": False}`), and an observed fraction + chunk seed. Every run
 writes its own `outputs/<run_id>/<group>/<name>/metrics.json` (hard rule 5). Nothing here tunes
 anything: each row on val is run once and reported.
 
@@ -28,8 +28,8 @@ from lsg.runinfo import git_sha
 
 MODES = ("perception", "oracle")
 
-# The M7 method (= outputs/m7_final, REPORT tables): CHANGE 1 (relaxed candidates) and CHANGE 2 (no class
-# prior, candidate log-odds) off. Ablation row FULL-m7 and the §7.4 audit rerun use it.
+# The M7 method (= outputs/m7_final): CHANGE 1 (relaxed candidates) and CHANGE 2 (no class
+# prior, candidate log-odds) off. Ablation row FULL-m7 and the GT audit rerun use it.
 M7_OVERRIDES: dict[str, Any] = {
     "perception.relaxed.enabled": False,
     "confidence.candidates.enabled": False,
@@ -48,7 +48,7 @@ M7_OVERRIDES: dict[str, Any] = {
 
 # CHANGE 1 + 2 as fixed by Erik on 2026-11-20 with the CHANGE 3 Part 0 tuning-set changes (flat start value 0.9 /
 # p_del 0.2, dev_tune rooms out of the CLIP vocabulary) = the config of `outputs/chg3_dev_baseline/FULL`. Every
-# CHANGE 3 part after Part 0 is off. Ablation row FULL-chg2 (docs/CHANGE_online_graph.md §7.4).
+# CHANGE 3 part after Part 0 is off. Ablation row FULL-chg2.
 CHG2_OVERRIDES: dict[str, Any] = {
     "association.old_place.enabled": False,  # Part A
     "confidence.L_hit": 2.5, "confidence.L_miss": 2.5, "confidence.p_del": 0.2,  # Part C
@@ -90,7 +90,7 @@ def apply_overrides(cfg: Mapping[str, Any], overrides: Mapping[str, Any]) -> dic
 
 
 def registry(cfg: Mapping[str, Any]) -> dict[str, Ablation]:
-    """All M7 rows (DESIGN §8 + the M6 / M7 switches), in report order.
+    """All M7 rows (the baselines + the M6 / M7 switches), in report order.
 
     Sweep values (`m7.tau_free_sweep`, `m7.fracs`, `m7.frac_seeds`) come from the config.
     """
@@ -204,7 +204,7 @@ def run_ablation(
 ) -> dict[str, Any]:
     """One ablation row: `run_eval` with the overrides (or the reused result).
 
-    `details=True` also writes per-object outcomes (`details/`, the §7.4 audit's input); a stored
+    `details=True` also writes per-object outcomes (`details/`, the GT audit's input); a stored
     row is reused then only if its `details/` folder exists.
 
     Returns:

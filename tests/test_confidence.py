@@ -1,4 +1,4 @@
-"""Log-odds confidence with class priors and FULL's removal rule (DESIGN §6.11, M6)."""
+"""Log-odds confidence with class priors and FULL's removal rule (M6)."""
 
 import copy
 
@@ -79,7 +79,7 @@ def test_prior_counts_from_metadata():
 
 
 def test_worked_examples_from_the_spec_decision(cfg):
-    """DECISIONS M6: chair 2 free -> removed; bed 2 free kept, 3 removed; mixed 7 free / 12 seen kept."""
+    """M6 values: chair 2 free -> removed; bed 2 free kept, 3 removed; mixed 7 free / 12 seen kept."""
     chair = logit(0.968)
     bed = logit(0.996)
     assert probability(node_logodds(chair, NodeVotes(free=2), cfg)) == pytest.approx(0.166, abs=0.01)

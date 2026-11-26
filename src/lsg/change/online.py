@@ -1,19 +1,19 @@
-"""The online frame loop (DESIGN §6.7): render -> votes -> decorrelation -> observe -> snapshot.
+"""The online frame loop: render -> votes -> decorrelation -> observe -> snapshot.
 
 Rescan frames are processed in time order. Per frame the reference mesh is rendered at the
 aligned rescan pose (`T_align @ pose`), frame votes are cast for every anchor / thing node,
 counted through the `Decorrelator`, and the frame plus the reference render go to the
 `ObsSource`. States during the walk are **tentative** (snapshots only); `moved` / `removed` are
 decided once, after the last frame, by the method (`change.baselines`) from the final votes and
-observations (deferred commitment, §3).
+observations (deferred commitment).
 
 With an `appearance` runner (FULL, M6) every frame that shows a thin node (or every frame, if
 the observation source wants appearance for thin-object candidates) also gets an appearance
 map: thin nodes' depth seen / noinfo votes are replaced by the appearance verdict
 (`visibility.thin_votes`), and the map rides along in `RefRender` to the source. After
-`finish()`, `obs_views` counts the decorrelated viewpoints of every observation (§6.11).
+`finish()`, `obs_views` counts the decorrelated viewpoints of every observation.
 
-With `contrast` (FULL, M7, DECISIONS 2026-11-15) the reference ray of every pixel on a voting
+With `contrast` (FULL, M7) the reference ray of every pixel on a voting
 node is continued to the next surface with another label (`Renderer.depth_behind`), and only
 contrastive pixels can support a `seen` vote (`visibility.frame_votes`).
 
@@ -93,7 +93,7 @@ def tentative_graph(
     obs_mode: str | None = None,
     priors: Any = None,
 ) -> Graph:
-    """Snapshot graph (§4): G_ref with tentative vote-only states, `meta.tentative = True`.
+    """Snapshot graph: G_ref with tentative vote-only states, `meta.tentative = True`.
 
     With `priors` (FULL, M6) nodes also carry their tentative confidence (unmatched formula).
     """
@@ -112,7 +112,7 @@ def observation_views(
     obs: list[ObsInstance], poses: Mapping[int, np.ndarray], cfg: Mapping[str, Any]
 ) -> dict[str, int]:
     """Decorrelated viewpoints per observation: frames with a mask of >= `min_mask_px` pixels,
-    counted through a fresh `Decorrelator` in time order (§6.11 "seen at the new location")."""
+    counted through a fresh `Decorrelator` in time order ("seen at the new location")."""
     min_px = int(cfg["visibility"]["min_mask_px"])
     out: dict[str, int] = {}
     for o in obs:
@@ -142,7 +142,7 @@ def run_online(
     contrast: bool = False,
     on_snapshot: Any = None,
 ) -> OnlineResult:
-    """Process the rescan's frames in time order (DESIGN §6.7).
+    """Process the rescan's frames in time order.
 
     Args:
         ref_ctx: Reference scan (mesh + objectId face labels) and G_ref.

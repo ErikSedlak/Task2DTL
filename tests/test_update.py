@@ -1,4 +1,4 @@
-"""Graph update (DESIGN §6.12, M5): support relations under the update / stale / geometric policies."""
+"""Graph update (M5): support relations under the update / stale / geometric policies."""
 
 import copy
 

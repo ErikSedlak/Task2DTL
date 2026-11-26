@@ -8,7 +8,7 @@ import numpy as np
 
 
 def mat4_from_colmajor(t: Sequence[float]) -> np.ndarray:
-    """Turn a 3RScan.json transform (16 floats, column-major) into a 4x4 matrix (DESIGN §2.1).
+    """Turn a 3RScan.json transform (16 floats, column-major) into a 4x4 matrix.
 
     Args:
         t: The 16 floats as stored in the JSON.
@@ -51,8 +51,7 @@ def apply(T: np.ndarray, pts: np.ndarray) -> np.ndarray:
 def pixel_grid(W: int, H: int) -> tuple[np.ndarray, np.ndarray]:
     """Integer pixel coordinates (u = column, v = row), each (H, W).
 
-    Convention used everywhere: pixel (u, v) <-> x = (u - cx) * z / fx, no +0.5 offset
-    (logged in DECISIONS 2026-11-05/M0).
+    Convention used everywhere: pixel (u, v) <-> x = (u - cx) * z / fx, no +0.5 offset.
     """
     v, u = np.mgrid[0:H, 0:W]
     return u.astype(np.float64), v.astype(np.float64)

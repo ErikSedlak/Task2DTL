@@ -1,4 +1,4 @@
-"""Online loop on a synthetic room (DESIGN §9 M3 acceptance): render -> votes -> decorrelation
+"""Online loop on a synthetic room: render -> votes -> decorrelation
 -> deferred B1 decision.
 
 Reference room: floor (z = 0), back wall (y = 4), front wall (y = -4), box r10 and basket r11

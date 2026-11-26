@@ -93,7 +93,7 @@ def _cmd_m7(args: argparse.Namespace) -> int:
 
 
 def _cmd_ablate(args: argparse.Namespace) -> int:
-    """`lsg ablate --names a,b --split S`: run ablation rows (DESIGN §8), one metrics.json each."""
+    """`lsg ablate --names a,b --split S`: run ablation rows, one metrics.json each."""
     from lsg.eval.ablations import run_ablation, select
     from lsg.eval.harness import format_summary, split_path
     from lsg.io.scan3r import read_pairs
@@ -119,7 +119,7 @@ def _cmd_ablate(args: argparse.Namespace) -> int:
 
 
 def _cmd_splits_textures(args: argparse.Namespace) -> int:
-    """`lsg splits textures`: write the reference scans that need textures (DESIGN §2.3)."""
+    """`lsg splits textures`: write the reference scans that need textures."""
     from lsg.config import REPO_ROOT
     from lsg.io.splits import write_texture_list
 
@@ -144,7 +144,7 @@ def _cmd_splits_subset(args: argparse.Namespace) -> int:
     out = REPO_ROOT / (args.out or sc["file"])
     pairs = subset_pairs(read_pairs(src), n, seed)
     write_pairs(pairs, out, f"{len(pairs)} pairs: {n} references of {src.name}, one rescan each, seed {seed}\n"
-                            "written by `lsg splits subset`; milestone val checks only (DECISIONS M6)")  # fmt: skip
+                            "written by `lsg splits subset`; milestone val checks only")  # fmt: skip
     print(f"wrote {len(pairs)} pairs to {out}")
     return 0
 
@@ -189,8 +189,8 @@ def _cmd_splits_devtune(args: argparse.Namespace) -> int:
                             "written by `lsg splits devtune`; tuning only (CLAUDE.md hard rule 4, CHANGE 3)")  # fmt: skip
     dl = REPO_ROOT / dc["download_list"]
     dl.write_text("".join(f"{i}\n" for i in ids), encoding="utf-8", newline="\n")
-    print(f"wrote {out} and {dl}\nnext: `uv run lsg splits textures`, then download (DESIGN §2.3 commands with {dl.name} "
-          f"and {cfg['splits']['texture_list']})")  # fmt: skip
+    print(f"wrote {out} and {dl}\nnext: `uv run lsg splits textures`, then download the scans in {dl.name} "
+          f"and {cfg['splits']['texture_list']}")  # fmt: skip
     return 0
 
 
@@ -458,7 +458,7 @@ def _cmd_newfunnel(args: argparse.Namespace) -> int:
 
 
 def _cmd_audit_sample(args: argparse.Namespace) -> int:
-    """`lsg audit sample`: FULL on val with per-object details, FP pools, seeded sample, panels, CSVs (§7.4)."""
+    """`lsg audit sample`: FULL on val with per-object details, FP pools, seeded sample, panels, CSVs."""
     from lsg.eval.audit import run_audit_sample
 
     from_run = None if str(args.from_run).lower() == "none" else args.from_run
@@ -579,7 +579,7 @@ def main(argv: list[str] | None = None) -> int:
     m7.add_argument("--workers", type=int, default=None, help="processes per val run (default: config)")
     m7.set_defaults(func=_cmd_m7)
 
-    ab = sub.add_parser("ablate", help="run ablation rows (DESIGN §8) on a split")
+    ab = sub.add_parser("ablate", help="run ablation rows on a split")
     ab.add_argument("--names", default="FULL", help="comma list, 'all', or 'group:<method|component|variant|tau_free|frac>'")
     ab.add_argument("--split", default="eval_val", help="split name or file")
     ab.add_argument("--obs", default="perception,oracle")
@@ -698,7 +698,7 @@ def main(argv: list[str] | None = None) -> int:
     gr.add_argument("--config", default=None)
     gr.set_defaults(func=_cmd_graph)
 
-    au = sub.add_parser("audit", help="§7.4 GT audit: sample false positives, summarise verdicts (M8)")
+    au = sub.add_parser("audit", help="GT audit: sample false positives, summarise verdicts (M8)")
     aus = au.add_subparsers(dest="audit_cmd", required=True)
     a1 = aus.add_parser("sample", help="FULL on val with details, FP pools, sample, panels, CSVs")
     a1.add_argument("--run-id", default="chg3_audit")
@@ -739,13 +739,13 @@ def main(argv: list[str] | None = None) -> int:
             v.add_argument("--spawn", action="store_true", help="open the Rerun viewer")
             v.set_defaults(func=_cmd_viz_rerun)
 
-    for name, helptext in (("eval", "run a method on a split and score it (DESIGN §7)"),
+    for name, helptext in (("eval", "run a method on a split and score it"),
                            ("run", "run a method on one (reference, rescan) pair and score it")):
         sp_ = sub.add_parser(name, help=helptext)
         if name == "eval":
             sp_.add_argument("--split", required=True, help="split name (eval_val, dev_train) or file")
             sp_.add_argument("--workers", type=int, default=None, help="processes (default: config)")
-            sp_.add_argument("--snapshots", action="store_true", help="write tentative snapshots (DESIGN §4)")
+            sp_.add_argument("--snapshots", action="store_true", help="write tentative snapshots")
             sp_.set_defaults(func=_cmd_eval)
         else:
             sp_.add_argument("--pair", nargs=2, required=True, metavar=("REF", "RESCAN"))

@@ -1,4 +1,4 @@
-"""Frame selection (§7.3 contiguous chunks) and the refined-alignment cache."""
+"""Frame selection (contiguous chunks) and the refined-alignment cache."""
 
 import copy
 from types import SimpleNamespace

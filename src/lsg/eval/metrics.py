@@ -1,10 +1,10 @@
-"""Change-detection scoring (DESIGN §5 matching, §7.1 metrics) for both observation modes.
+"""Change-detection scoring for both observation modes.
 
 Per pair, `score_pair` turns a predicted graph G_upd and the pair's `GTLabels` into **counts**
 (TP / FP / FN, numerators / denominators) plus a list of localisation errors. `aggregate`
 micro-averages the counts over a split and adds 95% bootstrap CIs over pairs.
 
-Scoring definitions (Erik, DECISIONS 2026-11-06 M2):
+Scoring definitions (Erik):
 - reference objects are scored if they are things/anchors with GT status moved / removed /
   unchanged; `dont_care` and `absent_unlisted` are excluded from moved P/R, removed P/R and
   unchanged accuracy;
@@ -47,7 +47,7 @@ def aabb_iou(amin, amax, bmin, bmax) -> float:
 
 
 def bucket_names(edges: Sequence[float]) -> list[str]:
-    """§7.1 displacement buckets from the config edges, e.g. `[0.1,0.3)`, `[0.3,1)`, `>=1`."""
+    """Displacement buckets from the config edges, e.g. `[0.1,0.3)`, `[0.3,1)`, `>=1`."""
     e = [float(x) for x in edges]
     fmt = lambda x: f"{x:g}"  # noqa: E731
     return [f"[{fmt(a)},{fmt(b)})" for a, b in zip(e, e[1:])] + [f">={fmt(e[-1])}"]
@@ -62,7 +62,7 @@ def bucket_of(d: float | None, edges: Sequence[float]) -> int | None:
 
 
 # --------------------------------------------------------------------------------------------
-# new-node matching (§5)
+# new-node matching
 # --------------------------------------------------------------------------------------------
 
 
@@ -88,7 +88,7 @@ def _pred_nyu(n: Node, label_nyu: Mapping[str, int] | None) -> int | None:
 def perception_compatible(
     n: Node, g: GTBox, cfg: Mapping[str, Any], label_nyu=None, use_label: bool = True
 ) -> tuple[bool, float, float]:
-    """§5 perception rule for one (prediction, GT instance) pair.
+    """perception matching rule for one (prediction, GT instance) pair.
 
     Compatible if (same label or same nyu40) and (centroid distance <= `match_new_dist` or
     AABB IoU >= `match_new_iou`). `use_label=False` drops the class condition (class-agnostic
@@ -161,7 +161,7 @@ def match_new(
     label_nyu: Mapping[str, int] | None = None,
     use_label: bool = True,
 ) -> dict[str, Any]:
-    """Match predicted new nodes to GT new objects with the mode's rule (§5).
+    """Match predicted new nodes to GT new objects with the mode's rule.
 
     Args:
         pred_new: Predicted nodes with `state == "new"`.
@@ -201,7 +201,7 @@ def match_new(
 
 
 def obs_node(o: Any) -> Node:
-    """An `ObsInstance` as a pseudo graph node (for the §5 matching rule)."""
+    """An `ObsInstance` as a pseudo graph node (for the matching rule)."""
     return Node(id=o.token, level="thing", label=o.label, nyu40=o.nyu40,
                 bbox_3d=bbox_dict(o.aabb_min, o.aabb_max), centroid=[float(v) for v in o.centroid])  # fmt: skip
 
@@ -220,7 +220,7 @@ def gt_rescan_boxes(gt: GTLabels) -> list[GTBox]:
 def perception_obs_truth(
     obs: Sequence[Any], gt: GTLabels, cfg: Mapping[str, Any], label_nyu: Mapping[str, int] | None = None
 ) -> dict[str, tuple[int, str]]:
-    """Perception `obs_truth`: candidate token -> (GT rescan objectId, GT label) by the §5 rule.
+    """Perception `obs_truth`: candidate token -> (GT rescan objectId, GT label) by the matching rule.
 
     One-to-one, greedy by IoU, against GT new objects and the rescan instances of reference
     objects. Feeds the association metric (a reference node's `obs_token` is correct if its
@@ -245,7 +245,7 @@ def candidate_counts(
     Targets = GT new objects and the rescan instances of GT-moved objects ("moved-to").
     - `*_hit`: targets matched by a candidate, class-agnostic (centroid <= `match_new_dist` or
       IoU >= `match_new_iou`), one-to-one greedy over all targets jointly;
-    - `*_lab`: the same with the §5 label condition;
+    - `*_lab`: the same with the label condition;
     - `diag_cand_explained`: candidates within the geometric gate of *any* GT rescan instance
       (many-to-one); the rest are unexplained (people, mesh holes, structure, unannotated);
     - `diag_cand_multi` (CHANGE 3 Part N): GT new objects whose centroid lies inside a candidate
@@ -315,7 +315,7 @@ def count_keys(cfg: Mapping[str, Any]) -> list[str]:
              *THIN_CONF_KEYS]  # fmt: skip
     keys += [f"moved_{x}_d{b}" for b in range(nb) for x in ("n", "tp")]
     keys += [f"{k}_{x}_{s}" for k in ("moved", "new") for s in SIZES for x in ("n", "tp")]
-    keys += relation_count_keys()  # §7.2 (M5); 0 when relations were not scored
+    keys += relation_count_keys()  # relation counts (M5); 0 when relations were not scored
     return keys
 
 
@@ -340,7 +340,7 @@ def score_pair(
         mode: "oracle" or "perception".
         cfg: Full config.
         obs_truth: `{token: (rescan objectId, label)}` for tokens that correspond to a GT
-            rescan instance. Oracle: the unshuffled token map; perception (M4): from the §5 rule.
+            rescan instance. Oracle: the unshuffled token map; perception (M4): from the matching rule.
         visible: Rescan objectIds visible in the processed frames (GT-matchable for the
             association metric). Default: the ids in `obs_truth`.
         label_nyu: Perception: label -> nyu40 fallback for the matching rule.
@@ -351,7 +351,7 @@ def score_pair(
         candidates: Perception `ObsInstance`s; adds the `candidate_counts` diagnostics.
         details: Also return per-object rows (`"objects"`: GT status, predicted state, confidence,
             counted votes, associated token's GT instance; `"new"`: per predicted new node its
-            outcome). For the §7.4 audit (M8); the counts do not depend on it.
+            outcome). For the GT audit (M8); the counts do not depend on it.
 
     Returns:
         `{"counts": {name: int}, "loc_errors": [m], "new_match": match_new(...)}` (+ `objects`, `new`).
@@ -367,7 +367,7 @@ def score_pair(
     c["diag_votes"] = int(votes is not None)
 
     def free_ev(oid: int) -> bool:
-        """§3 free evidence of a reference object (counted free + free-like votes; M6)."""
+        """free evidence of a reference object (counted free + free-like votes; M6)."""
         return has_free_evidence(vts.get(ref_node_id(oid)), cfg)
 
     def free_like_ev(oid: int) -> bool:
@@ -427,7 +427,7 @@ def score_pair(
                 c[f"moved_n_d{b}"] += 1
                 c[f"moved_tp_d{b}"] += hit
             if hit and o.centroid_new is not None and n.centroid is not None:
-                # rounded to 1 µm: fresh multi-threaded ICP differs at ~1e-15 m between runs (§7.5)
+                # rounded to 1 µm: fresh multi-threaded ICP differs at ~1e-15 m between runs
                 loc.append(round(float(np.linalg.norm(np.asarray(n.centroid, float) - o.centroid_new)), 6))
         elif st == "moved":
             c["moved_fp"] += 1

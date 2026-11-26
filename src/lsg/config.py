@@ -76,7 +76,7 @@ def setup_hub_offline(cfg: dict[str, Any]) -> str:
 
 def milestone_val_split(cfg: dict[str, Any], full: bool = False) -> Path:
     """Val pair list for milestone checks: the seeded subset (`splits.milestone_val.file`), or the
-    full `eval_val` with `full=True` (final tables, M7). DECISIONS M6 (Erik)."""
+    full `eval_val` with `full=True` (final tables, M7); Erik's choice at M6."""
     mv = cfg["splits"]["milestone_val"]
     return REPO_ROOT / (mv["source"] if full else mv["file"])
 
