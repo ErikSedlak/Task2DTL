@@ -658,6 +658,7 @@ Format: **date — decision.** Why. *Alternatives considered.* (status: fixed / 
 
 ## 2026-11-26 — Short report restructured along the assignment (Claude Code; Erik asked)
 - No abstract, a one-paragraph introduction; Sections 3 and 4 are named after the assignment's points (detection, graph update, update policy; P / R per change type, relation accuracy, the two ablations, the harder case, visualization). Choices the assignment leaves open are marked "(our choice)" in Section 2.2 and listed in a decisions table (Section 3.5). The appearance ablation got its own table with the thin-object numbers of `chg3_final` (perception: thin removed 1 of 4 vs 0 of 4, thin unchanged kept 91.9 vs 95.4%). Still 4 pages. (fixed)
+- Second pass (Erik): no related-work section (3RScan, 3DSSG and the models are cited where they are used; Adam et al. in the audit), no GPU model in the preprocessing, first person instead of "(our choice)" marks, and plain section names and row labels instead of "ablation" ("Which parts of the method matter", "without the old-place rule", ...). (fixed)
 
 ## 2026-11-26 — Unused code removed (Claude Code; Erik chose the scope)
 - **Scope (Erik):** dead code and the rejected variants; the tuning sweeps, milestone checks and every ablation row stay, so `lsg m7` still reproduces all reported numbers. (fixed)
