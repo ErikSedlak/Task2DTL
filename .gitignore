@@ -6,3 +6,11 @@ __MACOSX/
 .venv/
 __pycache__/
 *.rrd
+
+# working notes, kept locally only
+docs/AI_USAGE.md
+docs/CHANGE_*.md
+docs/DECISIONS.md
+docs/DESIGN.md
+docs/REPORT.md
+docs/STATUS.md
