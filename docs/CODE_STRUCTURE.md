@@ -331,7 +331,7 @@ The rule: no imports from `oracle/` / `eval/`, and no rescan annotations. Inputs
 - `lsg audit sample` reruns FULL on val with a `details` switch: for every object it writes what GT says, what the method predicted, its votes and confidence (`details/<mode>/<pair>.json`). The rerun must give exactly the M7 numbers (checked).
 - From these it collects the false positives per mode (moved / removed, including objects the annotation simply lacks, and new nodes that match nothing), draws 10 of each at random (seed 0), and adds every truly removed object that B2 deletes but FULL keeps.
 - For each it draws one panel: the reference photo of the object, the rescan photo of the same place, the rescan photo of the predicted new place, and a top-down sketch. `audit.csv` lists them with an empty `verdict` column.
-- After a person fills in `gt_missing` / `method_error` / `unclear`, `lsg audit summarize` gives the share of real GT gaps with 95% confidence intervals.
+- Each panel asks one plain question ("did this chair really move?"); after a person answers `yes` / `no` / `unsure` in the CSV, `verdict_of` maps the answer to `gt_missing` / `method_error` / `unclear` (inverted for the veto set) and `lsg audit summarize` gives the share of real GT gaps with 95% confidence intervals.
 
 ### `eval/figures.py` and `viz/` — pictures (`uv run lsg viz`, M8)
 - `viz/topdown.py`: the room seen from above, every object as its box footprint: the reference graph, the updated graph (moved = blue with an arrow from the old place, removed = orange hatched, new = aqua with its label, unchanged = grey, unknown = dotted) and optionally the ground truth (computed in `eval/figures.py`, because only `eval/` may read it).

@@ -78,11 +78,12 @@ def test_csv_roundtrip_and_summary(tmp_path):
              "pred_state": "removed", "confidence": 0.1} for k in range(4)]  # fmt: skip
     p = write_csv(rows, tmp_path / "a.csv")
     back = read_csv(p)
-    assert [r["verdict"] for r in back] == [""] * 4
+    assert [r["answer"] for r in back] == [""] * 4
+    assert back[0]["question"] == "Is this x really gone from the room (not just out of view)?"
     with pytest.raises(ValueError):
         summarize_rows(back)
-    for r, v in zip(back, ("gt_missing", "gt_missing", "unclear", "method_error")):
-        r["verdict"] = v
+    for r, v in zip(back, ("yes", "Y", "unsure", "no")):  # yes = the method's claim holds = the GT is incomplete
+        r["answer"] = v
     s = summarize_rows(back)
     assert s["oracle/removed"]["n"] == 4 and s["oracle/removed"]["gt_missing_share"] == 0.5
     assert s["oracle/removed/absent_unlisted"]["gt_missing"] == 2
@@ -127,3 +128,16 @@ def test_audit_runs_the_default_method_unless_m7(monkeypatch):
 
     with pytest.raises(FileNotFoundError):  # sampling from a run needs its details/
         run_audit_sample(cfg, "x", from_run=Path(__file__).parent)
+
+
+def test_veto_answers_are_inverted_and_legacy_verdicts_still_work():
+    from lsg.eval.audit import verdict_of
+
+    veto = {"id": "v", "category": "veto"}
+    assert verdict_of({**veto, "answer": "yes"}) == "method_error"  # really gone: the GT is right, the veto was too careful
+    assert verdict_of({**veto, "answer": "no"}) == "gt_missing"  # still there: the GT lists a removal that did not happen
+    assert verdict_of({"id": "m", "category": "moved", "answer": "no"}) == "method_error"
+    assert verdict_of({"id": "m", "category": "new", "answer": "unsure"}) == "unclear"
+    assert verdict_of({"id": "m", "category": "moved", "verdict": "gt_missing"}) == "gt_missing"
+    with pytest.raises(ValueError):
+        verdict_of({"id": "m", "category": "moved", "answer": "maybe"})

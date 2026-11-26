@@ -12,8 +12,10 @@ Flow (`lsg audit sample`, then `lsg audit summarize`):
    Each row keeps its GT status, so "scored FP" and "absent-unlisted" can be reported apart.
    **Veto set** (STATUS M7): GT-removed objects that B2 deletes and FULL keeps `unknown`.
 3. Seeded sample (`n_per_cat` per mode and category), one PNG panel per row, `audit.csv` and
-   `audit_veto.csv` with empty `verdict` / `note` columns. Erik labels them:
-   `gt_missing` (a real change the GT does not list, or a GT error), `method_error`, `unclear`.
+   `audit_veto.csv` with a `question` column and empty `answer` / `note` columns. Each panel asks one plain
+   question about the object ("did this chair really move?"); Erik answers `yes` / `no` / `unsure`. The
+   answer is turned into a verdict by `verdict_of` (the question is about the world, not about who is wrong):
+   `gt_missing` (the annotation is incomplete or wrong, the method is right), `method_error`, `unclear`.
 4. `summarize`: share of `gt_missing` per mode × category with a Wilson 95% CI → `metrics.json`
    (hard rule 5) + `audit.md`.
 
@@ -41,8 +43,68 @@ CATS = ("moved", "removed", "new")
 VERDICTS = ("gt_missing", "method_error", "unclear")
 MODES = ("oracle", "perception")
 CSV_COLS = ("id", "mode", "category", "ref", "rescan", "node", "label", "gt_status", "gt_reason", "pred_state",
-            "confidence", "seen", "free", "free_like", "panel", "verdict", "note")  # fmt: skip
+            "confidence", "seen", "free", "free_like", "panel", "question", "answer", "note")  # fmt: skip
+ANSWERS = {"yes": "yes", "y": "yes", "no": "no", "n": "no", "unsure": "unsure", "u": "unsure", "?": "unsure"}
 POOL_GT = {"moved": ("unchanged", "removed", "absent_unlisted"), "removed": ("unchanged", "moved", "absent_unlisted")}
+
+# One question per category, about the world (not about who is wrong). `yes` means the method's claim holds:
+# moved / removed / new: yes -> the GT is incomplete or wrong (`gt_missing`), no -> the method erred.
+# veto: the method kept an object the GT lists as removed; yes (it is gone) -> the GT is right, the method was
+# too careful (`method_error`); no (still there) -> the GT is wrong (`gt_missing`).
+QUESTIONS = {
+    "moved": "Did this {label} really move away from its old place?",
+    "removed": "Is this {label} really gone from the room (not just out of view)?",
+    "new": "Is there a real object inside the blue box that was not there in the first visit? (ignore its name)",
+    "veto": "Is this {label} really gone from its old place?",
+}
+HINTS = {
+    "moved": "Photo 2: if the object is still inside the grey box, it did not move (answer no). "
+             "Photo 3: if it is inside the blue box, it moved (yes).",
+    "removed": "Photo 2: if the object is still inside the orange box, it is not gone (answer no). "
+               "Compare with photo 1, which shows it in the first visit.",
+    "new": "Photo 3: is a real object inside the blue box? Photo 1 shows the same place in the first visit: "
+           "if the same object was already there, it is not new (answer no).",
+    "veto": "Photo 2: if the object is still inside the orange box, answer no. If the place is empty or "
+            "holds something else, answer yes.",
+}
+GT_SAYS = {
+    "unchanged": "it did not move",
+    "moved": "it moved",
+    "removed": "it was removed",
+    "absent_unlisted": "nothing: the object is missing from the rescan annotation, but not listed as removed",
+    "new_unmatched": "no new object matches this one",
+    "dont_care": "it moved by less than 10 cm (not scored)",
+}
+PRED_SAYS = {"moved": "it moved", "removed": "it was removed", "unknown": "unknown (kept, not deleted)",
+             "new": "it is a new object", "unchanged": "it did not move"}
+
+
+def question_for(row: Mapping[str, Any]) -> str:
+    """The plain question of a panel / CSV row."""
+    return QUESTIONS[row["category"]].format(label=row.get("label", "object"))
+
+
+def verdict_of(row: Mapping[str, str]) -> str:
+    """`gt_missing` / `method_error` / `unclear` from a labelled row.
+
+    Reads `answer` (`yes` / `no` / `unsure`, also `y` / `n` / `u`); a row with a legacy `verdict` column
+    (the verdict words themselves) still works.
+
+    Raises:
+        ValueError: if neither is a valid entry.
+    """
+    a = ANSWERS.get((row.get("answer") or "").strip().lower())
+    if a is None:
+        v = (row.get("verdict") or "").strip()
+        if v in VERDICTS:
+            return v
+        raise ValueError(f"row {row.get('id')}: answer must be yes / no / unsure, got {row.get('answer')!r}")
+    if a == "unsure":
+        return "unclear"
+    claim_holds = a == "yes"
+    if row["category"] == "veto":
+        return "method_error" if claim_holds else "gt_missing"
+    return "gt_missing" if claim_holds else "method_error"
 
 
 # --------------------------------------------------------------------------------------------
@@ -243,7 +305,10 @@ def render_panel(row: Mapping[str, Any], root: Path, R: Scan, renderer: Renderer
     pred_box = (pred["min"], pred["max"]) if pred else None
     col_ref = STATE_COLOR["removed" if cat in ("removed", "veto") else "unknown"]
     col_pred = STATE_COLOR["moved" if cat == "moved" else "new"]
-    fig, axes = plt.subplots(1, 4, figsize=(16, 7.2), facecolor=SURFACE, gridspec_kw={"width_ratios": [1, 1, 1, 1.5]})
+    old_box = "orange box" if cat in ("removed", "veto") else "grey box"
+    fig, axes = plt.subplots(1, 4, figsize=(16, 8.0), facecolor=SURFACE, gridspec_kw={"width_ratios": [1, 1, 1, 1.5]})
+    fig.text(0.01, 0.985, "QUESTION: " + question_for(row), fontsize=15, fontweight="bold", color="#0b0b0b", va="top")
+    fig.text(0.01, 0.945, HINTS[cat] + "   Answer yes / no / unsure in the CSV.", fontsize=10.5, color="#0b0b0b", va="top")
     I4 = np.eye(4)
     with open_sequence(root, row["ref"]) as rseq:
         ids = rseq.frame_ids[::ref_stride]
@@ -253,25 +318,28 @@ def render_panel(row: Mapping[str, Any], root: Path, R: Scan, renderer: Renderer
             i = best_box_view(rseq, ids, I4, *pred_box) if pred_box else None
         box = ref_box or pred_box
         _draw_photo(axes[0], rseq, i, rseq.pose(i) if i is not None else None,
-                    [(box[0], box[1], col_ref)] if box else [], f"reference scan, frame {i}")  # fmt: skip
+                    [(box[0], box[1], col_ref)] if box else [],
+                    f"1. first visit, frame {i}" + (f" ({old_box} = old place)" if ref_box is not None else
+                                                    " (blue box = predicted place)"))  # fmt: skip
     with open_sequence(root, row["rescan"]) as sseq:
         if ref_box is not None:
             j, _ = best_label_view(sseq, frame_ids, T_align, renderer, int(row["oid"]), ref_box)
             _draw_photo(axes[1], sseq, j, T_align @ sseq.pose(j) if j is not None else None,
-                        [(ref_box[0], ref_box[1], col_ref)], f"rescan at the reference place, frame {j}")  # fmt: skip
+                        [(ref_box[0], ref_box[1], col_ref)], f"2. second visit, the old place ({old_box}), frame {j}")  # fmt: skip
         else:
-            _draw_photo(axes[1], sseq, None, None, [], "rescan at the reference place: n/a (new node)")
+            _draw_photo(axes[1], sseq, None, None, [], "2. (new object: it has no old place)")
         if cat in ("moved", "new") and pred_box is not None:
             k = best_box_view(sseq, frame_ids, T_align, *pred_box)
             _draw_photo(axes[2], sseq, k, T_align @ sseq.pose(k) if k is not None else None,
-                        [(pred_box[0], pred_box[1], col_pred)], f"rescan at the predicted place, frame {k}")  # fmt: skip
+                        [(pred_box[0], pred_box[1], col_pred)],
+                        f"3. second visit, where the method says it is (blue box), frame {k}")  # fmt: skip
         elif row.get("gt_aabb_new"):
             lo, hi = row["gt_aabb_new"]
             k = best_box_view(sseq, frame_ids, T_align, lo, hi)
             _draw_photo(axes[2], sseq, k, T_align @ sseq.pose(k) if k is not None else None,
-                        [(lo, hi, STATE_COLOR["moved"])], f"rescan at the GT new place, frame {k}")  # fmt: skip
+                        [(lo, hi, STATE_COLOR["moved"])], f"3. second visit, where the GT says it went, frame {k}")  # fmt: skip
         else:
-            _draw_photo(axes[2], sseq, None, None, [], "rescan at the predicted place: n/a")
+            _draw_photo(axes[2], sseq, None, None, [], "3. (not used for this question)")
     ax = axes[3]
     _setup_ax(ax, room_outline(R.vertices, R.vertex_nyu40, max_points=8000), "top-down (reference frame)")
     if ref_box is not None:
@@ -283,16 +351,18 @@ def render_panel(row: Mapping[str, Any], root: Path, R: Scan, renderer: Renderer
         ax.text(hi[0], hi[1], "GT new place", fontsize=7, color=MUTED, ha="left", va="bottom")
     if pred_box is not None and cat in ("moved", "new"):
         _draw_box(ax, np.asarray(pred_box[0])[:2], np.asarray(pred_box[1])[:2], "moved" if cat == "moved" else "new", 4)
-    lines = [f"{row.get('id', '')}   {row['mode']} / {cat}",
-             f"pair {row['ref'][:8]} → {row['rescan'][:8]}   node {row['node']}   label '{row['label']}'",
-             f"predicted {row['pred_state']}   confidence {row['confidence'] if row['confidence'] is not None else '-'}",
-             f"counted votes seen {row.get('seen')} / free {row.get('free')} / free-like {row.get('free_like')}",
-             f"GT status {row['gt_status']}" + (f" ({row['gt_reason']})" if row.get("gt_reason") else "")
-             + (f", displacement {row['displacement']:.2f} m" if row.get("displacement") is not None else "")]  # fmt: skip
+    lines = [f"{row.get('id', '')}   ({row['mode']} / {cat})   '{row['label']}'",
+             f"The method says: {PRED_SAYS.get(row['pred_state'], row['pred_state'])}",
+             f"The ground truth says: {GT_SAYS.get(row['gt_status'], row['gt_status'])}"
+             + (f" [{row['gt_reason']}]" if row.get("gt_reason") else "")
+             + (f"; GT displacement {row['displacement']:.2f} m" if row.get("displacement") is not None else ""),
+             f"(technical: pair {row['ref'][:8]} -> {row['rescan'][:8]}, node {row['node']}, confidence "
+             f"{row['confidence'] if row['confidence'] is not None else '-'}, votes seen {row.get('seen')} / "
+             f"free {row.get('free')} / free-like {row.get('free_like')})"]  # fmt: skip
     if row.get("gt_token"):
         lines.append(f"observation = rescan instance {row['gt_token'][0]} '{row['gt_token'][1]}'")
-    fig.text(0.01, 0.01, "\n".join(lines), fontsize=8.5, color="#0b0b0b", va="bottom", family="monospace")
-    fig.tight_layout(rect=(0, 0.13, 1, 1))
+    fig.text(0.01, 0.01, "\n".join(lines), fontsize=9.5, color="#0b0b0b", va="bottom", family="monospace")
+    fig.tight_layout(rect=(0, 0.12, 1, 0.9))
     out.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(out, dpi=90, facecolor=SURFACE)
     plt.close(fig)
@@ -322,14 +392,14 @@ def render_panels(rows: Sequence[dict[str, Any]], root: Path, details_by_pair: M
 
 
 def write_csv(rows: Sequence[Mapping[str, Any]], path: Path) -> Path:
-    """Rows with empty `verdict` / `note` columns."""
+    """Rows with the `question` filled in and empty `answer` / `note` columns."""
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "w", newline="", encoding="utf-8") as f:
         w = csv.DictWriter(f, fieldnames=CSV_COLS, extrasaction="ignore")
         w.writeheader()
         for r in rows:
             w.writerow({**{k: "" for k in CSV_COLS}, **{k: ("" if r.get(k) is None else r[k]) for k in CSV_COLS},
-                        "verdict": r.get("verdict", ""), "note": r.get("note", "")})  # fmt: skip
+                        "question": question_for(r), "answer": r.get("answer", ""), "note": r.get("note", "")})  # fmt: skip
     return path
 
 
@@ -354,15 +424,21 @@ def summarize_rows(rows: Sequence[Mapping[str, str]]) -> dict[str, Any]:
     """Verdict counts and the `gt_missing` share per (mode, category), per mode, and by GT status.
 
     Raises:
-        ValueError: if a verdict is missing or not one of `VERDICTS`.
+        ValueError: if an answer is missing or not yes / no / unsure.
     """
-    bad = [r["id"] for r in rows if r.get("verdict", "").strip() not in VERDICTS]
+    bad = []
+    for r in rows:
+        try:
+            verdict_of(r)
+        except ValueError:
+            bad.append(r.get("id"))
     if bad:
-        raise ValueError(f"{len(bad)} rows without a valid verdict ({', '.join(VERDICTS)}): {bad[:5]}")
+        raise ValueError(f"{len(bad)} rows without a valid answer (yes / no / unsure): {bad[:5]}")
+    rows = [{**r, "verdict": verdict_of(r)} for r in rows]
 
     def block(sel: Sequence[Mapping[str, str]]) -> dict[str, Any]:
         n = len(sel)
-        c = {v: sum(r["verdict"].strip() == v for r in sel) for v in VERDICTS}
+        c = {v: sum(r["verdict"] == v for r in sel) for v in VERDICTS}
         lo, hi = wilson(c["gt_missing"], n)
         return {"n": n, **c, "gt_missing_share": c["gt_missing"] / n if n else None, "ci95": [lo, hi]}
 

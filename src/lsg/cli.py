@@ -522,7 +522,7 @@ def _cmd_audit_sample(args: argparse.Namespace) -> int:
     if c:
         print(f"  metrics identical to {c['compared_to']}: {c['identical']}")
     print(f"wrote {res['n_rows']} sampled rows + {res['n_veto']} veto rows -> {res['out_dir']}/audit.csv, "
-          f"audit_veto.csv, panels/  (fill in 'verdict': gt_missing | method_error | unclear)")
+          f"audit_veto.csv, panels/  (answer the question in the 'answer' column: yes | no | unsure)")
     return 0 if not c or c["identical"] else 1
 
 

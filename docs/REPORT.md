@@ -283,7 +283,7 @@ mode, perception new P / R (labelled).
 > absent-unlisted objects (pool sizes: oracle 157 moved / 81 removed / 52 new; perception 95 / 141 / 194). It also
 > drew every GT-removed object that B2 deletes but FULL's confidence keeps (the veto set: 4 oracle, 5 perception).
 > Each case is a panel: reference photo, rescan photo at the old place, rescan at the predicted place, top-down.
-> Erik labels each case `gt_missing` / `method_error` / `unclear`. Table: share of GT gaps per mode and category,
+> Each panel asks one plain question about the world (for example "did this pillow really move?"); Erik answers `yes` / `no` / `unsure`, and the answer is mapped to `gt_missing` (GT incomplete or wrong) / `method_error` / `unclear`. Table: share of GT gaps per mode and category,
 > with Wilson 95% CIs.
 
 Cases found during development (dev pairs, not part of the sample):
