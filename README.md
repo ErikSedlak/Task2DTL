@@ -13,7 +13,7 @@ Given the scene graph of a **reference** scan of a room (3RScan + 3DSSG) and the
 Only seeing *through* the place where a node was (or, for thin objects, an appearance mismatch seen from
 several viewpoints) lowers its confidence. Unseen nodes stay `unknown`, not `removed`.
 
-- Report: [docs/report/report.pdf](docs/report/report.pdf) (source `docs/report/report.typ`); slides: [docs/slides.pptx](docs/slides.pptx).
+- Report: [docs/report/report.pdf](docs/report/report.pdf) (source `docs/report/report.typ`).
 - Code map: [docs/CODE_STRUCTURE.md](docs/CODE_STRUCTURE.md).
 
 **Headline results** (full method FULL, 110 validation pairs, one run: `outputs/chg3_final`; the other experiments are in
