@@ -13,12 +13,11 @@ Given the scene graph of a **reference** scan of a room (3RScan + 3DSSG) and the
 Only seeing *through* the place where a node was (or, for thin objects, an appearance mismatch seen from
 several viewpoints) lowers its confidence. Unseen nodes stay `unknown`, not `removed`.
 
-- Write-up: [docs/REPORT.md](docs/REPORT.md); slides: [docs/slides.pptx](docs/slides.pptx).
-- Spec: [docs/DESIGN.md](docs/DESIGN.md); decision log: [docs/DECISIONS.md](docs/DECISIONS.md).
+- Report: [docs/report/report.pdf](docs/report/report.pdf) (source `docs/report/report.typ`); slides: [docs/slides.pptx](docs/slides.pptx).
 - Code map: [docs/CODE_STRUCTURE.md](docs/CODE_STRUCTURE.md).
 
-**Headline results** (full method FULL, 110 validation pairs, one run: `outputs/chg3_final`; 95% bootstrap CIs and
-all ablations in [docs/REPORT.md](docs/REPORT.md)):
+**Headline results** (full method FULL, 110 validation pairs, one run: `outputs/chg3_final`; the other experiments are in
+the [report](docs/report/report.pdf); `lsg m7` writes all tables with 95% bootstrap CIs to `outputs/chg3_final/results.md`):
 
 | mode | removed P / R | false deletion ↓ | unchanged kept | moved F1 | new P / R | new P / R, any label |
 |---|---|---|---|---|---|---|
@@ -29,7 +28,7 @@ all ablations in [docs/REPORT.md](docs/REPORT.md)):
 - *False deletion* = share of reference objects that are missing from the rescan annotation but not listed as
   removed, which the method deletes.
 - The naive baseline B0 deletes 95% of them (oracle).
-- The method is the final one: CHANGE 1, 2 and 3 of `docs/` (relaxed candidates, one confidence policy, moves
+- The method is the final one (relaxed candidates, one confidence policy, moves
   need old-place evidence, measured vote weights, co-segmented candidates, the graph maintained during the walk
   with online alignment). The open-vocabulary detector (Grounding DINO + SAM 2) lost its tuning-set rule and is
   the ablation row `FULL+detector`.
@@ -104,7 +103,7 @@ This prints a metrics table per mode and writes `outputs/demo/`:
 
 | path | content |
 |---|---|
-| `graphs/<mode>/<ref>_<rescan>.json` | the updated scene graph G_upd (schema: DESIGN §4) |
+| `graphs/<mode>/<ref>_<rescan>.json` | the updated scene graph G_upd (schema: `src/lsg/graph/model.py`) |
 | `snapshots/<mode>/<ref>_<rescan>/frame_XXXXXX.json` | tentative graphs during the walk (every 20 processed frames, plus the last) + `seq_info.json`; with `lsg anytime` the full method runs at every snapshot |
 | `candidates/<ref>_<rescan>.json` | perception candidates (centroid, box, CLIP top-k) |
 | `metrics.json` | all scores, config, config hash and git SHA |
@@ -145,16 +144,16 @@ uv run lsg viz rerun --run demo --pair <REF> <RESCAN> --mode perception --spawn 
 |---|---|---|
 | `uv run lsg eval --split dev_train --obs perception,oracle --method FULL` | one method on a split; methods `B0 B1 B2 FULL` | ~35 s |
 | `uv run lsg eval --split eval_val_small --obs perception,oracle --method FULL` | the 20-pair milestone subset of val | ~1 min |
-| `uv run lsg ablate --list` / `--names FULL-appearance,FULL+immediate` | single ablation rows (DESIGN §8) | ~6–7 min per val row |
+| `uv run lsg ablate --list` / `--names FULL-appearance,FULL+immediate` | single rows of the method comparison | ~6–7 min per val row |
 | `uv run lsg detect cache --split eval_val` | Grounding DINO + SAM 2 detections for the row `FULL+detector` (once) | ~2 h (GPU) |
 | `uv run lsg m7 --run-id chg3_final` | every results table, ablation and plot of the report (after the detect cache) | ≈ 4 h |
 | `uv run lsg anytime --split eval_val` | the method at every snapshot: metrics over the walk, state flips | ~20 min |
-| `uv run lsg audit sample` → label `audit.csv` → `uv run lsg audit summarize` | §7.4 GT audit, sampled from `chg3_final/val/FULL` | ~10 min + labelling |
+| `uv run lsg audit sample` → label `audit.csv` → `uv run lsg audit summarize` | ground-truth audit, sampled from `chg3_final/val/FULL` | ~10 min + labelling |
 | `uv run pytest -q -m slow` | slow tests (real data, models) | ~3 min |
 
 **Rules the code keeps** (CLAUDE.md):
 - perception never reads rescan annotations;
 - thresholds live in [configs/default.yaml](configs/default.yaml) and were chosen on the 33 training pairs of
-  `splits/dev_tune.txt`, each with a rule written before the run (REPORT §8 lists what val influenced earlier);
+  `splits/dev_tune.txt`, each with a rule written before the run (the report's conclusion lists what val influenced earlier);
 - every metric run writes `outputs/<run_id>/metrics.json` with the config hash and git SHA;
 - the same config and seed give the same `metrics`.

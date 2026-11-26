@@ -42,8 +42,7 @@ the camera poses and the rough alignment `T_align` to the reference.
 
 I split the pairs into three sets. All thresholds were chosen on a *tuning set* of 33 training pairs (the 20 rooms with the most changes, 10 random rooms and 3 pairs I used during
 development), and for each choice I wrote down the selection rule before running it. The *validation set* (110 pairs in 47 rooms) was run once for all tables. Because relation
-changes turned out to be rare, I added a *relation set* of 40 training pairs with the most changed support parents (73 events), which I never tuned on.
-
+changes turned out to be rare, I added a *relation set* of 40 training pairs with the most changed support parents (73 events).
 == What the ground truth says <sec-gt>
 
 Before building anything I looked at what the annotation actually says, and it changed how I score the results:
@@ -59,7 +58,7 @@ In total, validation has 235 moved, 73 removed, 171 new, 1,401 unchanged and 737
 
 Everything is in metres, in the frame of the reference mesh. The given `T_align` is about 5 cm off, which is enough to confuse depth comparisons at object borders, so the method
 refines it while walking: every 20 processed frames it registers the depth seen so far to the reference surfaces with point-to-plane ICP, and it accepts the result only if it stays
-close to the given transform and is well constrained. It never looks at future frames.
+close to the given transform and is well constrained.
 I process every third frame, in time order. For each one, Open3D @zhou2018open3d ray casting renders the reference mesh from the rescan pose (about 5 ms per frame on the CPU), which gives
 the depth the camera _would_ see if nothing had changed. CLIP and DINOv2 features are computed once and cached.
 
@@ -121,7 +120,7 @@ To see what each idea is worth, I compare four methods that build on each other.
 
 == Decisions I made along the way <sec-decisions>
 
-Apart from the scoring choices in @sec-gt, these are the decisions the assignment left to me. The values live in `configs/default.yaml`, and `docs/DECISIONS.md` explains each one together with the alternatives I considered.
+Apart from the scoring choices in @sec-gt, these are the decisions the assignment left to me. The values live in `configs/default.yaml`.
 
 #figure(
   table(
@@ -130,7 +129,7 @@ Apart from the scoring choices in @sec-gt, these are the decisions the assignmen
     table.header([*decision*], [*my choice*], [*why*]),
     [observation modes], [oracle and perception], [separates errors of the change logic from errors of perception],
     [frames used], [every 3rd], [consecutive frames are nearly identical],
-    [free / seen margins], [0.15 m / 0.10 m], [above depth and alignment noise; I also tried $tau_"free"$ from 0.05 to 0.30 m (`docs/REPORT.md`)],
+    [free / seen margins], [0.15 m / 0.10 m], [above depth and alignment noise; I also tried $tau_"free"$ from 0.05 to 0.30 m, which trades removed recall against false deletion],
     [new viewpoint], [0.30 m or 20°], [a camera standing still should not cast many votes],
     [thin objects], [< 15 cm], [depth cannot see through anything thinner than $tau_"free"$],
     [confirmed / removed], [3 seen / 2 free votes], [one view is never enough],
@@ -285,14 +284,14 @@ instances it finds moves with an F1 of 57%, with its own perception 43%. All num
 
 *Limitations.* New objects are the weak spot. Depth residuals mix real new objects with static differences between the two scans, and nothing in the confidence separates them (3.5% precision).
 The detector finds more of them, but objects it re-detects near emptied places then take over removed nodes. The confidence rule gives up some removals for safety, small moves (under 30 cm)
-and swaps of identical objects are often missed, and there are few relation changes to learn from. I did look at validation results between early development steps; the decisions they
-influenced are listed in `docs/REPORT.md` (Section 8).
+and swaps of identical objects are often missed, and there are few relation changes to learn from. I did look at validation results between early development steps. They led to excluding the catch-all classes when matching new objects, to "seen needs contrast", to the
+relaxed candidate rules, to dropping the class prior and to trying the detector; after the tuning set was introduced, every choice was made there with a rule written beforehand.
 
 *Future work.* The most useful next step would be a better test for new objects: tracking detector masks and comparing them with the reference object by object, instead of looking at
 residual depth. After that, a proper comparison with Adam et al. at their box-IoU thresholds, and estimating the rescan poses instead of taking them as given. Door swings, rotation-only
 moves and chains of several visits are out of scope.
 
-*Use of AI tools.* I used Claude Code (Anthropic) for code, experiments and drafting; its use is logged per milestone in `docs/AI_USAGE.md`.
+*Use of AI tools.* I used Claude Code (Anthropic) for code, experiments and drafting.
 
 #show bibliography: set text(size: 8pt)
 #set par(leading: 0.4em, spacing: 0.4em)
