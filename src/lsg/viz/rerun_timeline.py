@@ -20,6 +20,7 @@ Reads method inputs and outputs only (reference mesh, rescan frames + poses, gra
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -170,5 +171,10 @@ def rerun_timeline(
     rec.flush()
     rec.disconnect()
     if spawn:
-        subprocess.Popen([sys.executable, "-m", "rerun", str(out)])
+        # On a hybrid-GPU Windows laptop the viewer's default graphics backend exits silently after ~3 s;
+        # Vulkan stays open. An explicit WGPU_BACKEND of the user wins.
+        env = dict(os.environ)
+        if sys.platform == "win32":
+            env.setdefault("WGPU_BACKEND", "vulkan")
+        subprocess.Popen([sys.executable, "-m", "rerun", str(out)], env=env)
     return out
