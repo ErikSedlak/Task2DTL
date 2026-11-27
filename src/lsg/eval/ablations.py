@@ -126,6 +126,8 @@ def registry(cfg: Mapping[str, Any]) -> dict[str, Ablation]:
                  desc="thin-object candidates without confidence, always emitted (CHANGE 3 Part N5 off)"),
         Ablation("FULL-offlinealign", "FULL", {"alignment.online.enabled": False}, group="component",
                  desc="T_align refined by a pre-pass over all processed frames (CHANGE 3 Part B online alignment off)"),
+        Ablation("FULL-noalign", "FULL", {"alignment.refine": False}, group="component",
+                 desc="no ICP at all: the raw 3RScan T_align (offline and online refinement both off)"),
         Ablation("FULL-segment", "FULL", {"perception.segment.method": "none"}, group="component",
                  desc="candidate voxels linked by space only (CHANGE 3 Part N co-segmentation off)"),
         Ablation("FULL-moveev", "FULL", {"association.old_place.enabled": False}, group="component",

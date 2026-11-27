@@ -48,6 +48,7 @@ def test_registry_overrides_exist_and_sweeps_come_from_config():
     assert reg["FULL-appconf"].overrides == {"confidence.candidates.track.appearance": False}
     assert reg["FULL-offlinealign"].overrides == {"alignment.online.enabled": False}  # CHANGE 3 Part B
     assert abl.M7_OVERRIDES["alignment.online.enabled"] is False
+    assert reg["FULL-noalign"].overrides == {"alignment.refine": False}  # raw T_align, no ICP (disables the online aligner too)
     assert reg["FULL-chg2"].overrides == abl.CHG2_OVERRIDES
     assert reg["FULL+detector"].overrides == {"perception.detector.enabled": True}  # CHANGE 3 Part E (lost its rule)
     assert CFG["perception"]["detector"]["enabled"] is False
