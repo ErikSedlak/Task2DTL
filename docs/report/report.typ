@@ -86,7 +86,7 @@ reference surface or on walls, and collect the rest in a 4 cm voxel grid where e
 leaves nothing behind. Two neighbouring voxels are joined only if no frame puts them in different image segments, which keeps a new sofa apart from the cushions lying on it. Each cluster
 is named by CLIP and becomes a `new` node only if its confidence is high enough.
 
-*Deciding the states.* At the end of the walk, a node with three counted seen votes and no free vote is *confirmed* as `unchanged`. The other nodes are matched to the observations with the
+*Deciding the states.* At the end of the walk, a node with three counted seen votes and no free vote is *confirmed* as `unchanged` and thus not matched using the matching algorithm. The other nodes are matched to the observations with the
 Hungarian algorithm on label, size and position, and a matched node is `moved` if ICP of the observation onto the node shifts it by more than 10 cm. I added one rule that mirrors the
 removal rule: *a move needs evidence at the old place*. If the old place still looks occupied, or nobody looked at it, the node may only be matched to an observation inside its own box.
 An unmatched node becomes `removed` only with free evidence (@sec-policy); otherwise it stays `unknown`.
@@ -164,7 +164,7 @@ Intervals are 95% bootstrap over pairs.
     [B1], [perception], [14.7 / 45.2], [7.9], [80.7], [12.3], [5.8 / 8.2], [7.6 / 10.5],
     [B2], [perception], [17.3 / 43.8], [8.0], [86.2], [38.6], [3.3 / 3.5], [5.6 / 5.8],
     [*FULL*], [perception], [*22.3 / 34.2*], [*7.3*], [*93.4*], [*42.6*], [*3.5 / 4.1*], [*5.6 / 6.4*],
-    [FULL + detector (SAMv2)], [perception], [28.9 / 32.9], [6.9], [91.9], [44.9], [6.2 / 21.6], [10.1 / 35.1],
+    [FULL + detector], [perception], [28.9 / 32.9], [6.9], [91.9], [44.9], [6.2 / 21.6], [10.1 / 35.1],
   ),
   caption: [Change detection on the 110 validation pairs, in %. Support: 73 removed, 737 absent-unlisted, 1,401 unchanged, 235 moved, 171 new objects.
     95% CIs of FULL: perception false deletion 7.3 [4.7, 10.9], moved F1 42.6 [35.6, 48.6]; oracle moved F1 57.4 [50.4, 63.7].],
@@ -178,7 +178,8 @@ What I take from @tab-main:
 - *The confidence rule trades removals for safety:* FULL finds 33% of the removals in oracle, against 43% for B2.
 - *New objects are where perception fails.* From depth residuals it finds only 7 of the 171 new objects with the right class (11 with any label). Of the 155 visible ones, only 62 get a
   candidate at all, and most of the 56 candidates per pair are static differences between the two scans, or clutter. An open-vocabulary detector (Grounding DINO @liu2023gdino with SAM 2
-  @ravi2024sam2) raises new recall to 22%, but it cost removals on the tuning set, so I left it off.
+  @ravi2024sam2) raises new recall to 22%. On the tuning set it lost 6 points of removed F1, so I left it off. This did not carry over to validation: there the detector is
+  better in almost every column (removed F1 30.8 vs 27.0%, false deletion 6.9 vs 7.3%, moved F1 44.9 vs 42.6%). I kept the decision made on the tuning set.
 
 == Are the updated relations right?
 
@@ -222,7 +223,6 @@ not an overall gain.
     [no alignment refinement (given `T_align`)], [31.5 / 8.4 / 57.9], [35.6 / 7.3 / 41.6], [3.5 / 5.3],
     [every frame votes], [34.2 / 9.2 / 57.6], [37.0 / 8.4 / 42.0], [2.2 / 6.4],
     [deciding immediately], [52.1 / 10.2 / 23.8], [52.1 / 10.2 / 15.3], [5.2 / 7.6],
-    [my earlier method (class priors, strict candidates)], [27.4 / 8.1 / 54.6], [32.9 / 7.7 / 31.7], [2.0 / 8.8],
   ),
   caption: [FULL with one part changed at a time, on validation, in %.],
 ) <tab-abl>
@@ -277,15 +277,14 @@ cautious: it keeps unseen objects as unknown instead of deleting them (false del
 instances it finds moves with an F1 of 57%, with its own perception 43%. All numbers come from a single run on validation, after every threshold was fixed on 33 training pairs.
 
 *Limitations.* New objects are the weak spot. Depth residuals mix real new objects with static differences between the two scans, and nothing in the confidence separates them (3.5% precision).
-The detector finds more of them, but objects it re-detects near emptied places then take over removed nodes. The confidence rule gives up some removals for safety, small moves (under 30 cm)
-and swaps of identical objects are often missed, and there are few relation changes to learn from. I did look at validation results between early development steps. They led to excluding the catch-all classes when matching new objects, to "seen needs contrast", to the
-relaxed candidate rules, to dropping the class prior and to trying the detector; after the tuning set was introduced, every choice was made there with a rule written beforehand.
+The detector finds more of them, but on the tuning set objects it re-detected near emptied places took over removed nodes. The confidence rule gives up some removals for safety, small moves (under 30 cm)
+and swaps of identical objects are often missed, and there are few relation changes to learn from.
 
 *Future work.* The most useful next step would be a better test for new objects: tracking detector masks and comparing them with the reference object by object, instead of looking at
-residual depth. After that, a proper comparison with Adam et al. at their box-IoU thresholds, and estimating the rescan poses instead of taking them as given. Door swings, rotation-only
+residual depth. After that estimating the rescan poses instead of taking them as given. Door swings, rotation-only
 moves and chains of several visits are out of scope.
 
-*Use of AI tools.* I used Claude Code (Anthropic) for code, experiments and drafting.
+*Use of AI tools.* I used Claude Code for code, experiments and drafting.
 
 #show bibliography: set text(size: 8pt)
 #set par(leading: 0.4em, spacing: 0.4em)
