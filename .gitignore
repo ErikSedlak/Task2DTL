@@ -14,3 +14,6 @@ docs/DECISIONS.md
 docs/DESIGN.md
 docs/REPORT.md
 docs/STATUS.md
+
+# third-party 3RScan download script (not ours to redistribute; see README)
+download_files.py
